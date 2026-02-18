@@ -205,3 +205,35 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# =============================================================================
+# Chain-Analysis Specific
+# =============================================================================
+
+# Rust build artifacts
+rust/target/
+*.rlib
+
+# Node modules
+node_modules/
+
+# Frontend build
+frontend/dist/
+
+# Data directories
+data/
+*.parquet
+*.csv
+
+# Dagster
+.dagster/
+/tmp/dagster/
+
+# Local storage
+storage/
+
+# Neo4j data (when running locally outside Docker)
+neo4j/
+
+# Minio data
+minio/
