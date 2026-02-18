@@ -1,0 +1,124 @@
+services:
+  # =============================================================================
+  # Neo4j Graph Database with GDS Plugin
+  # =============================================================================
+  neo4j:
+    image: neo4j:5.26.0-enterprise
+    container_name: chain-analysis-neo4j
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - NEO4J_PLUGINS=["graph-data-science"]
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_memory_pagecache_size=512m
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # PostgreSQL Database
+  # =============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: chain-analysis-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+      - POSTGRES_DB=chain_analysis
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # Redis (with Streams support)
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: chain-analysis-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # MinIO (S3-compatible Object Storage)
+  # =============================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: chain-analysis-minio
+    ports:
+      - "9000:9000"   # API
+      - "9001:9001"   # Console
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # MinIO Bucket Initialization
+  # =============================================================================
+  minio-init:
+    image: minio/mc:latest
+    container_name: chain-analysis-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin123;
+      mc mb local/chain-analysis --ignore-existing;
+      mc mb local/chain-analysis-raw --ignore-existing;
+      mc mb local/chain-analysis-processed --ignore-existing;
+      exit 0;
+      "
+    networks:
+      - chain-analysis-net
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  chain-analysis-net:
+    driver: bridge
