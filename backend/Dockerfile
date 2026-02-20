@@ -11,8 +11,8 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy dependency files and source for editable install
-COPY pyproject.toml README.md ./
-COPY src ./src
+COPY backend/pyproject.toml backend/README.md ./
+COPY backend/src ./src
 
 # Install dependencies into /app/.venv
 RUN uv venv .venv && \
@@ -33,9 +33,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 COPY --from=builder /app/.venv .venv
 
 # Copy application source
-COPY src ./src
-COPY alembic ./alembic
-COPY alembic.ini ./
+COPY backend/src ./src
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./
+
+# Copy init scripts (from repo root scripts/)
+COPY scripts /app/scripts
+
+# Copy and wire up entrypoint
+COPY backend/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Make sure the venv Python is on PATH
 ENV PATH="/app/.venv/bin:$PATH"
@@ -49,4 +56,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
     CMD curl -f http://localhost:8000/health/live || exit 1
 
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/app/entrypoint.sh"]
