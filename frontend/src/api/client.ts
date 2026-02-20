@@ -4,9 +4,13 @@
 
 import type {
   EntityResponse,
+  EdgeResponse,
+  EdgeUpsertRequest,
   NeighborsResponse,
+  NodeUpsertRequest,
   PathResponse,
   HealthResponse,
+  GraphStatsResponse,
 } from '../types'
 
 const API_BASE = '/api'
@@ -121,6 +125,73 @@ export async function checkHealth(): Promise<HealthResponse> {
     throw new ApiError('Health check failed', response.status)
   }
   return response.json()
+}
+
+// Node / edge mutation endpoints
+
+export async function upsertEntity(
+  address: string,
+  body: NodeUpsertRequest
+): Promise<EntityResponse> {
+  return request<EntityResponse>(`/entities/${address}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function updateEntity(
+  address: string,
+  body: NodeUpsertRequest
+): Promise<EntityResponse> {
+  return request<EntityResponse>(`/entities/${address}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteEntity(address: string): Promise<void> {
+  const url = `${API_BASE}/entities/${address}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}))
+    throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status)
+  }
+}
+
+export async function upsertEdge(
+  source: string,
+  target: string,
+  body: EdgeUpsertRequest
+): Promise<EdgeResponse> {
+  return request<EdgeResponse>(`/entities/${source}/edges/${target}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteEdge(
+  source: string,
+  target: string,
+  edgeType = 'TRANSFER'
+): Promise<void> {
+  const url = `${API_BASE}/entities/${source}/edges/${target}?edge_type=${encodeURIComponent(edgeType)}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}))
+    throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status)
+  }
+}
+
+// Graph stats endpoints (for ETL testing)
+
+export async function fetchGraphStats(): Promise<GraphStatsResponse> {
+  return request<GraphStatsResponse>('/stats')
 }
 
 // Utility functions

@@ -96,3 +96,31 @@ export interface CytoscapeEdge {
 }
 
 export type CytoscapeElement = CytoscapeNode | CytoscapeEdge
+
+// Write request types
+export interface NodeUpsertRequest {
+  address: string
+  entity_type?: EntityType | null
+  risk_level?: RiskLevel
+  name?: string | null
+  labels?: string[]
+  properties?: Record<string, unknown>
+}
+
+export interface EdgeUpsertRequest {
+  source: string
+  target: string
+  edge_type?: string
+  value?: string | null
+  tx_hash?: string | null
+  block_number?: number | null
+  properties?: Record<string, unknown>
+}
+
+// Graph statistics (for ETL testing)
+export interface GraphStatsResponse {
+  node_count: number
+  edge_count: number
+  entity_types: Record<string, number>
+  risk_levels: Record<string, number>
+}

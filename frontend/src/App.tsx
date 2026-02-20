@@ -4,10 +4,10 @@
  */
 import { useState } from "react";
 import { SearchBar } from "./components/SearchBar";
-import { GraphExplorerPage, DashboardPage } from "./pages";
+import { GraphExplorerPage, DashboardPage, ETLTestPage } from "./pages";
 import "./index.css";
 
-type Page = "explorer" | "dashboard";
+type Page = "explorer" | "dashboard" | "etl-test";
 
 function App() {
     const [page, setPage] = useState<Page>("explorer");
@@ -53,6 +53,25 @@ function App() {
 
                 {/* Right side */}
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {/* ETL Test nav link */}
+                    <button
+                        onClick={() => setPage((p) => (p === "etl-test" ? "explorer" : "etl-test"))}
+                        className="btn btn-secondary"
+                        style={{ padding: "5px 12px" }}
+                    >
+                        <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                        >
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                        </svg>
+                        ETL Test
+                    </button>
+
                     {/* Dashboard nav link */}
                     <button
                         onClick={() => setPage((p) => (p === "dashboard" ? "explorer" : "dashboard"))}
@@ -88,6 +107,9 @@ function App() {
 
             {/* Dashboard overlay (rendered on top when active) */}
             {page === "dashboard" && <DashboardPage onClose={() => setPage("explorer")} />}
+
+            {/* ETL Test overlay */}
+            {page === "etl-test" && <ETLTestPage onClose={() => setPage("explorer")} />}
         </div>
     );
 }
