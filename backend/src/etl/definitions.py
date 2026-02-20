@@ -13,7 +13,12 @@ from etl.assets import (
     raw_transactions,
     resolved_entities,
 )
-from etl.resources import RustWorkerResource
+from etl.resources import (
+    Neo4jResource,
+    PostgresResource,
+    RedisResource,
+    RustWorkerResource,
+)
 
 # Define all Dagster assets
 all_assets = [
@@ -30,7 +35,10 @@ resources = {
         rust_binary_dir="../../etl-rs/target/release",
         ingest_binary="ingest",
         dry_run=False,
-    )
+    ),
+    "neo4j": Neo4jResource(),
+    "postgres": PostgresResource(),
+    "redis": RedisResource(),
 }
 
 # Create Dagster definitions

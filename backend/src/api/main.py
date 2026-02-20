@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.deps import close_adapters, init_adapters
-from api.routes import entities_router, health_router, labels_router
+from api.routes import entities_router, entities_write_router, health_router, labels_router, stats_router
 from core.config import get_settings
 from libs import logger
 
@@ -61,10 +61,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Register routers
+    # Register routers — write_router must come before read router so Starlette
+    # matches PUT/PATCH/DELETE before the GET-only /{address} route.
     app.include_router(health_router)
+    app.include_router(entities_write_router, prefix="/api")
     app.include_router(entities_router, prefix="/api")
     app.include_router(labels_router, prefix="/api")
+    app.include_router(stats_router, prefix="/api")
 
     return app
 

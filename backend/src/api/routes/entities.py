@@ -7,14 +7,17 @@ from fastapi import APIRouter, HTTPException, Query
 from api.deps import GraphDBDep
 from api.models.entity import (
     EdgeResponse,
+    EdgeUpsertRequest,
     EntityResponse,
     EntityType,
     NeighborsResponse,
+    NodeUpsertRequest,
     PathResponse,
     RiskLevel,
 )
 
 router = APIRouter(prefix="/entities", tags=["entities"])
+write_router = APIRouter(prefix="/entities", tags=["entities"])
 
 
 def _node_to_response(node: dict) -> EntityResponse:
@@ -231,4 +234,187 @@ async def find_paths(
         target=target,
         paths=path_data,
         total_paths=len(paths),
+    )
+
+
+# ── Write endpoints ────────────────────────────────────────────────────────────
+
+def _validate_address(address: str, field: str = "address") -> str:
+    """Validate and normalise an Ethereum address."""
+    if not address.startswith("0x") or len(address) != 42:
+        raise HTTPException(status_code=400, detail=f"Invalid {field} format")
+    return address.lower()
+
+
+@write_router.put("/{address}", response_model=EntityResponse)
+async def upsert_entity(
+    address: str,
+    body: NodeUpsertRequest,
+    graph_db: GraphDBDep,
+) -> EntityResponse:
+    """
+    Create or update an entity node in Neo4j.
+
+    Uses MERGE semantics — safe to call repeatedly with the same address.
+    """
+    address = _validate_address(address)
+    if address != body.address.lower():
+        raise HTTPException(status_code=400, detail="URL address and body address must match")
+
+    labels = ["Entity"]
+    if body.entity_type:
+        labels.append(body.entity_type.value)
+    labels.extend(body.labels)
+
+    properties: dict = {
+        "risk_level": body.risk_level.value,
+        **body.properties,
+    }
+    if body.entity_type:
+        properties["entity_type"] = body.entity_type.value
+    if body.name:
+        properties["name"] = body.name
+
+    from core.ports.graph_db import Node
+    node = Node(address=address, labels=labels, properties=properties)
+    await graph_db.upsert_nodes([node])
+
+    return EntityResponse(
+        address=address,
+        entity_type=body.entity_type,
+        risk_level=body.risk_level,
+        name=body.name,
+        labels=labels,
+        properties=properties,
+    )
+
+
+@write_router.patch("/{address}", response_model=EntityResponse)
+async def update_entity(
+    address: str,
+    body: NodeUpsertRequest,
+    graph_db: GraphDBDep,
+) -> EntityResponse:
+    """
+    Update an existing entity node.
+
+    Returns 404 if the entity does not exist.
+    """
+    address = _validate_address(address)
+
+    existing = await graph_db.get_node(address)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    # Merge incoming changes on top of the existing properties
+    merged_props = {**existing.properties}
+    if body.entity_type:
+        merged_props["entity_type"] = body.entity_type.value
+    if body.risk_level != RiskLevel.UNKNOWN or "risk_level" not in merged_props:
+        merged_props["risk_level"] = body.risk_level.value
+    if body.name is not None:
+        merged_props["name"] = body.name
+    merged_props.update(body.properties)
+
+    labels = list({*existing.labels, *(body.labels)})
+    if body.entity_type and body.entity_type.value not in labels:
+        labels.append(body.entity_type.value)
+
+    from core.ports.graph_db import Node
+    node = Node(address=address, labels=labels, properties=merged_props)
+    await graph_db.upsert_nodes([node])
+
+    return EntityResponse(
+        address=address,
+        entity_type=EntityType(merged_props.get("entity_type")) if merged_props.get("entity_type") else None,
+        risk_level=RiskLevel(merged_props.get("risk_level", "unknown")),
+        name=merged_props.get("name"),
+        labels=labels,
+        properties=merged_props,
+    )
+
+
+@write_router.delete("/{address}", status_code=204)
+async def delete_entity(
+    address: str,
+    graph_db: GraphDBDep,
+) -> None:
+    """
+    Delete an entity node and all its relationships from Neo4j.
+    """
+    address = _validate_address(address)
+
+    existing = await graph_db.get_node(address)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    await graph_db.execute_query(
+        "MATCH (n:Entity {address: $address}) DETACH DELETE n",
+        {"address": address},
+    )
+
+
+# ── Edge write endpoints ───────────────────────────────────────────────────────
+
+@write_router.put("/{source}/edges/{target}", response_model=EdgeResponse)
+async def upsert_edge(
+    source: str,
+    target: str,
+    body: EdgeUpsertRequest,
+    graph_db: GraphDBDep,
+) -> EdgeResponse:
+    """
+    Create or update a directed edge between two entities.
+
+    Uses MERGE semantics — safe to call repeatedly with the same source/target/type.
+    Both nodes are created if they don't exist.
+    """
+    source = _validate_address(source, "source")
+    target = _validate_address(target, "target")
+    if source == target:
+        raise HTTPException(status_code=400, detail="Source and target must differ")
+
+    properties: dict = {**body.properties}
+    if body.value is not None:
+        properties["value"] = body.value
+    if body.tx_hash is not None:
+        properties["tx_hash"] = body.tx_hash
+    if body.block_number is not None:
+        properties["block_number"] = body.block_number
+
+    from core.ports.graph_db import Edge
+    edge = Edge(source=source, target=target, edge_type=body.edge_type, properties=properties)
+    await graph_db.upsert_edges([edge])
+
+    return EdgeResponse(
+        source=source,
+        target=target,
+        edge_type=body.edge_type,
+        value=body.value,
+        tx_hash=body.tx_hash,
+        block_number=body.block_number,
+        properties=properties,
+    )
+
+
+@write_router.delete("/{source}/edges/{target}", status_code=204)
+async def delete_edge(
+    source: str,
+    target: str,
+    graph_db: GraphDBDep,
+    edge_type: str = Query("TRANSFER", description="Edge type to delete"),
+) -> None:
+    """
+    Delete a directed edge between two entities.
+    """
+    source = _validate_address(source, "source")
+    target = _validate_address(target, "target")
+
+    await graph_db.execute_query(
+        """
+        MATCH (a:Entity {address: $source})-[r]->(b:Entity {address: $target})
+        WHERE type(r) = $edge_type
+        DELETE r
+        """,
+        {"source": source, "target": target, "edge_type": edge_type},
     )

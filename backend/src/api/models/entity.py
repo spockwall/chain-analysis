@@ -103,6 +103,29 @@ class PathResponse(BaseModel):
     total_paths: int = Field(..., description="Total number of paths found")
 
 
+class NodeUpsertRequest(BaseModel):
+    """Request model for creating or updating a node."""
+
+    address: str = Field(..., description="Ethereum address (0x-prefixed, 42 chars)")
+    entity_type: EntityType | None = Field(None, description="Entity type classification")
+    risk_level: RiskLevel = Field(RiskLevel.UNKNOWN, description="Risk level")
+    name: str | None = Field(None, description="Human-readable name")
+    labels: list[str] = Field(default_factory=list, description="Additional labels/tags")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+
+
+class EdgeUpsertRequest(BaseModel):
+    """Request model for creating or updating an edge."""
+
+    source: str = Field(..., description="Source address (0x-prefixed, 42 chars)")
+    target: str = Field(..., description="Target address (0x-prefixed, 42 chars)")
+    edge_type: str = Field("TRANSFER", description="Edge type (TRANSFER, CALLS, DEPLOYED)")
+    value: str | None = Field(None, description="Value in wei (as string)")
+    tx_hash: str | None = Field(None, description="Transaction hash")
+    block_number: int | None = Field(None, description="Block number")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+
+
 class LabelTaskCreate(BaseModel):
     """Request model for creating a labeling task."""
 
