@@ -68,17 +68,15 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
             if (graphData) {
                 const existingAddresses = new Set(graphData.nodes.map((n) => n.address));
                 const newNodes = neighbors.nodes.filter((n) => !existingAddresses.has(n.address));
-                const existingEdges = new Set(graphData.edges.map((e) => `${e.source}-${e.target}-${e.edge_type}`));
-                const newEdges = neighbors.edges.filter(
-                    (e) => !existingEdges.has(`${e.source}-${e.target}-${e.edge_type}`),
-                );
+                const existingTxHashes = new Set(graphData.transactions.map((t) => t.hash));
+                const newTxs = neighbors.transactions.filter((t) => !existingTxHashes.has(t.hash));
                 setGraphData({
                     ...graphData,
                     center_address: address,
                     nodes: [...graphData.nodes, ...newNodes],
-                    edges: [...graphData.edges, ...newEdges],
+                    transactions: [...graphData.transactions, ...newTxs],
                     total_nodes: graphData.nodes.length + newNodes.length,
-                    total_edges: graphData.edges.length + newEdges.length,
+                    total_transactions: graphData.transactions.length + newTxs.length,
                 });
             } else {
                 setGraphData(neighbors);
@@ -141,11 +139,11 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                         <div className="graph-stats-bar">
                             <span className="stats-chip">
                                 <span className="stats-chip-dot" style={{ background: "var(--accent-blue)" }} />
-                                {graphData.total_nodes} nodes
+                                {graphData.total_nodes} entities
                             </span>
                             <span className="stats-chip">
                                 <span className="stats-chip-dot" style={{ background: "var(--accent-green)" }} />
-                                {graphData.total_edges} edges
+                                {graphData.total_transactions} transactions
                             </span>
                         </div>
                     </>

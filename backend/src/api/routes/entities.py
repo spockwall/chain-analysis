@@ -14,10 +14,12 @@ from api.models.entity import (
     NodeUpsertRequest,
     PathResponse,
     RiskLevel,
+    TransactionResponse,
 )
 
 router = APIRouter(prefix="/entities", tags=["entities"])
 write_router = APIRouter(prefix="/entities", tags=["entities"])
+transactions_router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
 def _node_to_response(node: dict) -> EntityResponse:
@@ -145,24 +147,30 @@ async def get_neighbors(
         for node in subgraph.nodes
     ]
 
-    edges = [
-        EdgeResponse(
-            source=edge.source,
-            target=edge.target,
-            edge_type=edge.edge_type,
-            value=edge.properties.get("value"),
-            block_number=edge.properties.get("block_number"),
-            properties=edge.properties,
+    transactions = [
+        TransactionResponse(
+            hash=tx.hash,
+            from_address=tx.from_address,
+            to_address=tx.to_address,
+            value=tx.properties.get("value"),
+            block_number=tx.properties.get("block_number"),
+            timestamp=tx.properties.get("timestamp"),
+            gas_used=tx.properties.get("gas_used"),
+            gas_price=tx.properties.get("gas_price"),
+            properties={
+                k: v for k, v in tx.properties.items()
+                if k not in {"value", "block_number", "timestamp", "gas_used", "gas_price"}
+            },
         )
-        for edge in subgraph.edges
+        for tx in subgraph.transactions
     ]
 
     return NeighborsResponse(
         center_address=address,
         nodes=nodes,
-        edges=edges,
+        transactions=transactions,
         total_nodes=len(nodes),
-        total_edges=len(edges),
+        total_transactions=len(transactions),
     )
 
 
@@ -216,16 +224,17 @@ async def find_paths(
                 }
                 for node in path.nodes
             ],
-            "edges": [
+            "transactions": [
                 {
-                    "source": edge.source,
-                    "target": edge.target,
-                    "edge_type": edge.edge_type,
-                    "value": edge.properties.get("value"),
+                    "hash": tx.hash,
+                    "from_address": tx.from_address,
+                    "to_address": tx.to_address,
+                    "value": tx.properties.get("value"),
+                    "block_number": tx.properties.get("block_number"),
                 }
-                for edge in path.edges
+                for tx in path.transactions
             ],
-            "length": len(path.edges),
+            "length": len(path.transactions),
             "total_value": path.total_value,
         })
 
@@ -417,4 +426,42 @@ async def delete_edge(
         DELETE r
         """,
         {"source": source, "target": target, "edge_type": edge_type},
+    )
+
+
+# ── Transaction endpoints ──────────────────────────────────────────────────────
+
+@transactions_router.get("/{hash}", response_model=TransactionResponse)
+async def get_transaction(
+    hash: str,
+    graph_db: GraphDBDep,
+) -> TransactionResponse:
+    """
+    Get a transaction node by hash.
+
+    Args:
+        hash: Transaction hash (0x-prefixed)
+
+    Returns:
+        Transaction information including from/to addresses, value, and metadata
+    """
+    tx = await graph_db.get_transaction(hash)
+
+    if tx is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    return TransactionResponse(
+        hash=tx.hash,
+        from_address=tx.from_address,
+        to_address=tx.to_address,
+        value=tx.properties.get("value"),
+        block_number=tx.properties.get("block_number"),
+        timestamp=tx.properties.get("timestamp"),
+        gas_used=tx.properties.get("gas_used"),
+        gas_price=tx.properties.get("gas_price"),
+        properties={
+            k: v for k, v in tx.properties.items()
+            if k not in {"value", "block_number", "timestamp", "gas_used", "gas_price"}
+        },
     )

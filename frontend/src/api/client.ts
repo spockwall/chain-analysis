@@ -9,6 +9,7 @@ import type {
   NeighborsResponse,
   NodeUpsertRequest,
   PathResponse,
+  TransactionResponse,
   HealthResponse,
   GraphStatsResponse,
 } from '../types'
@@ -115,6 +116,12 @@ export async function fetchPaths(
   const endpoint = `/entities/${source}/paths/${target}${query ? `?${query}` : ''}`
 
   return request<PathResponse>(endpoint)
+}
+
+// Transaction endpoints
+
+export async function fetchTransaction(hash: string): Promise<TransactionResponse> {
+  return request<TransactionResponse>(`/transactions/${hash}`)
 }
 
 // Health endpoints

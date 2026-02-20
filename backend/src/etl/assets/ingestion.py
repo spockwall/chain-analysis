@@ -2,7 +2,7 @@
 Dagster assets for blockchain data ingestion.
 
 Asset dependency chain:
-raw_transactions -> resolved_entities -> computed_features -> graph_nodes -> graph_edges
+raw_transactions -> resolved_entities -> computed_features -> graph_nodes -> graph_transactions
 """
 
 import json
@@ -19,7 +19,7 @@ from dagster import (
     asset,
 )
 
-from core.ports.graph_db import Edge, Node
+from core.ports.graph_db import Edge, Node, Transaction
 from etl.resources.adapters import Neo4jResource, PostgresResource, RedisResource
 from etl.resources.rust_worker import RustWorkerResource
 from libs import logger
@@ -491,10 +491,10 @@ async def graph_nodes(
 
 @asset(
     group_name="graph",
-    description="Upsert transfer edges to Neo4j",
+    description="Upsert transaction nodes to Neo4j with SENT/RECEIVED relationships",
     ins={"nodes": AssetIn("graph_nodes")},
 )
-async def graph_edges(
+async def graph_transactions(
     context: AssetExecutionContext,
     config: BlockRangeConfig,
     nodes: MaterializeResult,
@@ -502,11 +502,12 @@ async def graph_edges(
     neo4j: Neo4jResource,
 ) -> MaterializeResult:
     """
-    Upsert transfer edges to Neo4j graph database.
+    Upsert Transaction nodes to Neo4j graph database.
 
-    Uses MERGE with UNWIND for efficient batch upserts.
+    Creates (from:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(to:Entity)
+    using MERGE with UNWIND for efficient batch upserts.
     """
-    context.log.info("Upserting graph edges to Neo4j")
+    context.log.info("Upserting transaction nodes to Neo4j")
 
     redis_adapter = redis.create_adapter()
     neo4j_adapter = neo4j.create_adapter()
@@ -516,25 +517,16 @@ async def graph_edges(
         await neo4j_adapter.connect()
 
         # Read transactions from Redis
-        transactions = await _read_stream_messages(redis_adapter, TOPIC_INGESTED_TXS)
-        context.log.info(f"Read {len(transactions)} transactions from Redis")
+        transfers = await _read_stream_messages(redis_adapter, TOPIC_INGESTED_TXS)
+        context.log.info(f"Read {len(transfers)} transactions from Redis")
 
-        # Convert to Edge objects
-        edges: list[Edge] = []
-        for tx in transactions:
-            from_addr = tx.get("from_address", "").lower()
-            to_addr = tx.get("to_address", "").lower()
-
-            # Skip if missing addresses
-            if not from_addr or not to_addr:
-                continue
-
-            edge = Edge(
-                source=from_addr,
-                target=to_addr,
-                edge_type="TRANSFER",
+        # Convert to Transaction objects — skip rows missing required fields
+        txs: list[Transaction] = [
+            Transaction(
+                hash=tx["hash"],
+                from_address=tx.get("from_address", "").lower(),
+                to_address=tx.get("to_address", "").lower(),
                 properties={
-                    "tx_hash": tx.get("hash", ""),
                     "value": str(tx.get("value", 0)),  # Wei as string
                     "block_number": tx.get("block_number"),
                     "timestamp": tx.get("timestamp") or tx.get("block_timestamp"),
@@ -542,19 +534,21 @@ async def graph_edges(
                     "gas_price": str(tx.get("gas_price", 0)),
                 },
             )
-            edges.append(edge)
+            for tx in transfers
+            if tx.get("hash") and tx.get("from_address") and tx.get("to_address")
+        ]
 
-        context.log.info(f"Created {len(edges)} edge objects")
+        context.log.info(f"Created {len(txs)} transaction objects")
 
         # Batch upsert to Neo4j
         total_upserted = 0
-        for i in range(0, len(edges), NEO4J_BATCH_SIZE):
-            batch = edges[i : i + NEO4J_BATCH_SIZE]
-            count = await neo4j_adapter.upsert_edges(batch)
+        for i in range(0, len(txs), NEO4J_BATCH_SIZE):
+            batch = txs[i : i + NEO4J_BATCH_SIZE]
+            count = await neo4j_adapter.upsert_transactions(batch)
             total_upserted += count
-            context.log.info(f"Upserted batch of {count} edges")
+            context.log.info(f"Upserted batch of {count} transaction nodes")
 
-        context.log.info(f"Total edges upserted: {total_upserted}")
+        context.log.info(f"Total transaction nodes upserted: {total_upserted}")
 
     finally:
         await redis_adapter.close()
@@ -562,8 +556,8 @@ async def graph_edges(
 
     return MaterializeResult(
         metadata={
-            "edges_upserted": MetadataValue.int(total_upserted),
-            "transactions_processed": MetadataValue.int(len(transactions)),
+            "transactions_upserted": MetadataValue.int(total_upserted),
+            "transfers_processed": MetadataValue.int(len(transfers)),
             "start_block": MetadataValue.int(config.start_block),
             "end_block": MetadataValue.int(config.end_block),
         }

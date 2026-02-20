@@ -15,7 +15,7 @@ import {
     deleteEdge,
     formatAddress,
 } from "../api/client";
-import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel } from "../types";
+import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 
 interface ETLTestPageProps {
     onClose: () => void;
@@ -107,7 +107,18 @@ export function ETLTestPage({ onClose }: ETLTestPageProps) {
     const [deleteError, setDeleteError] = useState<string | null>(null);
     const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
 
-    // ── Edge upsert state ──────────────────────────────────────────────────────
+    // ── Transaction upsert state ───────────────────────────────────────────────
+    const [txHash, setTxHash] = useState("");
+    const [txFrom, setTxFrom] = useState("");
+    const [txTo, setTxTo] = useState("");
+    const [txValue, setTxValue] = useState("");
+    const [txBlock, setTxBlock] = useState("");
+    const [txLoading, setTxLoading] = useState(false);
+    const [txError, setTxError] = useState<string | null>(null);
+    const [txSuccess, setTxSuccess] = useState<string | null>(null);
+    const [txResult, setTxResult] = useState<TransactionResponse | null>(null);
+
+    // ── Edge upsert state (legacy, kept for backward compat) ──────────────────
     const [edgeSrc, setEdgeSrc] = useState("");
     const [edgeTgt, setEdgeTgt] = useState("");
     const [edgeType, setEdgeType] = useState("TRANSFER");
@@ -150,6 +161,47 @@ export function ETLTestPage({ onClose }: ETLTestPageProps) {
             setSearchError(err instanceof Error ? err.message : "Request failed");
         } finally {
             setSearchLoading(false);
+        }
+    };
+
+    const handleTxUpsert = async () => {
+        const from = txFrom.trim().toLowerCase();
+        const to = txTo.trim().toLowerCase();
+        const hash = txHash.trim();
+        if (!hash) {
+            setTxError("Transaction hash is required.");
+            return;
+        }
+        if (!isValidAddress(from)) {
+            setTxError("Invalid from address.");
+            return;
+        }
+        if (!isValidAddress(to)) {
+            setTxError("Invalid to address.");
+            return;
+        }
+        setTxLoading(true);
+        setTxError(null);
+        setTxSuccess(null);
+        setTxResult(null);
+        try {
+            // Use the legacy edge upsert endpoint to proxy a transaction node creation
+            // until a dedicated /transactions PUT endpoint is added to the backend.
+            await upsertEdge(from, to, {
+                source: from,
+                target: to,
+                edge_type: "TRANSFER",
+                value: txValue || undefined,
+                tx_hash: hash,
+                block_number: txBlock ? parseInt(txBlock, 10) : undefined,
+            });
+            setTxResult({ hash, from_address: from, to_address: to, value: txValue || null, block_number: txBlock ? parseInt(txBlock, 10) : null, properties: {} });
+            setTxSuccess(`Transaction upserted: ${hash.slice(0, 12)}…`);
+            refreshStats();
+        } catch (err) {
+            setTxError(err instanceof Error ? err.message : "Request failed");
+        } finally {
+            setTxLoading(false);
         }
     };
 
@@ -403,11 +455,11 @@ export function ETLTestPage({ onClose }: ETLTestPageProps) {
                                 <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
                                     <div className="stat-item">
                                         <div className="stat-value">{stats.node_count.toLocaleString()}</div>
-                                        <div className="stat-label">Nodes</div>
+                                        <div className="stat-label">Entities</div>
                                     </div>
                                     <div className="stat-item">
-                                        <div className="stat-value">{stats.edge_count.toLocaleString()}</div>
-                                        <div className="stat-label">Edges</div>
+                                        <div className="stat-value">{(stats.transaction_count ?? 0).toLocaleString()}</div>
+                                        <div className="stat-label">Transactions</div>
                                     </div>
                                     <div className="stat-item">
                                         <div className="stat-value">{Object.keys(stats.entity_types).length}</div>
@@ -527,7 +579,7 @@ export function ETLTestPage({ onClose }: ETLTestPageProps) {
                         {neighborsResult && neighborsResult.nodes.length > 0 && (
                             <div style={{ marginTop: 10 }}>
                                 <p className="panel-section-label">
-                                    Neighbors — {neighborsResult.total_nodes} nodes, {neighborsResult.total_edges} edges
+                                    Neighbors — {neighborsResult.total_nodes} entities, {neighborsResult.total_transactions} transactions
                                 </p>
                                 <div
                                     style={{
@@ -699,56 +751,64 @@ export function ETLTestPage({ onClose }: ETLTestPageProps) {
 
                     <hr className="divider" />
 
-                    {/* ── Edge Upsert ───────────────────────────────────────── */}
+                    {/* ── Transaction Upsert ────────────────────────────────── */}
                     <div>
-                        <p className="panel-section-label">Upsert Edge (PUT)</p>
+                        <p className="panel-section-label">Upsert Transaction Node</p>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            <input
+                                value={txHash}
+                                onChange={(e) => setTxHash(e.target.value)}
+                                placeholder="Transaction hash (0x…)"
+                                style={{ ...inputStyle, fontFamily: '"SF Mono","Fira Code",monospace' }}
+                            />
                             <div style={{ display: "flex", gap: 8 }}>
                                 <input
-                                    value={edgeSrc}
-                                    onChange={(e) => setEdgeSrc(e.target.value)}
-                                    placeholder="Source 0x…"
+                                    value={txFrom}
+                                    onChange={(e) => setTxFrom(e.target.value)}
+                                    placeholder="From 0x…"
                                     style={{ ...inputStyle, fontFamily: '"SF Mono","Fira Code",monospace' }}
                                 />
                                 <input
-                                    value={edgeTgt}
-                                    onChange={(e) => setEdgeTgt(e.target.value)}
-                                    placeholder="Target 0x…"
+                                    value={txTo}
+                                    onChange={(e) => setTxTo(e.target.value)}
+                                    placeholder="To 0x…"
                                     style={{ ...inputStyle, fontFamily: '"SF Mono","Fira Code",monospace' }}
                                 />
                             </div>
                             <div style={{ display: "flex", gap: 8 }}>
                                 <input
-                                    value={edgeType}
-                                    onChange={(e) => setEdgeType(e.target.value)}
-                                    placeholder="Edge type (TRANSFER)"
-                                    style={{ ...inputStyle, width: 140, flex: "none" }}
-                                />
-                                <input
-                                    value={edgeValue}
-                                    onChange={(e) => setEdgeValue(e.target.value)}
+                                    value={txValue}
+                                    onChange={(e) => setTxValue(e.target.value)}
                                     placeholder="Value in wei (optional)"
                                     style={inputStyle}
                                 />
                                 <input
-                                    value={edgeTxHash}
-                                    onChange={(e) => setEdgeTxHash(e.target.value)}
-                                    placeholder="tx_hash (optional)"
-                                    style={{ ...inputStyle, fontFamily: '"SF Mono","Fira Code",monospace' }}
+                                    value={txBlock}
+                                    onChange={(e) => setTxBlock(e.target.value)}
+                                    placeholder="Block number (optional)"
+                                    style={{ ...inputStyle, width: 160, flex: "none" }}
                                 />
                             </div>
                         </div>
                         <div style={{ marginTop: 8 }}>
                             <button
-                                onClick={handleEdgeUpsert}
-                                disabled={edgeLoading || !edgeSrc.trim() || !edgeTgt.trim()}
+                                onClick={handleTxUpsert}
+                                disabled={txLoading || !txHash.trim() || !txFrom.trim() || !txTo.trim()}
                                 className="btn btn-primary"
                             >
-                                {edgeLoading ? "…" : "PUT Edge"}
+                                {txLoading ? "…" : "Upsert Transaction"}
                             </button>
                         </div>
-                        <InlineError msg={edgeError} />
-                        <InlineSuccess msg={edgeSuccess} />
+                        <InlineError msg={txError} />
+                        <InlineSuccess msg={txSuccess} />
+                        {txResult && (
+                            <div style={{ marginTop: 8 }}>
+                                <p className="panel-section-label">Result</p>
+                                <div className="props-block">
+                                    <pre>{JSON.stringify(txResult, null, 2)}</pre>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <hr className="divider" />
@@ -818,7 +878,7 @@ export function ETLTestPage({ onClose }: ETLTestPageProps) {
                                 <li style={{ marginBottom: 6 }}>
                                     Materialize assets: <code>{`{start_block: 18000000, end_block: 18000010}`}</code>
                                 </li>
-                                <li style={{ marginBottom: 6 }}>Refresh stats → verify node/edge counts increased</li>
+                                <li style={{ marginBottom: 6 }}>Refresh stats → verify entity / transaction counts increased</li>
                                 <li style={{ marginBottom: 6 }}>
                                     Use <strong>Lookup</strong> to confirm addresses exist in Neo4j
                                 </li>
@@ -827,8 +887,8 @@ export function ETLTestPage({ onClose }: ETLTestPageProps) {
                                     to update it
                                 </li>
                                 <li>
-                                    Use <strong>PUT Edge</strong> / <strong>Delete Edge</strong> to test relationship
-                                    mutations
+                                    Use <strong>Upsert Transaction</strong> to create a Transaction node with
+                                    SENT/RECEIVED relationships between two entities
                                 </li>
                             </ol>
                         </div>

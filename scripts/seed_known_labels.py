@@ -16,8 +16,9 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+_backend_path = Path(__file__).parent.parent / "backend"
+if _backend_path.exists():
+    sys.path.insert(0, str(_backend_path))
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine

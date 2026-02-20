@@ -53,17 +53,42 @@ export function GraphCanvas({ data, onNodeSelect, onNodeExpand, selectedAddress 
                     riskLevel: node.risk_level,
                     bgColor: colors.bg,
                     borderColor: RISK_RING[node.risk_level],
+                    nodeKind: "entity",
                 },
             });
         }
-        for (const edge of data.edges) {
+        for (const tx of data.transactions) {
+            // Transaction node — small diamond-shaped node between entities
+            const shortHash = `${tx.hash.slice(0, 6)}…${tx.hash.slice(-4)}`;
             els.push({
                 data: {
-                    id: `${edge.source}-${edge.target}-${edge.edge_type}`,
-                    source: edge.source,
-                    target: edge.target,
-                    edgeType: edge.edge_type,
-                    value: edge.value,
+                    id: tx.hash,
+                    label: shortHash,
+                    txHash: tx.hash,
+                    value: tx.value,
+                    blockNumber: tx.block_number,
+                    bgColor: "#1a2744",
+                    borderColor: "#3b82f6",
+                    nodeKind: "transaction",
+                },
+            });
+            // SENT: from_address → tx
+            els.push({
+                data: {
+                    id: `sent-${tx.hash}`,
+                    source: tx.from_address,
+                    target: tx.hash,
+                    edgeKind: "SENT",
+                },
+            });
+            // RECEIVED: tx → to_address
+            els.push({
+                data: {
+                    id: `recv-${tx.hash}`,
+                    source: tx.hash,
+                    target: tx.to_address,
+                    edgeKind: "RECEIVED",
+                    value: tx.value,
                 },
             });
         }
@@ -95,12 +120,31 @@ export function GraphCanvas({ data, onNodeSelect, onNodeExpand, selectedAddress 
                     },
                 },
                 {
+                    // Transaction nodes: smaller diamond shape
+                    selector: 'node[nodeKind = "transaction"]',
+                    style: {
+                        shape: "diamond",
+                        width: 18,
+                        height: 18,
+                        "border-width": 1.5,
+                        "font-size": 8,
+                        color: "#94a3b8",
+                    },
+                },
+                {
                     selector: "node:selected",
                     style: {
                         "border-width": 3.5,
                         "border-color": "#0f172a",
                         width: 44,
                         height: 44,
+                    },
+                },
+                {
+                    selector: 'node[nodeKind = "transaction"]:selected',
+                    style: {
+                        width: 22,
+                        height: 22,
                     },
                 },
                 {
@@ -136,20 +180,23 @@ export function GraphCanvas({ data, onNodeSelect, onNodeExpand, selectedAddress 
                     },
                 },
                 {
-                    selector: 'edge[edgeType = "TRANSFER"]',
+                    // SENT edge: entity → tx node
+                    selector: 'edge[edgeKind = "SENT"]',
                     style: {
                         "line-color": "#86efac",
                         "target-arrow-color": "#86efac",
                         opacity: 0.8,
+                        width: 1.5,
                     },
                 },
                 {
-                    selector: 'edge[edgeType = "CALLS"]',
+                    // RECEIVED edge: tx node → entity (carries the value)
+                    selector: 'edge[edgeKind = "RECEIVED"]',
                     style: {
-                        "line-color": "#c4b5fd",
-                        "target-arrow-color": "#c4b5fd",
-                        "line-style": "dashed",
-                        "line-dash-pattern": [6, 3],
+                        "line-color": "#86efac",
+                        "target-arrow-color": "#86efac",
+                        opacity: 0.8,
+                        width: 1.5,
                     },
                 },
             ],

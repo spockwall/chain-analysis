@@ -12,8 +12,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+# Allow running from the repo root (outside Docker) or inside the container
+_backend_path = Path(__file__).parent.parent / "backend"
+if _backend_path.exists():
+    sys.path.insert(0, str(_backend_path))
 
 from neo4j import AsyncGraphDatabase
 
@@ -75,29 +77,36 @@ async def init_neo4j(
         print("  ✓ entity_type_risk composite index")
 
         # =================================================================
-        # Indexes for Edge Properties
+        # Transaction Node Constraint and Indexes
         # =================================================================
 
-        # Index on TRANSFER value for sorting/filtering
+        # Unique constraint on Transaction hash
         await session.run("""
-            CREATE INDEX transfer_value IF NOT EXISTS
-            FOR ()-[r:TRANSFER]-() ON (r.value)
+            CREATE CONSTRAINT tx_hash IF NOT EXISTS
+            FOR (t:Transaction) REQUIRE t.hash IS UNIQUE
         """)
-        print("  ✓ transfer_value index")
+        print("  ✓ tx_hash unique constraint")
 
-        # Index on TRANSFER timestamp for temporal queries
+        # Index on block_number for range queries
         await session.run("""
-            CREATE INDEX transfer_timestamp IF NOT EXISTS
-            FOR ()-[r:TRANSFER]-() ON (r.timestamp)
+            CREATE INDEX tx_block IF NOT EXISTS
+            FOR (t:Transaction) ON (t.block_number)
         """)
-        print("  ✓ transfer_timestamp index")
+        print("  ✓ tx_block index")
 
-        # Index on TRANSFER block_number for range queries
+        # Index on timestamp for temporal queries
         await session.run("""
-            CREATE INDEX transfer_block IF NOT EXISTS
-            FOR ()-[r:TRANSFER]-() ON (r.block_number)
+            CREATE INDEX tx_ts IF NOT EXISTS
+            FOR (t:Transaction) ON (t.timestamp)
         """)
-        print("  ✓ transfer_block index")
+        print("  ✓ tx_ts index")
+
+        # Index on value for sorting/filtering
+        await session.run("""
+            CREATE INDEX tx_value IF NOT EXISTS
+            FOR (t:Transaction) ON (t.value)
+        """)
+        print("  ✓ tx_value index")
 
         # =================================================================
         # Full-text Search Index (optional, for entity name search)

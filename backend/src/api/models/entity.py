@@ -67,14 +67,32 @@ class EdgeResponse(BaseModel):
     )
 
 
+class TransactionResponse(BaseModel):
+    """Response model for a Transaction node."""
+
+    hash: str = Field(..., description="Transaction hash")
+    from_address: str = Field(..., description="Sender address")
+    to_address: str = Field(..., description="Receiver address")
+    value: str | None = Field(None, description="Value in wei (as string)")
+    block_number: int | None = Field(None, description="Block number")
+    timestamp: datetime | None = Field(None, description="Transaction timestamp")
+    gas_used: int | None = Field(None, description="Gas used")
+    gas_price: str | None = Field(None, description="Gas price in wei (as string)")
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Additional properties"
+    )
+
+
 class NeighborsResponse(BaseModel):
     """Response model for neighborhood exploration."""
 
     center_address: str = Field(..., description="Center node address")
     nodes: list[EntityResponse] = Field(..., description="Nodes in the neighborhood")
-    edges: list[EdgeResponse] = Field(..., description="Edges in the neighborhood")
+    transactions: list[TransactionResponse] = Field(
+        ..., description="Transaction nodes in the neighborhood"
+    )
     total_nodes: int = Field(..., description="Total number of nodes returned")
-    total_edges: int = Field(..., description="Total number of edges returned")
+    total_transactions: int = Field(..., description="Total number of transactions returned")
 
 
 class PathNode(BaseModel):

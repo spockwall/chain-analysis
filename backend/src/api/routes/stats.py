@@ -12,7 +12,8 @@ class GraphStatsResponse(BaseModel):
     """Response model for graph statistics."""
 
     node_count: int
-    edge_count: int
+    transaction_count: int
+    edge_count: int  # counts SENT + RECEIVED relationships
     entity_types: dict[str, int]
     risk_levels: dict[str, int]
 
@@ -22,15 +23,21 @@ async def get_graph_stats(graph_db: GraphDBDep) -> GraphStatsResponse:
     """
     Get graph statistics from Neo4j.
 
-    Returns counts of nodes, edges, and breakdowns by entity type and risk level.
+    Returns counts of nodes, transaction nodes, edges, and breakdowns by
+    entity type and risk level.
     Useful for verifying ETL pipeline has ingested data correctly.
     """
-    # Count total nodes
+    # Count total entity nodes
     node_count_query = "MATCH (n:Entity) RETURN count(n) AS count"
     node_result = await graph_db.execute_query(node_count_query)
     node_count = node_result[0]["count"] if node_result else 0
 
-    # Count total edges
+    # Count transaction nodes
+    tx_count_query = "MATCH (t:Transaction) RETURN count(t) AS count"
+    tx_result = await graph_db.execute_query(tx_count_query)
+    transaction_count = tx_result[0]["count"] if tx_result else 0
+
+    # Count total relationships (SENT + RECEIVED)
     edge_count_query = "MATCH ()-[r]->() RETURN count(r) AS count"
     edge_result = await graph_db.execute_query(edge_count_query)
     edge_count = edge_result[0]["count"] if edge_result else 0
@@ -59,6 +66,7 @@ async def get_graph_stats(graph_db: GraphDBDep) -> GraphStatsResponse:
 
     return GraphStatsResponse(
         node_count=node_count,
+        transaction_count=transaction_count,
         edge_count=edge_count,
         entity_types=entity_types,
         risk_levels=risk_levels,

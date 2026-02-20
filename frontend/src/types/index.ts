@@ -38,12 +38,24 @@ export interface EdgeResponse {
   properties: Record<string, unknown>
 }
 
+export interface TransactionResponse {
+  hash: string
+  from_address: string
+  to_address: string
+  value?: string | null
+  block_number?: number | null
+  timestamp?: string | null
+  gas_used?: number | null
+  gas_price?: string | null
+  properties: Record<string, unknown>
+}
+
 export interface NeighborsResponse {
   center_address: string
   nodes: EntityResponse[]
-  edges: EdgeResponse[]
+  transactions: TransactionResponse[]
   total_nodes: number
-  total_edges: number
+  total_transactions: number
 }
 
 export interface PathResponse {
@@ -59,11 +71,12 @@ export interface PathData {
     entity_type?: EntityType | null
     name?: string | null
   }>
-  edges: Array<{
-    source: string
-    target: string
-    edge_type: string
+  transactions: Array<{
+    hash: string
+    from_address: string
+    to_address: string
     value?: string | null
+    block_number?: number | null
   }>
   length: number
   total_value?: string | null
@@ -90,8 +103,9 @@ export interface CytoscapeEdge {
     id: string
     source: string
     target: string
-    edgeType: string
+    txHash: string
     value?: string | null
+    blockNumber?: number | null
   }
 }
 
@@ -120,6 +134,7 @@ export interface EdgeUpsertRequest {
 // Graph statistics (for ETL testing)
 export interface GraphStatsResponse {
   node_count: number
+  transaction_count: number
   edge_count: number
   entity_types: Record<string, number>
   risk_levels: Record<string, number>

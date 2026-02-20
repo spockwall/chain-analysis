@@ -17,11 +17,29 @@ class Node:
 
 @dataclass
 class Edge:
-    """Represents a graph edge (TRANSFER, CALLS, etc.)."""
+    """Represents a graph edge (TRANSFER, CALLS, etc.).
+
+    .. deprecated::
+        Use Transaction instead. Kept for backwards compatibility.
+    """
 
     source: str
     target: str
     edge_type: str
+    properties: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Transaction:
+    """Represents a Transaction node in the graph.
+
+    Models a blockchain transaction as a first-class node connected via
+    (from:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(to:Entity).
+    """
+
+    hash: str
+    from_address: str
+    to_address: str
     properties: dict[str, Any] = field(default_factory=dict)
 
 
@@ -32,6 +50,7 @@ class Path:
     nodes: list[Node]
     edges: list[Edge]
     total_value: str | None = None  # Wei as string to avoid precision loss
+    transactions: list["Transaction"] = field(default_factory=list)
 
 
 @dataclass
@@ -41,6 +60,7 @@ class Subgraph:
     nodes: list[Node]
     edges: list[Edge]
     center_address: str | None = None
+    transactions: list["Transaction"] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -89,11 +109,41 @@ class GraphDatabase(Protocol):
         """
         Upsert edges using MERGE semantics.
 
+        .. deprecated::
+            Use upsert_transactions() instead.
+
         Args:
             edges: List of edges to upsert
 
         Returns:
             Number of edges upserted
+        """
+        ...
+
+    async def upsert_transactions(self, txs: list[Transaction]) -> int:
+        """
+        Upsert Transaction nodes with SENT/RECEIVED relationships.
+
+        Creates (from:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(to:Entity)
+        using MERGE semantics.
+
+        Args:
+            txs: List of transactions to upsert
+
+        Returns:
+            Number of transaction nodes upserted
+        """
+        ...
+
+    async def get_transaction(self, hash: str) -> Transaction | None:
+        """
+        Get a single transaction node by hash.
+
+        Args:
+            hash: Transaction hash
+
+        Returns:
+            Transaction if found, None otherwise
         """
         ...
 

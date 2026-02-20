@@ -2,8 +2,8 @@
 
 from .ingestion import (
     computed_features,
-    graph_edges,
     graph_nodes,
+    graph_transactions,
     raw_transactions,
     resolved_entities,
 )
@@ -13,5 +13,5 @@ __all__ = [
     "resolved_entities",
     "computed_features",
     "graph_nodes",
-    "graph_edges",
+    "graph_transactions",
 ]

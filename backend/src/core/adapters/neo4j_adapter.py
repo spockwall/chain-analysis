@@ -6,7 +6,7 @@ from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
-from core.ports.graph_db import Edge, GraphDatabase, Node, Path, Subgraph
+from core.ports.graph_db import Edge, GraphDatabase, Node, Path, Subgraph, Transaction
 from libs import logger
 
 
@@ -129,6 +129,63 @@ class Neo4jAdapter:
 
         return total_count
 
+    async def upsert_transactions(self, txs: list[Transaction]) -> int:
+        """Upsert Transaction nodes with SENT/RECEIVED relationships."""
+        if not txs:
+            return 0
+
+        tx_data = [
+            {
+                "hash": tx.hash,
+                "from_address": tx.from_address,
+                "to_address": tx.to_address,
+                "properties": tx.properties,
+            }
+            for tx in txs
+        ]
+
+        query = """
+        UNWIND $txs AS tx
+        MERGE (t:Transaction {hash: tx.hash})
+        SET t += tx.properties,
+            t.from_address = tx.from_address,
+            t.to_address   = tx.to_address
+        WITH t, tx
+        MATCH (from:Entity {address: tx.from_address})
+        MATCH (to:Entity   {address: tx.to_address})
+        MERGE (from)-[:SENT]->(t)
+        MERGE (t)-[:RECEIVED]->(to)
+        RETURN count(t) AS count
+        """
+
+        result = await self.execute_query(query, {"txs": tx_data})
+        return result[0]["count"] if result else 0
+
+    async def get_transaction(self, hash: str) -> Transaction | None:
+        """Get a single transaction node by hash."""
+        query = """
+        MATCH (t:Transaction {hash: $hash})
+        OPTIONAL MATCH (from:Entity)-[:SENT]->(t)
+        OPTIONAL MATCH (t)-[:RECEIVED]->(to:Entity)
+        RETURN t, from.address AS from_address, to.address AS to_address
+        """
+        result = await self.execute_query(query, {"hash": hash})
+        if not result:
+            return None
+
+        record = result[0]
+        tx_data = dict(record["t"])
+        tx_hash = tx_data.pop("hash", hash)
+        # from_address and to_address may be stored on node or returned separately
+        from_addr = record.get("from_address") or tx_data.pop("from_address", "")
+        to_addr = record.get("to_address") or tx_data.pop("to_address", "")
+        return Transaction(
+            hash=tx_hash,
+            from_address=from_addr,
+            to_address=to_addr,
+            properties=tx_data,
+        )
+
     async def get_node(self, address: str) -> Node | None:
         """Get a single node by address."""
         query = """
@@ -156,80 +213,103 @@ class Neo4jAdapter:
         edge_types: list[str] | None = None,
         limit: int = 100,
     ) -> Subgraph:
-        """Get the neighborhood of a node."""
-        # Build direction pattern
-        if direction == "in":
-            pattern = "<-[r*1..{depth}]-"
-        elif direction == "out":
-            pattern = "-[r*1..{depth}]->"
+        """Get the neighborhood of a node via Transaction nodes."""
+        # Build direction-aware Cypher for Transaction-as-Node model.
+        # One hop = (Entity)-[:SENT]->(Transaction)-[:RECEIVED]->(Entity)
+        # We repeat this pattern up to `depth` times.
+        hop = "(:Entity)-[:SENT]->(:Transaction)-[:RECEIVED]->"
+        hop_rev = "<-[:RECEIVED]-(:Transaction)<-[:SENT]-(:Entity)"
+
+        if direction == "out":
+            # outgoing: center sends → tx → neighbor
+            query = f"""
+            MATCH (center:Entity {{address: $address}})
+            MATCH path = (center)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(neighbor:Entity)
+            WITH center, tx, neighbor
+            LIMIT $limit
+            RETURN
+                collect(DISTINCT neighbor) AS neighbors,
+                collect(DISTINCT tx) AS txs,
+                center
+            """
+        elif direction == "in":
+            # incoming: neighbor sends → tx → center
+            query = f"""
+            MATCH (center:Entity {{address: $address}})
+            MATCH (neighbor:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(center)
+            WITH center, tx, neighbor
+            LIMIT $limit
+            RETURN
+                collect(DISTINCT neighbor) AS neighbors,
+                collect(DISTINCT tx) AS txs,
+                center
+            """
         else:
-            pattern = "-[r*1..{depth}]-"
-
-        pattern = pattern.format(depth=depth)
-
-        # Build edge type filter
-        if edge_types:
-            type_filter = ":" + "|".join(edge_types)
-            pattern = pattern.replace("[r*", f"[r{type_filter}*")
-
-        query = f"""
-        MATCH (center:Entity {{address: $address}})
-        MATCH path = (center){pattern}(neighbor:Entity)
-        WITH center, neighbor, relationships(path) AS rels
-        LIMIT $limit
-        RETURN
-            collect(DISTINCT neighbor) AS neighbors,
-            collect(DISTINCT rels) AS all_rels,
-            center
-        """
+            # both directions
+            query = """
+            MATCH (center:Entity {address: $address})
+            MATCH (neighbor:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(center)
+            WITH center, collect(DISTINCT neighbor) AS in_neighbors, collect(DISTINCT tx) AS in_txs
+            MATCH (center)-[:SENT]->(tx2:Transaction)-[:RECEIVED]->(out_neighbor:Entity)
+            WITH center, in_neighbors, in_txs,
+                 collect(DISTINCT out_neighbor) AS out_neighbors,
+                 collect(DISTINCT tx2) AS out_txs
+            RETURN
+                in_neighbors + out_neighbors AS neighbors,
+                in_txs + out_txs AS txs,
+                center
+            LIMIT $limit
+            """
 
         result = await self.execute_query(
             query, {"address": address, "limit": limit}
         )
 
         if not result:
-            return Subgraph(nodes=[], edges=[], center_address=address)
+            return Subgraph(nodes=[], edges=[], transactions=[], center_address=address)
 
         record = result[0]
 
-        # Parse nodes
+        # Parse Entity nodes
         nodes: list[Node] = []
         seen_addresses: set[str] = set()
 
-        # Add center node
         center_data = dict(record["center"])
         center_addr = center_data.pop("address")
         nodes.append(Node(address=center_addr, properties=center_data))
         seen_addresses.add(center_addr)
 
-        # Add neighbor nodes
         for neighbor in record["neighbors"]:
             neighbor_data = dict(neighbor)
-            neighbor_addr = neighbor_data.pop("address")
-            if neighbor_addr not in seen_addresses:
+            neighbor_addr = neighbor_data.pop("address", None)
+            if neighbor_addr and neighbor_addr not in seen_addresses:
                 nodes.append(Node(address=neighbor_addr, properties=neighbor_data))
                 seen_addresses.add(neighbor_addr)
 
-        # Parse edges
-        edges: list[Edge] = []
-        seen_edges: set[tuple[str, str, str]] = set()
+        # Parse Transaction nodes
+        transactions: list[Transaction] = []
+        seen_hashes: set[str] = set()
 
-        for rel_list in record["all_rels"]:
-            for rel in rel_list:
-                source = rel.start_node["address"]
-                target = rel.end_node["address"]
-                edge_type = rel.type
-                edge_key = (source, target, edge_type)
-                if edge_key not in seen_edges:
-                    edges.append(Edge(
-                        source=source,
-                        target=target,
-                        edge_type=edge_type,
-                        properties=dict(rel),
-                    ))
-                    seen_edges.add(edge_key)
+        for tx_node in record["txs"]:
+            tx_data = dict(tx_node)
+            tx_hash = tx_data.pop("hash", None)
+            if tx_hash and tx_hash not in seen_hashes:
+                from_addr = tx_data.pop("from_address", "")
+                to_addr = tx_data.pop("to_address", "")
+                transactions.append(Transaction(
+                    hash=tx_hash,
+                    from_address=from_addr,
+                    to_address=to_addr,
+                    properties=tx_data,
+                ))
+                seen_hashes.add(tx_hash)
 
-        return Subgraph(nodes=nodes, edges=edges, center_address=address)
+        return Subgraph(
+            nodes=nodes,
+            edges=[],
+            transactions=transactions,
+            center_address=address,
+        )
 
     async def find_paths(
         self,
@@ -239,16 +319,15 @@ class Neo4jAdapter:
         edge_types: list[str] | None = None,
         limit: int = 10,
     ) -> list[Path]:
-        """Find paths between two nodes."""
-        # Build edge type filter
-        type_filter = ""
-        if edge_types:
-            type_filter = ":" + "|".join(edge_types)
+        """Find paths between two entities via Transaction nodes.
 
+        Uses quantified path patterns available in Neo4j 5.x.
+        Each hop is (Entity)-[:SENT]->(Transaction)-[:RECEIVED]->(Entity).
+        """
+        # max_depth here is the number of Entity-to-Entity hops
         query = f"""
-        MATCH path = shortestPath(
-            (s:Entity {{address: $source}})-[r{type_filter}*1..{max_depth}]->(t:Entity {{address: $target}})
-        )
+        MATCH path = (s:Entity {{address: $source}})
+          ((-[:SENT]->(:Transaction)-[:RECEIVED]->){{1..{max_depth}}})(t:Entity {{address: $target}})
         RETURN path
         LIMIT $limit
         """
@@ -261,24 +340,26 @@ class Neo4jAdapter:
         for record in result:
             path_data = record["path"]
 
-            # Parse nodes
-            nodes = []
+            entity_nodes: list[Node] = []
+            tx_nodes: list[Transaction] = []
+
             for node in path_data.nodes:
                 node_data = dict(node)
-                addr = node_data.pop("address")
-                nodes.append(Node(address=addr, properties=node_data))
+                if "Transaction" in node.labels:
+                    tx_hash = node_data.pop("hash", "")
+                    from_addr = node_data.pop("from_address", "")
+                    to_addr = node_data.pop("to_address", "")
+                    tx_nodes.append(Transaction(
+                        hash=tx_hash,
+                        from_address=from_addr,
+                        to_address=to_addr,
+                        properties=node_data,
+                    ))
+                else:
+                    addr = node_data.pop("address", "")
+                    entity_nodes.append(Node(address=addr, properties=node_data))
 
-            # Parse edges
-            edges = []
-            for rel in path_data.relationships:
-                edges.append(Edge(
-                    source=rel.start_node["address"],
-                    target=rel.end_node["address"],
-                    edge_type=rel.type,
-                    properties=dict(rel),
-                ))
-
-            paths.append(Path(nodes=nodes, edges=edges))
+            paths.append(Path(nodes=entity_nodes, edges=[], transactions=tx_nodes))
 
         return paths
 
