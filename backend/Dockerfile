@@ -10,8 +10,9 @@ WORKDIR /app
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy dependency files
-COPY pyproject.toml ./
+# Copy dependency files and source for editable install
+COPY pyproject.toml README.md ./
+COPY src ./src
 
 # Install dependencies into /app/.venv
 RUN uv venv .venv && \
@@ -38,7 +39,7 @@ COPY alembic.ini ./
 
 # Make sure the venv Python is on PATH
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app"
+ENV PYTHONPATH="/app/src"
 ENV PYTHONUNBUFFERED=1
 
 # Expose API port
@@ -46,6 +47,6 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/health/live || exit 1
 
 CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
