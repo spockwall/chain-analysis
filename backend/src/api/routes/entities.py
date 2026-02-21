@@ -274,6 +274,16 @@ async def upsert_entity(
     if address != body.address.lower():
         raise HTTPException(status_code=400, detail="URL address and body address must match")
 
+    # Block reclassification of group parent nodes
+    existing = await graph_db.get_node(address)
+    if existing and existing.properties.get("member_count", 0) > 0:
+        member_count = existing.properties["member_count"]
+        raise HTTPException(
+            status_code=409,
+            detail=f"Address {address} is a group parent with {member_count} member(s) and cannot be reclassified. "
+                   "Manage its members via the /members API.",
+        )
+
     labels = ["Entity"]
     if body.entity_type:
         labels.append(body.entity_type.value)
@@ -319,6 +329,15 @@ async def update_entity(
     if existing is None:
         raise HTTPException(status_code=404, detail="Entity not found")
 
+    # Block reclassification of group parent nodes
+    if existing.properties.get("member_count", 0) > 0:
+        member_count = existing.properties["member_count"]
+        raise HTTPException(
+            status_code=409,
+            detail=f"Address {address} is a group parent with {member_count} member(s) and cannot be reclassified. "
+                   "Manage its members via the /members API.",
+        )
+
     # Merge incoming changes on top of the existing properties
     merged_props = {**existing.properties}
     if body.entity_type:
@@ -360,6 +379,14 @@ async def delete_entity(
     existing = await graph_db.get_node(address)
     if existing is None:
         raise HTTPException(status_code=404, detail="Entity not found")
+
+    if existing.properties.get("member_count", 0) > 0:
+        member_count = existing.properties["member_count"]
+        raise HTTPException(
+            status_code=409,
+            detail=f"Address {address} is a group parent with {member_count} member(s). "
+                   "Remove all members before deleting the group.",
+        )
 
     await graph_db.execute_query(
         "MATCH (n:Entity {address: $address}) DETACH DELETE n",
