@@ -1,16 +1,14 @@
 /**
- * App shell — navbar with tab navigation between pages.
- * Pages: Explorer | ETL | Dashboard
+ * App shell — navbar with URL-based routing.
+ * Routes: /explorer  /groups  /etl  /dashboard
  */
-import { useState } from "react";
+import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { SearchBar } from "./components/SearchBar";
 import { Toaster } from "./components/Toaster";
 import { GraphExplorerPage, DashboardPage, ETLPage, GroupsPage } from "./pages";
 import { ToastContext } from "./context/ToastContext";
 import { useToast } from "./hooks/useToast";
 import "./index.css";
-
-type Page = "explorer" | "etl" | "dashboard" | "groups";
 
 // ── Nav tab icons ─────────────────────────────────────────────────────────────
 
@@ -69,83 +67,105 @@ function LogoIcon() {
     );
 }
 
+// ── Nav ───────────────────────────────────────────────────────────────────────
+
+const tabs = [
+    { to: "/explorer", label: "Explorer", icon: <ExplorerIcon /> },
+    { to: "/groups",   label: "Groups",   icon: <GroupsIcon /> },
+    { to: "/etl",      label: "ETL",      icon: <EtlIcon /> },
+    { to: "/dashboard",label: "Dashboard",icon: <DashboardIcon /> },
+] as const;
+
+function Nav() {
+    const navigate = useNavigate();
+
+    function handleSearch(address: string) {
+        navigate(`/explorer?address=${encodeURIComponent(address)}`);
+    }
+
+    return (
+        <nav className="nav">
+            <NavLink
+                className="nav-logo"
+                to="/explorer"
+            >
+                <span className="nav-logo-icon"><LogoIcon /></span>
+                Chain Analysis
+            </NavLink>
+
+            {/* SearchBar only shows on explorer — hide on other routes */}
+            <Routes>
+                <Route path="/explorer" element={<SearchBar onSearch={handleSearch} />} />
+                <Route path="*" element={null} />
+            </Routes>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div className="nav-tabs">
+                    {tabs.map((tab) => (
+                        <NavLink
+                            key={tab.to}
+                            to={tab.to}
+                            className={({ isActive }) => `nav-tab${isActive ? " active" : ""}`}
+                        >
+                            {tab.icon}
+                            {tab.label}
+                        </NavLink>
+                    ))}
+                </div>
+                <div className="nav-badge">
+                    <span className="nav-badge-dot" />
+                    Live Network
+                </div>
+            </div>
+        </nav>
+    );
+}
+
+// ── Explorer wrapper — reads ?address= from URL ────────────────────────────────
+
+function ExplorerRoute() {
+    const navigate = useNavigate();
+    const params = new URLSearchParams(window.location.search);
+    const address = params.get("address");
+
+    return (
+        <GraphExplorerPage
+            initialAddress={address}
+            onAddressLoad={() => {
+                // strip the query param once consumed so back/forward works cleanly
+                if (address) navigate("/explorer", { replace: true });
+            }}
+        />
+    );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
-    const [page, setPage] = useState<Page>("explorer");
-    const [searchTrigger, setSearchTrigger] = useState<string | null>(null);
     const toast = useToast();
-
-    const handleSearch = (address: string) => {
-        setPage("explorer");
-        setSearchTrigger(address);
-    };
-
-    const tabs: { id: Page; label: string; icon: React.ReactNode }[] = [
-        { id: "explorer", label: "Explorer", icon: <ExplorerIcon /> },
-        { id: "groups", label: "Groups", icon: <GroupsIcon /> },
-        { id: "etl", label: "ETL", icon: <EtlIcon /> },
-        { id: "dashboard", label: "Dashboard", icon: <DashboardIcon /> },
-    ];
+    const navigate = useNavigate();
 
     return (
         <ToastContext.Provider value={toast}>
             <div className="app-shell">
-                {/* ── Navigation ── */}
-                <nav className="nav">
-                    <a
-                        className="nav-logo"
-                        href="/"
-                        onClick={(e) => {
-                            e.preventDefault();
-                            setPage("explorer");
-                        }}
-                    >
-                        <span className="nav-logo-icon">
-                            <LogoIcon />
-                        </span>
-                        Chain Analysis
-                    </a>
+                <Nav />
 
-                    {page === "explorer" && <SearchBar onSearch={handleSearch} />}
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <div className="nav-tabs">
-                            {tabs.map((tab) => (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setPage(tab.id)}
-                                    className={`nav-tab ${page === tab.id ? "active" : ""}`}
-                                >
-                                    {tab.icon}
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="nav-badge">
-                            <span className="nav-badge-dot" />
-                            Live Network
-                        </div>
-                    </div>
-                </nav>
-
-                {/* ── Pages ── */}
-                {page === "explorer" && (
-                    <GraphExplorerPage initialAddress={searchTrigger} onAddressLoad={() => setSearchTrigger(null)} />
-                )}
-                {page === "groups" && (
-                    <GroupsPage
-                        onNavigateToExplorer={(addr) => {
-                            setPage("explorer");
-                            setSearchTrigger(addr);
-                        }}
-                    />
-                )}
-                {page === "etl" && <ETLPage />}
-                {page === "dashboard" && <DashboardPage />}
+                <Routes>
+                    <Route path="/" element={<Navigate to="/explorer" replace />} />
+                    <Route path="/explorer" element={<ExplorerRoute />} />
+                    <Route path="/groups" element={
+                        <GroupsPage
+                            onNavigateToExplorer={(addr) =>
+                                navigate(`/explorer?address=${encodeURIComponent(addr)}`)
+                            }
+                        />
+                    } />
+                    <Route path="/etl" element={<ETLPage />} />
+                    <Route path="/dashboard" element={<DashboardPage />} />
+                    <Route path="*" element={<Navigate to="/explorer" replace />} />
+                </Routes>
             </div>
 
-            {/* Global toast stack — bottom-right */}
             <Toaster />
         </ToastContext.Provider>
     );
