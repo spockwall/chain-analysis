@@ -33,6 +33,9 @@ const RISK_DOT_COLORS: Record<string, string> = {
     critical: "#ef4444",
 };
 
+// shared input style used in path-finder and filter panel
+const monoInput = "w-60 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none transition-colors focus:border-blue-400";
+
 export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplorerPageProps) {
     const toast = useToastContext();
     const [graphData, setGraphData] = useState<NeighborsResponse | null>(null);
@@ -40,12 +43,10 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
     const [selectedEdge, setSelectedEdge] = useState<TransactionResponse | null>(null);
     const [loading, setLoading] = useState(false);
 
-    // Layout & filter state
     const [activeLayout, setActiveLayout] = useState<LayoutName>("fcose");
     const [filters, setFilters] = useState<GraphFilters>(DEFAULT_FILTERS);
     const [filterPanelOpen, setFilterPanelOpen] = useState(false);
 
-    // Path finder state
     const [pathFinderOpen, setPathFinderOpen] = useState(false);
     const [pathSource, setPathSource] = useState("");
     const [pathTarget, setPathTarget] = useState("");
@@ -69,19 +70,9 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                 fetchNeighbors(address, { depth: 1, limit: 50 }),
             ]);
             setSelectedNode(entity);
-
-            // Ensure the center node is always in the graph even if it has no
-            // SENT/RECEIVED transactions (e.g. a group node with only MEMBER_OF edges).
             const centerInNodes = neighbors.nodes.some((n) => n.address === entity.address);
-            const nodes = centerInNodes
-                ? neighbors.nodes
-                : [entity, ...neighbors.nodes];
-            setGraphData({
-                ...neighbors,
-                nodes,
-                total_nodes: nodes.length,
-            });
-
+            const nodes = centerInNodes ? neighbors.nodes : [entity, ...neighbors.nodes];
+            setGraphData({ ...neighbors, nodes, total_nodes: nodes.length });
             setPathResult(null);
             toast.dismiss(loadId);
         } catch (err) {
@@ -95,8 +86,7 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
     const handleNodeSelect = async (address: string) => {
         setSelectedEdge(null);
         try {
-            const entity = await fetchEntity(address);
-            setSelectedNode(entity);
+            setSelectedNode(await fetchEntity(address));
         } catch {
             setSelectedNode({ address, risk_level: "unknown", labels: [], properties: {} });
         }
@@ -104,17 +94,11 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
 
     const handleEdgeSelect = async (txHash: string) => {
         setSelectedNode(null);
-        // Try finding the tx in already-loaded graph data first
         const cached = graphData?.transactions.find((t) => t.hash === txHash) ?? null;
-        if (cached) {
-            setSelectedEdge(cached);
-            return;
-        }
+        if (cached) { setSelectedEdge(cached); return; }
         try {
-            const tx = await fetchTransaction(txHash);
-            setSelectedEdge(tx);
+            setSelectedEdge(await fetchTransaction(txHash));
         } catch {
-            // Minimal fallback so the panel still opens
             setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
         }
     };
@@ -156,10 +140,7 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
     };
 
     const handleFindPath = async () => {
-        if (!pathSource.trim() || !pathTarget.trim()) {
-            toast.error("Enter both source and target addresses");
-            return;
-        }
+        if (!pathSource.trim() || !pathTarget.trim()) { toast.error("Enter both source and target addresses"); return; }
         setPathLoading(true);
         const loadId = toast.loading("Finding paths…");
         try {
@@ -171,54 +152,27 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
             } else {
                 toast.success(`Found ${result.total_paths} path(s)`);
                 setPathResult(result);
-
-                // Merge any path nodes/txs not yet in graph
                 if (graphData) {
                     const existingAddresses = new Set(graphData.nodes.map((n) => n.address));
                     const existingTxHashes = new Set(graphData.transactions.map((t) => t.hash));
                     const stubNodes: typeof graphData.nodes = [];
                     const stubTxs: typeof graphData.transactions = [];
-
                     result.paths.forEach((p) => {
                         p.nodes.forEach((n) => {
                             if (!existingAddresses.has(n.address)) {
                                 existingAddresses.add(n.address);
-                                stubNodes.push({
-                                    address: n.address,
-                                    entity_type: n.entity_type ?? null,
-                                    name: n.name ?? null,
-                                    risk_level: "unknown",
-                                    labels: [],
-                                    properties: {},
-                                });
+                                stubNodes.push({ address: n.address, entity_type: n.entity_type ?? null, name: n.name ?? null, risk_level: "unknown", labels: [], properties: {} });
                             }
                         });
                         p.transactions.forEach((tx) => {
                             if (!existingTxHashes.has(tx.hash)) {
                                 existingTxHashes.add(tx.hash);
-                                stubTxs.push({
-                                    hash: tx.hash,
-                                    from_address: tx.from_address,
-                                    to_address: tx.to_address,
-                                    value: tx.value ?? null,
-                                    block_number: tx.block_number ?? null,
-                                    timestamp: null,
-                                    gas_used: null,
-                                    gas_price: null,
-                                    properties: {},
-                                });
+                                stubTxs.push({ hash: tx.hash, from_address: tx.from_address, to_address: tx.to_address, value: tx.value ?? null, block_number: tx.block_number ?? null, timestamp: null, gas_used: null, gas_price: null, properties: {} });
                             }
                         });
                     });
-
                     if (stubNodes.length > 0 || stubTxs.length > 0) {
-                        setGraphData({
-                            ...graphData,
-                            nodes: [...graphData.nodes, ...stubNodes],
-                            transactions: [...graphData.transactions, ...stubTxs],
-                            total_nodes: graphData.total_nodes + stubNodes.length,
-                            total_transactions: graphData.total_transactions + stubTxs.length,
-                        });
+                        setGraphData({ ...graphData, nodes: [...graphData.nodes, ...stubNodes], transactions: [...graphData.transactions, ...stubTxs], total_nodes: graphData.total_nodes + stubNodes.length, total_transactions: graphData.total_transactions + stubTxs.length });
                     }
                 }
             }
@@ -230,7 +184,6 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
         }
     };
 
-    // Derived highlight sets
     const highlightedNodeIds = useMemo(() => {
         if (!pathResult) return new Set<string>();
         const ids = new Set<string>();
@@ -245,53 +198,37 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
         return ids;
     }, [pathResult]);
 
-    // Filter helpers
     const toggleEntityType = (type: string) => {
-        setFilters((prev) => {
-            const next = new Set(prev.entityTypes);
-            if (next.has(type)) next.delete(type);
-            else next.add(type);
-            return { ...prev, entityTypes: next };
-        });
+        setFilters((prev) => { const next = new Set(prev.entityTypes); if (next.has(type)) next.delete(type); else next.add(type); return { ...prev, entityTypes: next }; });
     };
-
     const toggleRiskLevel = (level: string) => {
-        setFilters((prev) => {
-            const next = new Set(prev.riskLevels);
-            if (next.has(level)) next.delete(level);
-            else next.add(level);
-            return { ...prev, riskLevels: next };
-        });
+        setFilters((prev) => { const next = new Set(prev.riskLevels); if (next.has(level)) next.delete(level); else next.add(level); return { ...prev, riskLevels: next }; });
     };
 
     return (
-        <div className="app-body" style={{ flexDirection: "column" }}>
-            {/* Path finder bar — slides open above the graph */}
-            <div
-                className={`path-finder-bar${pathFinderOpen ? " path-finder-bar--open" : ""}${pathResult ? " path-finder-bar--active" : ""}`}
-            >
-                <div className="path-finder-bar__inner">
+        <div className="flex flex-col flex-1 min-h-0">
+            {/* Path finder bar */}
+            <div className={`overflow-hidden shrink-0 border-b transition-all duration-250 ${pathFinderOpen ? "h-[52px] border-gray-100" : "h-0 border-transparent"} ${pathResult ? "bg-blue-500/[0.04]" : ""}`}>
+                <div className="flex items-center gap-2.5 px-5 h-[52px]">
                     <input
-                        className="path-finder-input"
+                        className={monoInput}
                         placeholder="Source address (0x…)"
                         value={pathSource}
                         onChange={(e) => setPathSource(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && handleFindPath()}
                     />
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" style={{ flexShrink: 0 }}>
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                        <polyline points="12 5 19 12 12 19" />
+                        <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
                     </svg>
                     <input
-                        className="path-finder-input"
+                        className={monoInput}
                         placeholder="Target address (0x…)"
                         value={pathTarget}
                         onChange={(e) => setPathTarget(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && handleFindPath()}
                     />
                     <button
-                        className="action-btn action-btn-primary"
-                        style={{ width: "auto", padding: "6px 14px", fontSize: "0.75rem" }}
+                        className="px-3.5 py-1.5 bg-gray-900 text-white text-[0.75rem] font-semibold rounded-lg border-none cursor-pointer transition-colors hover:bg-[#1e293b] disabled:opacity-45"
                         onClick={handleFindPath}
                         disabled={pathLoading}
                     >
@@ -299,8 +236,7 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                     </button>
                     {pathResult && (
                         <button
-                            className="action-btn action-btn-secondary"
-                            style={{ width: "auto", padding: "6px 14px", fontSize: "0.75rem" }}
+                            className="px-3.5 py-1.5 bg-white text-gray-900 text-[0.75rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50"
                             onClick={() => setPathResult(null)}
                         >
                             Clear
@@ -309,33 +245,14 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                 </div>
             </div>
 
-            {/* Main body row */}
-            <div className="app-body" style={{ flex: 1, minHeight: 0 }}>
+            {/* Main body */}
+            <div className="flex flex-1 min-h-0">
                 {/* Graph area */}
-                <main className="graph-area grid-bg">
-                    {/* Loading indicator */}
+                <main className="flex-1 relative overflow-hidden grid-bg">
+                    {/* Loading pill */}
                     {loading && (
-                        <div
-                            style={{
-                                position: "absolute",
-                                top: 12,
-                                left: "50%",
-                                transform: "translateX(-50%)",
-                                zIndex: 10,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 6,
-                                padding: "5px 12px",
-                                borderRadius: "var(--radius-full)",
-                                background: "rgba(15,23,42,0.75)",
-                                color: "rgba(255,255,255,0.85)",
-                                fontSize: "0.72rem",
-                                fontWeight: 500,
-                                backdropFilter: "blur(6px)",
-                                border: "1px solid rgba(255,255,255,0.08)",
-                            }}
-                        >
-                            <svg className="toast-spin" width="11" height="11" viewBox="0 0 24 24" fill="none">
+                        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-[5px] rounded-full bg-[rgba(15,23,42,0.75)] text-[rgba(255,255,255,0.85)] text-[0.72rem] font-medium backdrop-blur-sm border border-white/[0.08]">
+                            <svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none">
                                 <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
                             </svg>
                             Loading…
@@ -358,10 +275,10 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                                 highlightedEdgeIds={highlightedEdgeIds}
                             />
 
-                            {/* Filter toggle button */}
+                            {/* Filter toggle */}
                             {!filterPanelOpen && (
                                 <button
-                                    className="graph-filter-toggle"
+                                    className="absolute top-3 left-3 z-10 w-[30px] h-[30px] flex items-center justify-center bg-[rgba(249,250,251,0.92)] border border-gray-200 rounded-lg shadow-md backdrop-blur-sm cursor-pointer text-gray-500 transition-colors p-0 hover:bg-gray-100 hover:text-gray-900"
                                     title="Toggle filters"
                                     onClick={() => setFilterPanelOpen(true)}
                                 >
@@ -371,9 +288,9 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                                 </button>
                             )}
 
-                            {/* Path finder toggle button */}
+                            {/* Path finder toggle */}
                             <button
-                                className="path-finder-toggle"
+                                className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center justify-center gap-1.5 px-3 h-[30px] bg-[rgba(249,250,251,0.92)] border border-gray-200 rounded-full shadow-md backdrop-blur-sm cursor-pointer text-gray-500 text-[0.7rem] font-medium transition-colors whitespace-nowrap hover:bg-gray-100 hover:text-gray-900"
                                 title="Path finder"
                                 onClick={() => setPathFinderOpen((o) => !o)}
                             >
@@ -384,73 +301,54 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
 
                             {/* Filter panel */}
                             {filterPanelOpen && (
-                                <div className="graph-filter-panel">
-                                    <div className="graph-filter-panel__header">
-                                        <span style={{ fontSize: "0.7rem", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)" }}>
-                                            Filters
-                                        </span>
+                                <div className="absolute top-3 left-3 z-20 w-[220px] bg-[rgba(249,250,251,0.95)] border border-gray-200 rounded-lg shadow-md backdrop-blur-sm flex flex-col overflow-hidden">
+                                    <div className="flex items-center justify-between px-2.5 py-2 border-b border-gray-100">
+                                        <span className="text-[0.7rem] font-semibold tracking-widest uppercase text-gray-400">Filters</span>
                                         <button
-                                            className="btn-icon"
-                                            style={{ width: 22, height: 22 }}
+                                            className="w-[22px] h-[22px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900"
                                             onClick={() => setFilterPanelOpen(false)}
                                         >
                                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                <line x1="18" y1="6" x2="6" y2="18" />
-                                                <line x1="6" y1="6" x2="18" y2="18" />
+                                                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                                             </svg>
                                         </button>
                                     </div>
 
-                                    <div className="graph-filter-panel__section">
-                                        <span className="panel-section-label" style={{ marginBottom: 4 }}>Entity Type</span>
+                                    <div className="px-2.5 py-2 flex flex-col gap-1 border-b border-gray-100 max-h-[180px] overflow-y-auto">
+                                        <span className="text-[0.65rem] font-semibold tracking-widest uppercase text-gray-400 mb-1">Entity Type</span>
                                         {ALL_ENTITY_TYPES.map((type) => (
-                                            <label key={type} className="filter-checkbox-row">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={filters.entityTypes.has(type)}
-                                                    onChange={() => toggleEntityType(type)}
-                                                    style={{ marginRight: 6 }}
-                                                />
+                                            <label key={type} className="flex items-center gap-1.5 text-[0.73rem] text-gray-500 cursor-pointer select-none">
+                                                <input type="checkbox" checked={filters.entityTypes.has(type)} onChange={() => toggleEntityType(type)} className="mr-0" />
                                                 {type}
                                             </label>
                                         ))}
                                     </div>
 
-                                    <div className="graph-filter-panel__section">
-                                        <span className="panel-section-label" style={{ marginBottom: 4 }}>Risk Level</span>
+                                    <div className="px-2.5 py-2 flex flex-col gap-1 border-b border-gray-100 max-h-[180px] overflow-y-auto">
+                                        <span className="text-[0.65rem] font-semibold tracking-widest uppercase text-gray-400 mb-1">Risk Level</span>
                                         {ALL_RISK_LEVELS.map((level) => (
-                                            <label key={level} className="filter-checkbox-row">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={filters.riskLevels.has(level)}
-                                                    onChange={() => toggleRiskLevel(level)}
-                                                    style={{ marginRight: 6 }}
-                                                />
-                                                <span
-                                                    className="filter-risk-dot"
-                                                    style={{ background: RISK_DOT_COLORS[level] }}
-                                                />
+                                            <label key={level} className="flex items-center gap-1.5 text-[0.73rem] text-gray-500 cursor-pointer select-none">
+                                                <input type="checkbox" checked={filters.riskLevels.has(level)} onChange={() => toggleRiskLevel(level)} />
+                                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: RISK_DOT_COLORS[level] }} />
                                                 {level}
                                             </label>
                                         ))}
                                     </div>
 
-                                    <div className="graph-filter-panel__section">
-                                        <span className="panel-section-label" style={{ marginBottom: 4 }}>Address Search</span>
+                                    <div className="px-2.5 py-2 flex flex-col gap-1 border-b border-gray-100">
+                                        <span className="text-[0.65rem] font-semibold tracking-widest uppercase text-gray-400 mb-1">Address Search</span>
                                         <input
                                             type="text"
-                                            className="path-finder-input"
-                                            style={{ width: "100%", boxSizing: "border-box" }}
+                                            className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none focus:border-blue-400"
                                             placeholder="0x… or name"
                                             value={filters.addressSearch}
                                             onChange={(e) => setFilters((prev) => ({ ...prev, addressSearch: e.target.value }))}
                                         />
                                     </div>
 
-                                    <div style={{ padding: "0 10px 10px" }}>
+                                    <div className="px-2.5 py-2.5">
                                         <button
-                                            className="action-btn action-btn-secondary"
-                                            style={{ fontSize: "0.72rem", padding: "5px 10px" }}
+                                            className="w-full px-2.5 py-[5px] text-[0.72rem] font-medium bg-white border border-gray-200 rounded-lg text-gray-900 cursor-pointer transition-colors hover:bg-gray-50"
                                             onClick={() => setFilters(DEFAULT_FILTERS)}
                                         >
                                             Reset filters
@@ -459,42 +357,39 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                                 </div>
                             )}
 
-                            <div className="graph-stats-bar">
-                                <span className="stats-chip">
-                                    <span className="stats-chip-dot" style={{ background: "var(--accent-blue)" }} />
+                            {/* Stats bar */}
+                            <div className="absolute bottom-5 left-5 z-10 flex gap-2">
+                                <span className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500">
+                                    <span className="w-[5px] h-[5px] rounded-full bg-blue-500" />
                                     {graphData.total_nodes} entities
                                 </span>
-                                <span className="stats-chip">
-                                    <span className="stats-chip-dot" style={{ background: "var(--accent-green)" }} />
+                                <span className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500">
+                                    <span className="w-[5px] h-[5px] rounded-full bg-emerald-500" />
                                     {graphData.total_transactions} transactions
                                 </span>
                             </div>
                         </>
                     ) : (
-                        <div className="graph-empty">
-                            <div className="graph-empty-icon">
+                        <div className="flex flex-col items-center justify-center h-full gap-6 p-10">
+                            <div className="w-16 h-16 rounded-2xl border border-gray-200 bg-white shadow-sm flex items-center justify-center text-gray-400">
                                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                                     <circle cx="12" cy="12" r="3" />
-                                    <circle cx="4" cy="6" r="2" />
-                                    <circle cx="20" cy="6" r="2" />
-                                    <circle cx="4" cy="18" r="2" />
-                                    <circle cx="20" cy="18" r="2" />
-                                    <line x1="12" y1="12" x2="4" y2="6" />
-                                    <line x1="12" y1="12" x2="20" y2="6" />
-                                    <line x1="12" y1="12" x2="4" y2="18" />
-                                    <line x1="12" y1="12" x2="20" y2="18" />
+                                    <circle cx="4" cy="6" r="2" /><circle cx="20" cy="6" r="2" />
+                                    <circle cx="4" cy="18" r="2" /><circle cx="20" cy="18" r="2" />
+                                    <line x1="12" y1="12" x2="4" y2="6" /><line x1="12" y1="12" x2="20" y2="6" />
+                                    <line x1="12" y1="12" x2="4" y2="18" /><line x1="12" y1="12" x2="20" y2="18" />
                                 </svg>
                             </div>
-                            <div style={{ textAlign: "center" }}>
-                                <p className="graph-empty-title">Transaction Graph Explorer.</p>
-                                <p className="graph-empty-hint" style={{ marginTop: 8 }}>
+                            <div className="text-center">
+                                <p className="text-[1.1rem] font-semibold text-gray-900 tracking-[-0.01em]">Transaction Graph Explorer.</p>
+                                <p className="text-[0.8rem] text-gray-400 text-center mt-2">
                                     Enter an Ethereum address to map its on-chain relationships
                                     <br />
                                     and trace fund flows across the network.
                                 </p>
                             </div>
                             <button
-                                className="graph-example-chip"
+                                className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-gray-200 rounded-lg text-[0.75rem] text-gray-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-colors font-mono hover:bg-gray-50 hover:border-gray-300"
                                 onClick={() => handleSearch("0x28c6c06298d514db089934071355e5743bf21d60")}
                             >
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -506,8 +401,9 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                     )}
                 </main>
 
+                {/* Side panel */}
                 {(selectedNode || selectedEdge) && (
-                    <aside className="side-panel">
+                    <aside className="w-[340px] bg-white border-l border-gray-200 flex flex-col overflow-hidden shadow-[-4px_0_20px_rgba(15,23,42,0.04)] animate-[slide-in_250ms_cubic-bezier(0.4,0,0.2,1)]">
                         {selectedNode && (
                             <NodePanel
                                 node={selectedNode}

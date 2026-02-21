@@ -6,6 +6,20 @@ export default {
   ],
   theme: {
     extend: {
+      keyframes: {
+        'toast-slide-in': {
+          from: { opacity: '0', transform: 'translateX(16px)' },
+          to:   { opacity: '1', transform: 'translateX(0)' },
+        },
+        'slide-in': {
+          from: { opacity: '0', transform: 'translateX(100%)' },
+          to:   { opacity: '1', transform: 'translateX(0)' },
+        },
+      },
+      animation: {
+        'toast-slide-in': 'toast-slide-in 250ms cubic-bezier(0.4,0,0.2,1)',
+        'slide-in': 'slide-in 250ms cubic-bezier(0.4,0,0.2,1)',
+      },
       colors: {
         // Risk level colors
         risk: {

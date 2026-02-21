@@ -37,6 +37,9 @@ interface GraphCanvasProps {
     highlightedEdgeIds?: Set<string>;
 }
 
+const ctrlBtn = "w-[30px] h-[30px] flex items-center justify-center border-none bg-transparent rounded cursor-pointer text-gray-500 transition-colors p-0 hover:bg-gray-100 hover:text-gray-900";
+const ctrlBtnActive = ctrlBtn + " !bg-gray-900 !text-white hover:!bg-[#1e293b] hover:!text-white";
+
 export function GraphCanvas({
     data,
     onNodeSelect,
@@ -58,7 +61,6 @@ export function GraphCanvas({
 
         const knownNodeIds = new Set(data.nodes.map((n) => n.address));
 
-        // Entity nodes only (no transaction nodes)
         for (const node of data.nodes) {
             const entityType = node.entity_type || "Unknown";
             const label = node.name ? node.name : `${node.address.slice(0, 6)}…${node.address.slice(-4)}`;
@@ -78,7 +80,6 @@ export function GraphCanvas({
             });
         }
 
-        // Group transactions by "from::to" pair for parallel edge fanning
         const grouped = new Map<string, TransactionResponse[]>();
         for (const tx of data.transactions) {
             if (!knownNodeIds.has(tx.from_address) || !knownNodeIds.has(tx.to_address)) continue;
@@ -87,7 +88,6 @@ export function GraphCanvas({
             grouped.get(key)!.push(tx);
         }
 
-        // Emit one edge per transaction, fanned out for parallel pairs
         for (const [, group] of grouped) {
             const total = group.length;
             group.forEach((tx, index) => {
@@ -113,10 +113,8 @@ export function GraphCanvas({
         return els;
     }, [data]);
 
-    // Effect 1 — initial mount
     useEffect(() => {
         if (!containerRef.current) return;
-
         const cy = cytoscape({
             container: containerRef.current,
             elements: toElements(),
@@ -125,48 +123,30 @@ export function GraphCanvas({
             minZoom: 0.1,
             maxZoom: 4,
         });
-
         cy.on("tap", "node", (evt) => onNodeSelect(evt.target.id()));
         cy.on("dbltap", "node", (evt) => onNodeExpand(evt.target.id()));
         cy.on("tap", "edge", (evt) => {
             const txHash = evt.target.data("txHash") as string | undefined;
             if (txHash) onEdgeSelect?.(txHash);
         });
-
-        if (data.center_address) {
-            cy.getElementById(data.center_address).addClass("center");
-        }
-
+        if (data.center_address) cy.getElementById(data.center_address).addClass("center");
         cyRef.current = cy;
         return () => cy.destroy();
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Effect 2 — data updates (incremental add/remove)
     useEffect(() => {
         const cy = cyRef.current;
         if (!cy) return;
-
         const currentIds = new Set(cy.elements().map((ele) => ele.id()));
         const newEls = toElements();
         const newIds = new Set(newEls.map((e) => e.data.id as string));
-
-        cy.elements().forEach((ele) => {
-            if (!newIds.has(ele.id())) ele.remove();
-        });
-
+        cy.elements().forEach((ele) => { if (!newIds.has(ele.id())) ele.remove(); });
         const toAdd = newEls.filter((e) => !currentIds.has(e.data.id as string));
-        if (toAdd.length > 0) {
-            cy.add(toAdd);
-            runLayout(cy, activeLayout);
-        }
-
+        if (toAdd.length > 0) { cy.add(toAdd); runLayout(cy, activeLayout); }
         cy.nodes().removeClass("center");
-        if (data.center_address) {
-            cy.getElementById(data.center_address).addClass("center");
-        }
+        if (data.center_address) cy.getElementById(data.center_address).addClass("center");
     }, [data, toElements]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Effect 3 — selection highlight
     useEffect(() => {
         const cy = cyRef.current;
         if (!cy) return;
@@ -174,12 +154,10 @@ export function GraphCanvas({
         if (selectedAddress) cy.getElementById(selectedAddress).addClass("highlighted");
     }, [selectedAddress]);
 
-    // Effect 4 — layout change
     useEffect(() => {
         if (cyRef.current) runLayout(cyRef.current, activeLayout);
     }, [activeLayout]);
 
-    // Effect 5 — filters (show/hide elements)
     useEffect(() => {
         const cy = cyRef.current;
         if (!cy) return;
@@ -190,10 +168,7 @@ export function GraphCanvas({
             }
         });
         cy.edges().forEach((e) => {
-            if (
-                (cy.getElementById(e.data("source")) as any).hidden() ||
-                (cy.getElementById(e.data("target")) as any).hidden()
-            ) {
+            if ((cy.getElementById(e.data("source")) as any).hidden() || (cy.getElementById(e.data("target")) as any).hidden()) {
                 (e as any).hide();
             }
         });
@@ -208,7 +183,6 @@ export function GraphCanvas({
         }
     }, [filters]);
 
-    // Effect 6 — path highlights
     useEffect(() => {
         const cy = cyRef.current;
         if (!cy) return;
@@ -217,86 +191,70 @@ export function GraphCanvas({
         highlightedEdgeIds?.forEach((id) => cy.getElementById(id).addClass("on-path"));
     }, [highlightedNodeIds, highlightedEdgeIds]);
 
-    // Effect 7 — selected edge highlight
     useEffect(() => {
         const cy = cyRef.current;
         if (!cy) return;
         cy.edges().removeClass("edge-selected");
-        if (selectedEdgeTxHash) {
-            cy.getElementById(`tx-${selectedEdgeTxHash}`).addClass("edge-selected");
-        }
+        if (selectedEdgeTxHash) cy.getElementById(`tx-${selectedEdgeTxHash}`).addClass("edge-selected");
     }, [selectedEdgeTxHash]);
 
     return (
         <div style={{ position: "relative", width: "100%", height: "100%" }}>
             <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
-            <div className="graph-controls">
+            {/* Controls overlay */}
+            <div className="absolute bottom-5 right-5 flex flex-col gap-1 z-10 bg-[rgba(249,250,251,0.92)] border border-gray-200 rounded-lg p-1.5 shadow-md backdrop-blur-sm">
                 <button
-                    className="graph-ctrl-btn"
+                    className={ctrlBtn}
                     title="Zoom in"
                     onClick={() => {
                         const cy = cyRef.current;
                         if (!cy) return;
-                        const center = { x: cy.width() / 2, y: cy.height() / 2 };
-                        cy.zoom({ level: cy.zoom() * 1.3, renderedPosition: center });
+                        cy.zoom({ level: cy.zoom() * 1.3, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
                     }}
                 >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="11" cy="11" r="8" />
-                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                        <line x1="11" y1="8" x2="11" y2="14" />
-                        <line x1="8" y1="11" x2="14" y2="11" />
+                        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        <line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
                     </svg>
                 </button>
                 <button
-                    className="graph-ctrl-btn"
+                    className={ctrlBtn}
                     title="Zoom out"
                     onClick={() => {
                         const cy = cyRef.current;
                         if (!cy) return;
-                        const center = { x: cy.width() / 2, y: cy.height() / 2 };
-                        cy.zoom({ level: cy.zoom() * 0.77, renderedPosition: center });
+                        cy.zoom({ level: cy.zoom() * 0.77, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
                     }}
                 >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="11" cy="11" r="8" />
-                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
                         <line x1="8" y1="11" x2="14" y2="11" />
                     </svg>
                 </button>
-                <button
-                    className="graph-ctrl-btn"
-                    title="Fit to view"
-                    onClick={() => cyRef.current?.fit(undefined, 40)}
-                >
+                <button className={ctrlBtn} title="Fit to view" onClick={() => cyRef.current?.fit(undefined, 40)}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
                     </svg>
                 </button>
-                <div className="graph-ctrl-divider" />
+                <div className="h-px bg-gray-100 my-0.5" />
                 <button
-                    className="graph-ctrl-btn"
+                    className={ctrlBtn}
                     title="Re-run layout"
-                    onClick={() => {
-                        if (cyRef.current) runLayout(cyRef.current, activeLayout);
-                    }}
+                    onClick={() => { if (cyRef.current) runLayout(cyRef.current, activeLayout); }}
                 >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="1 4 1 10 7 10" />
-                        <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+                        <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
                     </svg>
                 </button>
                 <button
-                    className={`graph-ctrl-btn${activeLayout === "dagre" ? " graph-ctrl-btn--active" : ""}`}
+                    className={activeLayout === "dagre" ? ctrlBtnActive : ctrlBtn}
                     title="Toggle layout (fcose ↔ dagre)"
                     onClick={() => onLayoutChange(activeLayout === "fcose" ? "dagre" : "fcose")}
                 >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="2" y="7" width="5" height="5" rx="1" />
-                        <rect x="17" y="3" width="5" height="5" rx="1" />
+                        <rect x="2" y="7" width="5" height="5" rx="1" /><rect x="17" y="3" width="5" height="5" rx="1" />
                         <rect x="17" y="16" width="5" height="5" rx="1" />
-                        <line x1="7" y1="9.5" x2="17" y2="5.5" />
-                        <line x1="7" y1="9.5" x2="17" y2="18.5" />
+                        <line x1="7" y1="9.5" x2="17" y2="5.5" /><line x1="7" y1="9.5" x2="17" y2="18.5" />
                     </svg>
                 </button>
             </div>

@@ -4,6 +4,9 @@
 import { useHealth } from "../hooks/useHealth";
 import { useGraphStats } from "../hooks/useGraphStats";
 
+const sectionLabel = "text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400";
+const btnSecondary = "inline-flex items-center justify-center px-2.5 py-1 bg-white text-gray-700 text-[0.72rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50 disabled:opacity-45 disabled:cursor-not-allowed";
+
 export function DashboardPage() {
     const { health, loading, error, lastChecked, refresh } = useHealth({
         refreshInterval: 30000,
@@ -15,83 +18,51 @@ export function DashboardPage() {
     const overallHealthy = health?.status === "healthy";
 
     return (
-        <div className="page-content">
-            <div className="page-padded">
+        <div className="flex-1 min-h-0 overflow-auto bg-[var(--bg-primary)]">
+            <div className="max-w-[860px] mx-auto px-6 py-8">
                 {/* Page header */}
-                <div style={{ marginBottom: 28 }}>
-                    <p className="panel-section-label" style={{ marginBottom: 4 }}>System</p>
-                    <h1 className="heading-md" style={{ fontSize: "1.5rem", margin: 0 }}>Dashboard</h1>
+                <div className="mb-7">
+                    <p className={`${sectionLabel} mb-1`}>System</p>
+                    <h1 className="text-2xl font-bold tracking-tight text-gray-900 m-0">Dashboard</h1>
                 </div>
 
                 {/* Overall status banner */}
                 {health && (
-                    <div
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            padding: "12px 16px",
-                            borderRadius: "var(--radius-md)",
-                            border: "1px solid",
-                            borderColor: overallHealthy ? "rgba(34,197,94,0.3)" : "rgba(234,179,8,0.3)",
-                            background: overallHealthy ? "rgba(34,197,94,0.06)" : "rgba(234,179,8,0.06)",
-                            marginBottom: 24,
-                        }}
-                    >
-                        <span
-                            style={{
-                                width: 8,
-                                height: 8,
-                                borderRadius: "50%",
-                                flexShrink: 0,
-                                background: overallHealthy ? "var(--risk-low)" : "var(--risk-medium)",
-                            }}
-                        />
-                        <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                    <div className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border mb-6 ${
+                        overallHealthy
+                            ? "border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.06)]"
+                            : "border-[rgba(234,179,8,0.3)] bg-[rgba(234,179,8,0.06)]"
+                    }`}>
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${overallHealthy ? "bg-green-500" : "bg-yellow-500"}`} />
+                        <span className="text-[0.85rem] font-semibold text-gray-900">
                             {overallHealthy ? "All Systems Operational" : "Degraded — some services unhealthy"}
                         </span>
                     </div>
                 )}
 
                 {/* Graph quick stats */}
-                <div className="card" style={{ marginBottom: 20, padding: 20 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                        <p className="panel-section-label" style={{ marginBottom: 0 }}>Graph Statistics</p>
-                        <button
-                            onClick={refreshStats}
-                            disabled={statsLoading}
-                            className="btn btn-secondary"
-                            style={{ padding: "4px 10px", fontSize: "0.72rem" }}
-                        >
+                <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+                    <div className="flex justify-between items-center mb-4">
+                        <p className={sectionLabel}>Graph Statistics</p>
+                        <button onClick={refreshStats} disabled={statsLoading} className={btnSecondary}>
                             {statsLoading ? "Loading…" : "Refresh"}
                         </button>
                     </div>
                     {stats ? (
                         <>
-                            <div className="stat-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-                                <div className="stat-item">
-                                    <div className="stat-value">{stats.node_count.toLocaleString()}</div>
-                                    <div className="stat-label">Total Entities</div>
-                                </div>
-                                <div className="stat-item">
-                                    <div className="stat-value">{(stats.transaction_count ?? 0).toLocaleString()}</div>
-                                    <div className="stat-label">Transactions</div>
-                                </div>
-                                <div className="stat-item">
-                                    <div className="stat-value">
-                                        {((stats.risk_levels["high"] ?? 0) + (stats.risk_levels["critical"] ?? 0)).toLocaleString()}
-                                    </div>
-                                    <div className="stat-label">High Risk</div>
-                                </div>
-                                <div className="stat-item">
-                                    <div className="stat-value">{Object.keys(stats.entity_types).length}</div>
-                                    <div className="stat-label">Entity Types</div>
-                                </div>
+                            <div className="grid grid-cols-4 gap-3">
+                                <StatItem value={stats.node_count.toLocaleString()} label="Total Entities" />
+                                <StatItem value={(stats.transaction_count ?? 0).toLocaleString()} label="Transactions" />
+                                <StatItem
+                                    value={((stats.risk_levels["high"] ?? 0) + (stats.risk_levels["critical"] ?? 0)).toLocaleString()}
+                                    label="High Risk"
+                                />
+                                <StatItem value={String(Object.keys(stats.entity_types).length)} label="Entity Types" />
                             </div>
                             {Object.keys(stats.entity_types).length > 0 && (
-                                <div className="tag-list" style={{ marginTop: 14 }}>
+                                <div className="flex flex-wrap gap-1 mt-3.5">
                                     {Object.entries(stats.entity_types).map(([type, count]) => (
-                                        <span key={type} className="tag">
+                                        <span key={type} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded text-[0.7rem] text-gray-600">
                                             {type}: {count}
                                         </span>
                                     ))}
@@ -100,81 +71,41 @@ export function DashboardPage() {
                         </>
                     ) : (
                         !statsLoading && (
-                            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                                No graph data — run the ETL pipeline first.
-                            </p>
+                            <p className="text-[0.78rem] text-gray-400">No graph data — run the ETL pipeline first.</p>
                         )
                     )}
                 </div>
 
                 {/* Service health */}
-                <div className="card" style={{ padding: 20 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                        <p className="panel-section-label" style={{ marginBottom: 0 }}>Service Health</p>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+                    <div className="flex justify-between items-center mb-4">
+                        <p className={sectionLabel}>Service Health</p>
+                        <div className="flex items-center gap-2.5">
                             {lastChecked && (
-                                <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
+                                <span className="text-[0.68rem] text-gray-400">
                                     Last checked {lastChecked.toLocaleTimeString()}
                                 </span>
                             )}
-                            <button
-                                onClick={refresh}
-                                disabled={loading}
-                                className="btn btn-secondary"
-                                style={{ padding: "4px 10px", fontSize: "0.72rem" }}
-                            >
+                            <button onClick={refresh} disabled={loading} className={btnSecondary}>
                                 {loading ? "Checking…" : "Refresh"}
                             </button>
                         </div>
                     </div>
 
                     {error && (
-                        <p style={{ fontSize: "0.78rem", color: "var(--risk-critical)", marginBottom: 10 }}>{error}</p>
+                        <p className="text-[0.78rem] text-red-500 mb-2.5">{error}</p>
                     )}
 
                     {health ? (
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+                        <div className="grid grid-cols-2 gap-2">
                             {Object.entries(health.services).map(([service, healthy]) => (
                                 <div
                                     key={service}
-                                    style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: 10,
-                                        padding: "10px 14px",
-                                        border: "1px solid var(--border-light)",
-                                        borderRadius: "var(--radius-md)",
-                                        background: "var(--bg-primary)",
-                                    }}
+                                    className="flex items-center gap-2.5 px-3.5 py-2.5 border border-gray-200 rounded-lg bg-gray-50"
                                 >
-                                    <span
-                                        style={{
-                                            width: 6,
-                                            height: 6,
-                                            borderRadius: "50%",
-                                            flexShrink: 0,
-                                            background: healthy ? "var(--risk-low)" : "var(--risk-critical)",
-                                        }}
-                                    />
-                                    <span
-                                        style={{
-                                            flex: 1,
-                                            fontSize: "0.8rem",
-                                            color: "var(--text-primary)",
-                                            textTransform: "capitalize",
-                                        }}
-                                    >
-                                        {service}
-                                    </span>
-                                    <span
-                                        style={{
-                                            fontSize: "0.65rem",
-                                            fontWeight: 600,
-                                            textTransform: "uppercase",
-                                            letterSpacing: "0.04em",
-                                            color: healthy ? "#15803d" : "#b91c1c",
-                                        }}
-                                    >
+                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${healthy ? "bg-green-500" : "bg-red-500"}`} />
+                                    <span className="flex-1 text-[0.8rem] text-gray-900 capitalize">{service}</span>
+                                    <span className={`text-[0.65rem] font-semibold uppercase tracking-[0.04em] ${healthy ? "text-green-700" : "text-red-700"}`}>
                                         {healthy ? "OK" : "Down"}
                                     </span>
                                 </div>
@@ -182,11 +113,20 @@ export function DashboardPage() {
                         </div>
                     ) : (
                         !loading && (
-                            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>No health data yet.</p>
+                            <p className="text-[0.78rem] text-gray-400">No health data yet.</p>
                         )
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+function StatItem({ value, label }: { value: string; label: string }) {
+    return (
+        <div className="flex flex-col gap-1 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <div className="text-[1.4rem] font-bold text-gray-900 tracking-tight leading-none">{value}</div>
+            <div className="text-[0.7rem] text-gray-400">{label}</div>
         </div>
     );
 }
