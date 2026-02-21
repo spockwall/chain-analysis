@@ -138,6 +138,40 @@ export interface EdgeUpsertRequest {
   properties?: Record<string, unknown>
 }
 
+// Group management types
+
+export interface GroupCreateRequest {
+  address: string
+  name: string
+  entity_type?: string
+  risk_level?: string
+  description?: string
+  properties?: Record<string, unknown>
+}
+
+export interface GroupUpdateRequest {
+  name?: string
+  risk_level?: string
+  description?: string
+  properties?: Record<string, unknown>
+}
+
+export interface GroupDetailResponse {
+  address: string
+  name: string | null
+  entity_type: string | null
+  risk_level: RiskLevel
+  description: string | null
+  member_count: number
+  members: EntityResponse[]
+  properties: Record<string, unknown>
+}
+
+export interface GroupListResponse {
+  groups: GroupDetailResponse[]
+  total: number
+}
+
 // Graph statistics (for ETL testing)
 export interface GraphStatsResponse {
   node_count: number

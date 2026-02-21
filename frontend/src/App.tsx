@@ -5,12 +5,12 @@
 import { useState } from "react";
 import { SearchBar } from "./components/SearchBar";
 import { Toaster } from "./components/Toaster";
-import { GraphExplorerPage, DashboardPage, ETLPage } from "./pages";
+import { GraphExplorerPage, DashboardPage, ETLPage, GroupsPage } from "./pages";
 import { ToastContext } from "./context/ToastContext";
 import { useToast } from "./hooks/useToast";
 import "./index.css";
 
-type Page = "explorer" | "etl" | "dashboard";
+type Page = "explorer" | "etl" | "dashboard" | "groups";
 
 // ── Nav tab icons ─────────────────────────────────────────────────────────────
 
@@ -38,6 +38,17 @@ function DashboardIcon() {
             <rect x="14" y="3" width="7" height="7" />
             <rect x="14" y="14" width="7" height="7" />
             <rect x="3" y="14" width="7" height="7" />
+        </svg>
+    );
+}
+
+function GroupsIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="7" width="20" height="14" rx="2" />
+            <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+            <line x1="12" y1="12" x2="12" y2="16" />
+            <line x1="10" y1="14" x2="14" y2="14" />
         </svg>
     );
 }
@@ -72,6 +83,7 @@ function App() {
 
     const tabs: { id: Page; label: string; icon: React.ReactNode }[] = [
         { id: "explorer", label: "Explorer", icon: <ExplorerIcon /> },
+        { id: "groups", label: "Groups", icon: <GroupsIcon /> },
         { id: "etl", label: "ETL", icon: <EtlIcon /> },
         { id: "dashboard", label: "Dashboard", icon: <DashboardIcon /> },
     ];
@@ -120,6 +132,14 @@ function App() {
                 {/* ── Pages ── */}
                 {page === "explorer" && (
                     <GraphExplorerPage initialAddress={searchTrigger} onAddressLoad={() => setSearchTrigger(null)} />
+                )}
+                {page === "groups" && (
+                    <GroupsPage
+                        onNavigateToExplorer={(addr) => {
+                            setPage("explorer");
+                            setSearchTrigger(addr);
+                        }}
+                    />
                 )}
                 {page === "etl" && <ETLPage />}
                 {page === "dashboard" && <DashboardPage />}

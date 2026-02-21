@@ -6,7 +6,11 @@ import type {
   EntityResponse,
   EdgeResponse,
   EdgeUpsertRequest,
+  GroupCreateRequest,
+  GroupDetailResponse,
+  GroupListResponse,
   GroupMemberResponse,
+  GroupUpdateRequest,
   NeighborsResponse,
   NodeUpsertRequest,
   PathResponse,
@@ -214,6 +218,42 @@ export async function addGroupMember(
 
 export async function removeGroupMember(address: string, childAddress: string): Promise<void> {
   const url = `${API_BASE}/entities/${address}/members/${childAddress}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}))
+    throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status)
+  }
+}
+
+// Group endpoints
+
+export async function fetchGroups(): Promise<GroupListResponse> {
+  return request<GroupListResponse>('/groups')
+}
+
+export async function fetchGroup(address: string): Promise<GroupDetailResponse> {
+  return request<GroupDetailResponse>(`/groups/${address}`)
+}
+
+export async function createGroup(body: GroupCreateRequest): Promise<GroupDetailResponse> {
+  return request<GroupDetailResponse>('/groups', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function updateGroup(address: string, body: GroupUpdateRequest): Promise<GroupDetailResponse> {
+  return request<GroupDetailResponse>(`/groups/${address}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteGroup(address: string): Promise<void> {
+  const url = `${API_BASE}/groups/${address}`
   const response = await fetch(url, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },

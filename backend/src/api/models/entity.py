@@ -53,6 +53,46 @@ class EntityResponse(BaseModel):
     member_count: int = Field(0, description="Number of contract members in this group")
 
 
+class GroupCreateRequest(BaseModel):
+    """Request model for creating a new group entity."""
+
+    address: str = Field(..., description="0x-prefixed Ethereum address, 42 chars")
+    name: str = Field(..., description="Human-readable group name")
+    entity_type: "EntityType" = Field(EntityType.CONTRACT, description="Entity type")
+    risk_level: "RiskLevel" = Field(RiskLevel.UNKNOWN, description="Risk level")
+    description: str | None = Field(None, description="Optional group description")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+
+
+class GroupUpdateRequest(BaseModel):
+    """Request model for updating a group entity."""
+
+    name: str | None = Field(None, description="New group name")
+    risk_level: "RiskLevel | None" = Field(None, description="New risk level")
+    description: str | None = Field(None, description="New description")
+    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+
+
+class GroupDetailResponse(BaseModel):
+    """Response model for a group entity with its members."""
+
+    address: str
+    name: str | None
+    entity_type: "EntityType | None"
+    risk_level: "RiskLevel"
+    description: str | None
+    member_count: int
+    members: list["EntityResponse"]
+    properties: dict[str, Any]
+
+
+class GroupListResponse(BaseModel):
+    """Response model for listing all group entities."""
+
+    groups: list[GroupDetailResponse]
+    total: int
+
+
 class GroupMemberRequest(BaseModel):
     """Request model for adding a contract member to a group entity."""
 
