@@ -13,9 +13,15 @@ export function Nav() {
     const navigate = useNavigate();
 
     return (
-        <nav className="nav">
-            <NavLink className="nav-logo" to="/" end>
-                <span className="nav-logo-icon"><LogoIcon /></span>
+        <nav className="flex items-center justify-between px-6 h-14 bg-[rgba(249,250,251,0.92)] border-b border-gray-200 backdrop-blur-md sticky top-0 z-50">
+            <NavLink
+                className="flex items-center gap-2.5 font-bold text-base text-gray-900 no-underline tracking-tight"
+                to="/"
+                end
+            >
+                <span className="w-7 h-7 bg-gray-900 rounded-[4px] flex items-center justify-center">
+                    <LogoIcon />
+                </span>
                 Chain Analysis
             </NavLink>
 
@@ -33,21 +39,26 @@ export function Nav() {
                 <Route path="*" element={null} />
             </Routes>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div className="nav-tabs">
+            <div className="flex items-center gap-3">
+                <div className="flex items-center gap-0.5">
                     {NAV_TABS.map((tab) => (
                         <NavLink
                             key={tab.to}
                             to={tab.to}
-                            className={({ isActive }) => `nav-tab${isActive ? " active" : ""}`}
+                            className={({ isActive }) =>
+                                `flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[0.8rem] font-medium transition-all whitespace-nowrap no-underline ` +
+                                (isActive
+                                    ? "text-gray-900 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.05)] border border-gray-200"
+                                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-100/80")
+                            }
                         >
                             {tab.icon}
                             {tab.label}
                         </NavLink>
                     ))}
                 </div>
-                <div className="nav-badge">
-                    <span className="nav-badge-dot" />
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-200 bg-white text-[0.7rem] font-medium text-gray-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     Live Network
                 </div>
             </div>
