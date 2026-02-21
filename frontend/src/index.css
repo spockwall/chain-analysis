@@ -1637,3 +1637,378 @@ body {
     color: var(--risk-critical);
     background: rgba(239, 68, 68, 0.08);
 }
+
+/* ============================================================
+   Landing / Home Page  (.lp-*)
+   ============================================================ */
+
+.lp-page {
+    min-height: 100vh;
+    background-color: #f5f5f5;
+    background-image:
+        linear-gradient(#e2e2e2 1px, transparent 1px),
+        linear-gradient(90deg, #e2e2e2 1px, transparent 1px);
+    background-size: 48px 48px;
+    display: flex;
+    flex-direction: column;
+    font-family: "Outfit", "Inter", sans-serif;
+    color: #111827;
+    overflow-x: hidden;
+}
+
+/* ── Nav ── */
+
+.lp-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 40px;
+    height: 60px;
+    background: rgba(245, 245, 245, 0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}
+
+.lp-nav-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: #111827;
+}
+
+.lp-nav-links {
+    display: flex;
+    gap: 32px;
+}
+
+.lp-nav-links a {
+    font-size: 0.85rem;
+    color: #374151;
+    text-decoration: none;
+    transition: color 150ms;
+}
+
+.lp-nav-links a:hover {
+    color: #111827;
+}
+
+.lp-nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* ── Buttons ── */
+
+.lp-btn-ghost {
+    background: transparent;
+    border: none;
+    font-size: 0.85rem;
+    color: #374151;
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: background 150ms;
+    font-family: inherit;
+}
+
+.lp-btn-ghost:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.lp-btn-dark {
+    background: #111827;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 150ms, transform 100ms;
+}
+
+.lp-btn-dark:hover {
+    background: #1f2937;
+    transform: translateY(-1px);
+}
+
+.lp-btn-outline {
+    background: transparent;
+    color: #111827;
+    border: 1.5px solid #d1d5db;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 150ms, background 150ms;
+}
+
+.lp-btn-outline:hover {
+    border-color: #9ca3af;
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.lp-btn-lg {
+    padding: 13px 28px;
+    font-size: 0.95rem;
+    border-radius: 8px;
+}
+
+/* ── Hero ── */
+
+.lp-hero {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    padding: 80px 40px 60px;
+    gap: 0;
+    max-width: 1280px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.lp-hero-left {
+    flex: 0 0 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    z-index: 1;
+}
+
+.lp-hero-right {
+    flex: 1;
+    position: relative;
+    height: 520px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+/* ── Badge ── */
+
+.lp-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 99px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #374151;
+    width: fit-content;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.lp-badge-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    flex-shrink: 0;
+}
+
+/* ── Heading ── */
+
+.lp-heading {
+    font-size: clamp(3rem, 5vw, 4.5rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    margin: 0;
+    color: #111827;
+}
+
+.lp-heading-muted {
+    color: #9ca3af;
+}
+
+/* ── Subtext ── */
+
+.lp-subtext {
+    font-size: 0.95rem;
+    line-height: 1.65;
+    color: #6b7280;
+    margin: 0;
+    max-width: 360px;
+}
+
+/* ── CTA row ── */
+
+.lp-cta-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+/* ── Dot cube ── */
+
+.lp-dot-cube {
+    position: absolute;
+    top: -40px;
+    left: -80px;
+    width: 560px;
+    height: 460px;
+    opacity: 0.9;
+    pointer-events: none;
+}
+
+/* ── Mock graph card ── */
+
+.lp-graph-card {
+    position: relative;
+    z-index: 2;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+    width: 600px;
+    overflow: hidden;
+}
+
+.lp-graph-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.lp-graph-header-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #d1d5db;
+}
+
+.lp-graph-header-title {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: #9ca3af;
+}
+
+.lp-graph-body {
+    position: relative;
+    height: 240px;
+    padding: 16px;
+}
+
+.lp-graph-svg {
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Node labels/pills overlaid on svg ── */
+
+.lp-node-label {
+    position: absolute;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: #374151;
+    transform: translateY(-50%);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.lp-node-pill {
+    position: absolute;
+    background: white;
+    border: 1.5px solid #d1d5db;
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: #374151;
+    transform: translateY(-50%);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.lp-node-pill--dim {
+    opacity: 0.45;
+}
+
+.lp-node-badge {
+    position: absolute;
+    background: #111827;
+    color: white;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    transform: translateY(-50%);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+/* ── Footer bar ── */
+
+.lp-footer {
+    border-top: 1px solid #e5e7eb;
+    padding: 18px 40px;
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    background: rgba(245, 245, 245, 0.7);
+}
+
+.lp-footer-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: #9ca3af;
+    white-space: nowrap;
+}
+
+.lp-footer-logos {
+    display: flex;
+    gap: 32px;
+    flex: 1;
+}
+
+.lp-footer-logos span {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #9ca3af;
+    transition: color 150ms;
+    cursor: default;
+}
+
+.lp-footer-logos span:hover {
+    color: #6b7280;
+}
+
+.lp-made-in {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.75rem;
+    color: #9ca3af;
+    white-space: nowrap;
+}
+
+.lp-made-in-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: #111827;
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 700;
+    border-radius: 4px;
+}
