@@ -25,7 +25,7 @@ export const GRAPH_STYLESHEET: any[] = [
             "font-family": "SF Mono, Fira Code, Cascadia Code, monospace",
             "font-weight": 400,
             "text-background-color": "#ffffff",
-            "text-background-opacity": 0.8,
+            "text-background-opacity": 0,
             "text-background-padding": "2px",
             "text-background-shape": "roundrectangle",
             width: NODE_SIZE,
@@ -54,11 +54,10 @@ export const GRAPH_STYLESHEET: any[] = [
         style: {
             "font-weight": 400,
             "font-size": 11,
-            color: "#0f172a",
+            color: "#333a4dff",
         },
     },
     {
-        // Base edge fallback
         selector: "edge",
         style: {
             width: 1,
@@ -139,6 +138,26 @@ export const GRAPH_STYLESHEET: any[] = [
             "curve-style": "loop",
             "loop-direction": "-45deg",
             "loop-sweep": "45deg",
+        } as any,
+    },
+    {
+        // Selected edge highlight
+        selector: "edge.edge-selected",
+        style: {
+            "line-color": "#7e80d5ff",
+            "target-arrow-color": "#7e80d5ff",
+            opacity: 1,
+            "z-index": 20,
+        } as any,
+    },
+    {
+        // Group node — entity that has contract members
+        selector: 'node[nodeKind="group"]',
+        style: {
+            "border-width": 2,
+            "border-color": "#8c8edfff",
+            "border-style": "dashed",
+            "background-opacity": 0.85,
         } as any,
     },
 ];

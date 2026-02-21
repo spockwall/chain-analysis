@@ -24,7 +24,14 @@ export interface EntityResponse {
   first_seen_block?: number | null
   last_seen_block?: number | null
   transaction_count?: number | null
+  member_count?: number
   properties: Record<string, unknown>
+}
+
+export interface GroupMemberResponse {
+  parent_address: string
+  members: EntityResponse[]
+  total: number
 }
 
 export interface EdgeResponse {

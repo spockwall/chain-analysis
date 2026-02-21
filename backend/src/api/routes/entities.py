@@ -10,6 +10,8 @@ from api.models.entity import (
     EdgeUpsertRequest,
     EntityResponse,
     EntityType,
+    GroupMemberRequest,
+    GroupMemberResponse,
     NeighborsResponse,
     NodeUpsertRequest,
     PathResponse,
@@ -34,9 +36,10 @@ def _node_to_response(node: dict) -> EntityResponse:
         first_seen_block=props.get("first_seen_block"),
         last_seen_block=props.get("last_seen_block"),
         transaction_count=props.get("tx_count"),
+        member_count=props.get("member_count", 0),
         properties={k: v for k, v in props.items() if k not in {
             "entity_type", "risk_level", "name", "first_seen_block",
-            "last_seen_block", "tx_count"
+            "last_seen_block", "tx_count", "member_count"
         }},
     )
 
@@ -92,9 +95,10 @@ async def get_entity(
         first_seen_block=node.properties.get("first_seen_block"),
         last_seen_block=node.properties.get("last_seen_block"),
         transaction_count=node.properties.get("tx_count"),
+        member_count=node.properties.get("member_count", 0),
         properties={k: v for k, v in node.properties.items() if k not in {
             "entity_type", "risk_level", "name", "first_seen_block",
-            "last_seen_block", "tx_count"
+            "last_seen_block", "tx_count", "member_count"
         }},
     )
 
@@ -427,6 +431,92 @@ async def delete_edge(
         """,
         {"source": source, "target": target, "edge_type": edge_type},
     )
+
+
+# ── Group member endpoints ─────────────────────────────────────────────────────
+
+def _node_obj_to_response(node) -> EntityResponse:
+    """Convert a core Node dataclass to EntityResponse."""
+    return EntityResponse(
+        address=node.address,
+        entity_type=node.properties.get("entity_type"),
+        risk_level=RiskLevel(node.properties.get("risk_level", "unknown")),
+        name=node.properties.get("name"),
+        labels=node.labels,
+        first_seen_block=node.properties.get("first_seen_block"),
+        last_seen_block=node.properties.get("last_seen_block"),
+        transaction_count=node.properties.get("tx_count"),
+        member_count=node.properties.get("member_count", 0),
+        properties={k: v for k, v in node.properties.items() if k not in {
+            "entity_type", "risk_level", "name", "first_seen_block",
+            "last_seen_block", "tx_count", "member_count"
+        }},
+    )
+
+
+@write_router.get("/{address}/members", response_model=GroupMemberResponse)
+async def get_group_members(
+    address: str,
+    graph_db: GraphDBDep,
+) -> GroupMemberResponse:
+    """Get all contract members of a group entity."""
+    address = _validate_address(address)
+    members = await graph_db.get_group_members(address)
+    member_responses = [_node_obj_to_response(m) for m in members]
+    return GroupMemberResponse(
+        parent_address=address,
+        members=member_responses,
+        total=len(member_responses),
+    )
+
+
+@write_router.post("/{address}/members", status_code=201, response_model=GroupMemberResponse)
+async def add_group_member(
+    address: str,
+    body: GroupMemberRequest,
+    graph_db: GraphDBDep,
+) -> GroupMemberResponse:
+    """Add a contract address as a member of a group entity."""
+    address = _validate_address(address)
+    child_address = _validate_address(body.child_address, "child_address")
+
+    if address == child_address:
+        raise HTTPException(status_code=400, detail="Parent and child addresses must differ")
+
+    parent_node = await graph_db.get_node(address)
+    if parent_node is None:
+        raise HTTPException(status_code=404, detail="Parent entity not found")
+
+    # Check if the child already belongs to a different group
+    existing_parent = await graph_db.get_group_parent(child_address)
+    if existing_parent and existing_parent.address != address:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Address {child_address} is already a member of group {existing_parent.address} "
+                   f"({existing_parent.properties.get('name', existing_parent.address)})",
+        )
+
+    await graph_db.add_group_member(address, child_address)
+
+    members = await graph_db.get_group_members(address)
+    member_responses = [_node_obj_to_response(m) for m in members]
+    return GroupMemberResponse(
+        parent_address=address,
+        members=member_responses,
+        total=len(member_responses),
+    )
+
+
+@write_router.delete("/{address}/members/{child_address}", status_code=204)
+async def remove_group_member(
+    address: str,
+    child_address: str,
+    graph_db: GraphDBDep,
+) -> None:
+    """Remove a contract member from a group entity."""
+    address = _validate_address(address)
+    child_address = _validate_address(child_address, "child_address")
+    await graph_db.remove_group_member(address, child_address)
 
 
 # ── Transaction endpoints ──────────────────────────────────────────────────────

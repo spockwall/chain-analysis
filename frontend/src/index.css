@@ -1190,3 +1190,168 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: #cbd5e1;
 }
+
+/* ============================================================
+   Edge (Transaction) Panel
+   ============================================================ */
+.edge-panel-flow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.edge-panel-addr {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 6px 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s;
+}
+
+.edge-panel-addr:hover {
+    border-color: var(--accent-primary);
+}
+
+.edge-panel-addr__dir {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.edge-panel-addr--from .edge-panel-addr__dir { color: #64748b; }
+.edge-panel-addr--to   .edge-panel-addr__dir { color: #6366f1; }
+
+.edge-panel-addr__val {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.7rem;
+    color: var(--text-primary);
+}
+
+.edge-panel-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.edge-panel-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 0.72rem;
+}
+
+.edge-panel-row__label {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.edge-panel-row__value {
+    color: var(--text-primary);
+    font-family: "SF Mono", "Fira Code", monospace;
+    text-align: right;
+    word-break: break-all;
+}
+
+/* ============================================================
+   Group Member List (NodePanel Contracts section)
+   ============================================================ */
+.member-count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #6366f1;
+    color: #fff;
+    border-radius: 9999px;
+    font-size: 0.6rem;
+    font-weight: 600;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+    line-height: 1;
+}
+
+.member-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 160px;
+    overflow-y: auto;
+    margin-bottom: 6px;
+}
+
+.member-list-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 4px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+}
+
+.member-addr-btn {
+    flex: 1;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.68rem;
+    color: var(--text-primary);
+    padding: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.member-addr-btn:hover {
+    color: var(--accent-primary);
+    text-decoration: underline;
+}
+
+.member-remove-btn {
+    flex-shrink: 0;
+    font-size: 0.9rem;
+    line-height: 1;
+    color: var(--text-muted);
+}
+
+.member-remove-btn:hover {
+    color: #ef4444;
+}
+
+.member-add-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.member-add-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.68rem;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.member-add-input:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}

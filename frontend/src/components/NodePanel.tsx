@@ -1,8 +1,10 @@
 /**
  * Node details panel — Oravia style
  */
+import { useState, useEffect } from "react";
 import type { EntityResponse, RiskLevel, EntityType, TransactionResponse } from "../types";
-import { formatAddress, formatWei } from "../api/client";
+import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember } from "../api/client";
+import { useToastContext } from "../context/ToastContext";
 
 interface NodePanelProps {
     node: EntityResponse;
@@ -42,6 +44,48 @@ const RISK_DOT: Record<RiskLevel, string> = {
 
 export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress }: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
+    const toast = useToastContext();
+
+    const [members, setMembers] = useState<EntityResponse[]>([]);
+    const [memberInput, setMemberInput] = useState("");
+    const [membersLoading, setMembersLoading] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        setMembers([]);
+        setMemberInput("");
+        setMembersLoading(true);
+        fetchGroupMembers(node.address)
+            .then((res) => { if (!cancelled) setMembers(res.members); })
+            .catch(() => { /* silently ignore — not all nodes will have members */ })
+            .finally(() => { if (!cancelled) setMembersLoading(false); });
+        return () => { cancelled = true; };
+    }, [node.address]);
+
+    const handleAddMember = async () => {
+        const addr = memberInput.trim();
+        if (!addr) return;
+        try {
+            const res = await addGroupMember(node.address, addr);
+            setMembers(res.members);
+            setMemberInput("");
+            toast.success(`Added ${formatAddress(addr, 4)} as member`);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : "Failed to add member";
+            toast.error(msg);
+        }
+    };
+
+    const handleRemoveMember = async (childAddress: string) => {
+        try {
+            await removeGroupMember(node.address, childAddress);
+            setMembers((prev) => prev.filter((m) => m.address !== childAddress));
+            toast.success(`Removed ${formatAddress(childAddress, 4)}`);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : "Failed to remove member";
+            toast.error(msg);
+        }
+    };
 
     const txForNode = (transactions ?? []).filter(
         (tx) => tx.from_address === node.address || tx.to_address === node.address,
@@ -212,6 +256,67 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             </svg>
                         </a>
                     </div>
+                </div>
+
+                {/* Contracts (group members) */}
+                <hr className="divider" />
+                <div>
+                    <p className="panel-section-label">
+                        Contracts
+                        {members.length > 0 && (
+                            <span className="member-count-badge">{members.length}</span>
+                        )}
+                    </p>
+                    {membersLoading ? (
+                        <p style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>Loading…</p>
+                    ) : (
+                        <>
+                            {members.length > 0 && (
+                                <div className="member-list">
+                                    {members.map((m) => (
+                                        <div key={m.address} className="member-list-item">
+                                            <button
+                                                className="member-addr-btn"
+                                                title={m.address}
+                                                onClick={() => onNavigateToAddress?.(m.address)}
+                                            >
+                                                {formatAddress(m.address, 5)}
+                                            </button>
+                                            {m.entity_type && (
+                                                <span className="badge badge-entity" style={{ fontSize: "0.6rem", padding: "1px 5px" }}>
+                                                    {m.entity_type}
+                                                </span>
+                                            )}
+                                            <button
+                                                className="btn-icon member-remove-btn"
+                                                title="Remove member"
+                                                onClick={() => handleRemoveMember(m.address)}
+                                            >
+                                                ×
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="member-add-row">
+                                <input
+                                    className="member-add-input"
+                                    type="text"
+                                    placeholder="0x… contract address"
+                                    value={memberInput}
+                                    onChange={(e) => setMemberInput(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === "Enter") handleAddMember(); }}
+                                />
+                                <button
+                                    className="action-btn action-btn-primary"
+                                    style={{ flexShrink: 0, padding: "4px 10px", fontSize: "0.7rem" }}
+                                    onClick={handleAddMember}
+                                >
+                                    Add
+                                </button>
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Transaction list */}

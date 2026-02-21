@@ -205,6 +205,46 @@ class GraphDatabase(Protocol):
         """
         ...
 
+    async def add_group_member(self, parent_address: str, child_address: str) -> None:
+        """
+        Add a child entity as a member of a parent group entity.
+
+        Creates a (child:Entity)-[:MEMBER_OF]->(parent:Entity) relationship.
+        """
+        ...
+
+    async def remove_group_member(self, parent_address: str, child_address: str) -> None:
+        """
+        Remove a child entity from a parent group entity.
+
+        Deletes the (child:Entity)-[:MEMBER_OF]->(parent:Entity) relationship.
+        """
+        ...
+
+    async def get_group_members(self, parent_address: str) -> list[Node]:
+        """
+        Get all member entities of a group entity.
+
+        Args:
+            parent_address: Address of the parent group entity
+
+        Returns:
+            List of Node objects for each member entity
+        """
+        ...
+
+    async def get_group_parent(self, child_address: str) -> Node | None:
+        """
+        Return the parent group node that this address belongs to, or None.
+
+        Args:
+            child_address: Entity address to check membership for
+
+        Returns:
+            Parent Node if the address is a member of a group, None otherwise
+        """
+        ...
+
     # GDS-specific operations (optional capability)
     def supports_gds(self) -> bool:
         """Check if this database supports Graph Data Science algorithms."""

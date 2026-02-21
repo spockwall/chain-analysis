@@ -187,10 +187,11 @@ class Neo4jAdapter:
         )
 
     async def get_node(self, address: str) -> Node | None:
-        """Get a single node by address."""
+        """Get a single node by address, including member_count for group entities."""
         query = """
         MATCH (e:Entity {address: $address})
-        RETURN e, labels(e) AS labels
+        OPTIONAL MATCH (child:Entity)-[:MEMBER_OF]->(e)
+        RETURN e, labels(e) AS labels, count(child) AS member_count
         """
         result = await self.execute_query(query, {"address": address})
         if not result:
@@ -198,6 +199,62 @@ class Neo4jAdapter:
 
         record = result[0]
         node_data = dict(record["e"])
+        node_address = node_data.pop("address")
+        node_data["member_count"] = record.get("member_count", 0)
+        return Node(
+            address=node_address,
+            labels=[l for l in record["labels"] if l != "Entity"],
+            properties=node_data,
+        )
+
+    async def add_group_member(self, parent_address: str, child_address: str) -> None:
+        """Add a child entity as a member of a parent group via MEMBER_OF relationship."""
+        from datetime import datetime, timezone
+        query = """
+        MATCH (parent:Entity {address: $parent})
+        MERGE (child:Entity {address: $child})
+        MERGE (child)-[:MEMBER_OF {added_at: $now}]->(parent)
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        await self.execute_query(query, {"parent": parent_address, "child": child_address, "now": now})
+
+    async def remove_group_member(self, parent_address: str, child_address: str) -> None:
+        """Remove the MEMBER_OF relationship between child and parent."""
+        query = """
+        MATCH (child:Entity {address: $child})-[r:MEMBER_OF]->(parent:Entity {address: $parent})
+        DELETE r
+        """
+        await self.execute_query(query, {"parent": parent_address, "child": child_address})
+
+    async def get_group_members(self, parent_address: str) -> list[Node]:
+        """Return all entities that are members of the given parent group."""
+        query = """
+        MATCH (child:Entity)-[:MEMBER_OF]->(parent:Entity {address: $parent})
+        RETURN child, labels(child) AS labels
+        """
+        result = await self.execute_query(query, {"parent": parent_address})
+        nodes: list[Node] = []
+        for record in result:
+            node_data = dict(record["child"])
+            node_address = node_data.pop("address")
+            nodes.append(Node(
+                address=node_address,
+                labels=[l for l in record["labels"] if l != "Entity"],
+                properties=node_data,
+            ))
+        return nodes
+
+    async def get_group_parent(self, child_address: str) -> "Node | None":
+        """Return the parent group node this address belongs to, or None."""
+        query = """
+        MATCH (child:Entity {address: $child})-[:MEMBER_OF]->(parent:Entity)
+        RETURN parent, labels(parent) AS labels
+        """
+        result = await self.execute_query(query, {"child": child_address})
+        if not result:
+            return None
+        record = result[0]
+        node_data = dict(record["parent"])
         node_address = node_data.pop("address")
         return Node(
             address=node_address,

@@ -109,6 +109,17 @@ async def init_neo4j(
         print("  ✓ tx_value index")
 
         # =================================================================
+        # MEMBER_OF Relationship Index
+        # =================================================================
+
+        # Index on MEMBER_OF added_at for temporal queries
+        await session.run("""
+            CREATE INDEX member_of_added_at IF NOT EXISTS
+            FOR ()-[r:MEMBER_OF]-() ON (r.added_at)
+        """)
+        print("  ✓ member_of_added_at index")
+
+        # =================================================================
         # Full-text Search Index (optional, for entity name search)
         # =================================================================
         try:

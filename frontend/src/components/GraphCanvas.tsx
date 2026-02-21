@@ -27,7 +27,9 @@ interface GraphCanvasProps {
     data: NeighborsResponse;
     onNodeSelect: (address: string) => void;
     onNodeExpand: (address: string) => void;
+    onEdgeSelect?: (txHash: string) => void;
     selectedAddress?: string;
+    selectedEdgeTxHash?: string | null;
     activeLayout: import("./graph/layouts").LayoutName;
     onLayoutChange: (layout: import("./graph/layouts").LayoutName) => void;
     filters: GraphFilters;
@@ -39,7 +41,9 @@ export function GraphCanvas({
     data,
     onNodeSelect,
     onNodeExpand,
+    onEdgeSelect,
     selectedAddress,
+    selectedEdgeTxHash,
     activeLayout,
     onLayoutChange,
     filters,
@@ -59,6 +63,7 @@ export function GraphCanvas({
             const entityType = node.entity_type || "Unknown";
             const label = node.name ? node.name : `${node.address.slice(0, 6)}…${node.address.slice(-4)}`;
             const colors = ENTITY_COLORS[entityType];
+            const memberCount = node.member_count ?? 0;
             els.push({
                 data: {
                     id: node.address,
@@ -67,7 +72,8 @@ export function GraphCanvas({
                     riskLevel: node.risk_level,
                     bgColor: colors.bg,
                     borderColor: RISK_RING[node.risk_level],
-                    nodeKind: "entity",
+                    nodeKind: memberCount > 0 ? "group" : "entity",
+                    memberCount,
                 },
             });
         }
@@ -122,6 +128,10 @@ export function GraphCanvas({
 
         cy.on("tap", "node", (evt) => onNodeSelect(evt.target.id()));
         cy.on("dbltap", "node", (evt) => onNodeExpand(evt.target.id()));
+        cy.on("tap", "edge", (evt) => {
+            const txHash = evt.target.data("txHash") as string | undefined;
+            if (txHash) onEdgeSelect?.(txHash);
+        });
 
         if (data.center_address) {
             cy.getElementById(data.center_address).addClass("center");
@@ -206,6 +216,16 @@ export function GraphCanvas({
         highlightedNodeIds?.forEach((id) => cy.getElementById(id).addClass("on-path"));
         highlightedEdgeIds?.forEach((id) => cy.getElementById(id).addClass("on-path"));
     }, [highlightedNodeIds, highlightedEdgeIds]);
+
+    // Effect 7 — selected edge highlight
+    useEffect(() => {
+        const cy = cyRef.current;
+        if (!cy) return;
+        cy.edges().removeClass("edge-selected");
+        if (selectedEdgeTxHash) {
+            cy.getElementById(`tx-${selectedEdgeTxHash}`).addClass("edge-selected");
+        }
+    }, [selectedEdgeTxHash]);
 
     return (
         <div style={{ position: "relative", width: "100%", height: "100%" }}>

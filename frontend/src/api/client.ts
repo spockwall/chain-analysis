@@ -6,6 +6,7 @@ import type {
   EntityResponse,
   EdgeResponse,
   EdgeUpsertRequest,
+  GroupMemberResponse,
   NeighborsResponse,
   NodeUpsertRequest,
   PathResponse,
@@ -185,6 +186,34 @@ export async function deleteEdge(
   edgeType = 'TRANSFER'
 ): Promise<void> {
   const url = `${API_BASE}/entities/${source}/edges/${target}?edge_type=${encodeURIComponent(edgeType)}`
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}))
+    throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status)
+  }
+}
+
+// Group member endpoints
+
+export async function fetchGroupMembers(address: string): Promise<GroupMemberResponse> {
+  return request<GroupMemberResponse>(`/entities/${address}/members`)
+}
+
+export async function addGroupMember(
+  address: string,
+  childAddress: string
+): Promise<GroupMemberResponse> {
+  return request<GroupMemberResponse>(`/entities/${address}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ child_address: childAddress }),
+  })
+}
+
+export async function removeGroupMember(address: string, childAddress: string): Promise<void> {
+  const url = `${API_BASE}/entities/${address}/members/${childAddress}`
   const response = await fetch(url, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },

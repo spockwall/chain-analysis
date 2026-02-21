@@ -4,9 +4,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { GraphCanvas, type LayoutName, type GraphFilters } from "../components/GraphCanvas";
 import { NodePanel } from "../components/NodePanel";
+import { EdgePanel } from "../components/EdgePanel";
 import { useToastContext } from "../context/ToastContext";
-import type { EntityResponse, NeighborsResponse, PathResponse } from "../types";
-import { fetchEntity, fetchNeighbors, fetchPaths } from "../api/client";
+import type { EntityResponse, NeighborsResponse, PathResponse, TransactionResponse } from "../types";
+import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction } from "../api/client";
 
 interface GraphExplorerPageProps {
     initialAddress?: string | null;
@@ -36,6 +37,7 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
     const toast = useToastContext();
     const [graphData, setGraphData] = useState<NeighborsResponse | null>(null);
     const [selectedNode, setSelectedNode] = useState<EntityResponse | null>(null);
+    const [selectedEdge, setSelectedEdge] = useState<TransactionResponse | null>(null);
     const [loading, setLoading] = useState(false);
 
     // Layout & filter state
@@ -67,7 +69,19 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                 fetchNeighbors(address, { depth: 1, limit: 50 }),
             ]);
             setSelectedNode(entity);
-            setGraphData(neighbors);
+
+            // Ensure the center node is always in the graph even if it has no
+            // SENT/RECEIVED transactions (e.g. a group node with only MEMBER_OF edges).
+            const centerInNodes = neighbors.nodes.some((n) => n.address === entity.address);
+            const nodes = centerInNodes
+                ? neighbors.nodes
+                : [entity, ...neighbors.nodes];
+            setGraphData({
+                ...neighbors,
+                nodes,
+                total_nodes: nodes.length,
+            });
+
             setPathResult(null);
             toast.dismiss(loadId);
         } catch (err) {
@@ -79,11 +93,29 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
     };
 
     const handleNodeSelect = async (address: string) => {
+        setSelectedEdge(null);
         try {
             const entity = await fetchEntity(address);
             setSelectedNode(entity);
         } catch {
             setSelectedNode({ address, risk_level: "unknown", labels: [], properties: {} });
+        }
+    };
+
+    const handleEdgeSelect = async (txHash: string) => {
+        setSelectedNode(null);
+        // Try finding the tx in already-loaded graph data first
+        const cached = graphData?.transactions.find((t) => t.hash === txHash) ?? null;
+        if (cached) {
+            setSelectedEdge(cached);
+            return;
+        }
+        try {
+            const tx = await fetchTransaction(txHash);
+            setSelectedEdge(tx);
+        } catch {
+            // Minimal fallback so the panel still opens
+            setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
         }
     };
 
@@ -316,7 +348,9 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                                 data={graphData}
                                 onNodeSelect={handleNodeSelect}
                                 onNodeExpand={handleExpandNode}
+                                onEdgeSelect={handleEdgeSelect}
                                 selectedAddress={selectedNode?.address}
+                                selectedEdgeTxHash={selectedEdge?.hash}
                                 activeLayout={activeLayout}
                                 onLayoutChange={setActiveLayout}
                                 filters={filters}
@@ -472,15 +506,24 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                     )}
                 </main>
 
-                {selectedNode && (
+                {(selectedNode || selectedEdge) && (
                     <aside className="side-panel">
-                        <NodePanel
-                            node={selectedNode}
-                            onExpand={() => handleExpandNode(selectedNode.address)}
-                            onClose={() => setSelectedNode(null)}
-                            transactions={graphData?.transactions}
-                            onNavigateToAddress={handleNodeSelect}
-                        />
+                        {selectedNode && (
+                            <NodePanel
+                                node={selectedNode}
+                                onExpand={() => handleExpandNode(selectedNode.address)}
+                                onClose={() => setSelectedNode(null)}
+                                transactions={graphData?.transactions}
+                                onNavigateToAddress={handleNodeSelect}
+                            />
+                        )}
+                        {selectedEdge && (
+                            <EdgePanel
+                                tx={selectedEdge}
+                                onClose={() => setSelectedEdge(null)}
+                                onNavigateToAddress={handleNodeSelect}
+                            />
+                        )}
                     </aside>
                 )}
             </div>
