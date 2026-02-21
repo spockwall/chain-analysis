@@ -245,18 +245,20 @@ class Neo4jAdapter:
                 center
             """
         else:
-            # both directions
+            # both directions — use OPTIONAL MATCH so a node with only in or
+            # only out transactions still returns results
             query = """
             MATCH (center:Entity {address: $address})
-            MATCH (neighbor:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(center)
-            WITH center, collect(DISTINCT neighbor) AS in_neighbors, collect(DISTINCT tx) AS in_txs
-            MATCH (center)-[:SENT]->(tx2:Transaction)-[:RECEIVED]->(out_neighbor:Entity)
-            WITH center, in_neighbors, in_txs,
+            OPTIONAL MATCH (in_neighbor:Entity)-[:SENT]->(in_tx:Transaction)-[:RECEIVED]->(center)
+            OPTIONAL MATCH (center)-[:SENT]->(out_tx:Transaction)-[:RECEIVED]->(out_neighbor:Entity)
+            WITH center,
+                 collect(DISTINCT in_neighbor) AS in_neighbors,
+                 collect(DISTINCT in_tx)       AS in_txs,
                  collect(DISTINCT out_neighbor) AS out_neighbors,
-                 collect(DISTINCT tx2) AS out_txs
+                 collect(DISTINCT out_tx)       AS out_txs
             RETURN
-                in_neighbors + out_neighbors AS neighbors,
-                in_txs + out_txs AS txs,
+                [x IN (in_neighbors + out_neighbors) WHERE x IS NOT NULL] AS neighbors,
+                [x IN (in_txs + out_txs) WHERE x IS NOT NULL]             AS txs,
                 center
             LIMIT $limit
             """

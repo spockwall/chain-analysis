@@ -1,13 +1,15 @@
 /**
  * Node details panel — Oravia style
  */
-import type { EntityResponse, RiskLevel, EntityType } from "../types";
-import { formatAddress } from "../api/client";
+import type { EntityResponse, RiskLevel, EntityType, TransactionResponse } from "../types";
+import { formatAddress, formatWei } from "../api/client";
 
 interface NodePanelProps {
     node: EntityResponse;
     onExpand: () => void;
     onClose: () => void;
+    transactions?: TransactionResponse[];
+    onNavigateToAddress?: (address: string) => void;
 }
 
 const RISK_BADGE: Record<RiskLevel, string> = {
@@ -30,7 +32,6 @@ const ENTITY_LABEL: Record<EntityType, string> = {
     Unknown: "Unknown",
 };
 
-// Risk indicator dot colour
 const RISK_DOT: Record<RiskLevel, string> = {
     unknown: "#94a3b8",
     low: "#22c55e",
@@ -39,8 +40,12 @@ const RISK_DOT: Record<RiskLevel, string> = {
     critical: "#ef4444",
 };
 
-export function NodePanel({ node, onExpand, onClose }: NodePanelProps) {
+export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress }: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
+
+    const txForNode = (transactions ?? []).filter(
+        (tx) => tx.from_address === node.address || tx.to_address === node.address,
+    );
 
     return (
         <>
@@ -71,7 +76,6 @@ export function NodePanel({ node, onExpand, onClose }: NodePanelProps) {
                 <div>
                     <p className="panel-section-label">Classification</p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {/* Risk badge */}
                         <span className={RISK_BADGE[node.risk_level]}>
                             <span
                                 style={{
@@ -84,8 +88,6 @@ export function NodePanel({ node, onExpand, onClose }: NodePanelProps) {
                             />
                             {node.risk_level}
                         </span>
-
-                        {/* Entity type badge */}
                         <span className="badge badge-entity">{ENTITY_LABEL[entityType]}</span>
                     </div>
                 </div>
@@ -211,6 +213,51 @@ export function NodePanel({ node, onExpand, onClose }: NodePanelProps) {
                         </a>
                     </div>
                 </div>
+
+                {/* Transaction list */}
+                {txForNode.length > 0 && (
+                    <>
+                        <hr className="divider" />
+                        <div>
+                            <p className="panel-section-label">Recent Transactions</p>
+                            <div className="tx-list">
+                                {txForNode.slice(0, 10).map((tx) => {
+                                    const isSent = tx.from_address === node.address;
+                                    const counterparty = isSent ? tx.to_address : tx.from_address;
+                                    return (
+                                        <button
+                                            key={tx.hash}
+                                            className="tx-list-item"
+                                            onClick={() => onNavigateToAddress?.(counterparty)}
+                                            title={`${isSent ? "Sent to" : "Received from"} ${counterparty}`}
+                                        >
+                                            <span className={`tx-dir tx-dir--${isSent ? "sent" : "received"}`}>
+                                                {isSent ? "↑" : "↓"}
+                                            </span>
+                                            <span className="tx-counterparty">{formatAddress(counterparty, 4)}</span>
+                                            <span className="tx-value">{formatWei(tx.value)}</span>
+                                            {tx.block_number != null && (
+                                                <span className="tx-block">#{tx.block_number.toLocaleString()}</span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                                {txForNode.length > 10 && (
+                                    <p
+                                        style={{
+                                            fontSize: "0.65rem",
+                                            color: "var(--text-muted)",
+                                            textAlign: "center",
+                                            margin: "4px 0 0",
+                                        }}
+                                    >
+                                        +{txForNode.length - 10} more
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    </>
+                )}
 
                 {/* Properties */}
                 {Object.keys(node.properties).length > 0 && (
