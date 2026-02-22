@@ -210,16 +210,8 @@ export async function addGroupMember(
   })
 }
 
-export async function removeGroupMember(address: string, childAddress: string): Promise<void> {
-  const url = `${API_BASE}/entities/${address}/members/${childAddress}`
-  const response = await fetch(url, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-  })
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}))
-    throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status)
-  }
+export async function removeGroupMember(address: string, memberAddress: string): Promise<void> {
+  return request<void>(`/entities/${address}/members/${memberAddress}`, { method: 'DELETE' }, true)
 }
 
 // Group endpoints

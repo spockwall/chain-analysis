@@ -196,6 +196,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
 
     async function handleRemoveMember(childAddress: string) {
         if (!selected) return;
+        if (!window.confirm("Remove this address from the group?")) return;
         try {
             await removeGroupMember(selected.address, childAddress);
             toast.success("Member removed");
