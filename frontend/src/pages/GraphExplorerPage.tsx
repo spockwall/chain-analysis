@@ -8,29 +8,17 @@ import { EdgePanel } from "../components/EdgePanel";
 import { useToastContext } from "../context/ToastContext";
 import type { EntityResponse, NeighborsResponse, PathResponse, TransactionResponse } from "../types";
 import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction } from "../api/client";
+import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
 
 interface GraphExplorerPageProps {
     initialAddress?: string | null;
     onAddressLoad?: () => void;
 }
 
-const ALL_ENTITY_TYPES = [
-    "EOA", "Contract", "Mixer", "DEX", "CEXHotWallet",
-    "Bridge", "LendingPool", "Application", "Unknown",
-];
-const ALL_RISK_LEVELS = ["unknown", "low", "medium", "high", "critical"];
 const DEFAULT_FILTERS: GraphFilters = {
-    entityTypes: new Set(ALL_ENTITY_TYPES),
-    riskLevels: new Set(ALL_RISK_LEVELS),
+    entityTypes: new Set(ENTITY_TYPES),
+    riskLevels: new Set(RISK_LEVELS),
     addressSearch: "",
-};
-
-const RISK_DOT_COLORS: Record<string, string> = {
-    unknown: "#94a3b8",
-    low: "#22c55e",
-    medium: "#eab308",
-    high: "#f97316",
-    critical: "#ef4444",
 };
 
 // shared input style used in path-finder and filter panel
@@ -316,7 +304,7 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
 
                                     <div className="px-2.5 py-2 flex flex-col gap-1 border-b border-gray-100 max-h-[180px] overflow-y-auto">
                                         <span className="text-[0.65rem] font-semibold tracking-widest uppercase text-gray-400 mb-1">Entity Type</span>
-                                        {ALL_ENTITY_TYPES.map((type) => (
+                                        {ENTITY_TYPES.map((type) => (
                                             <label key={type} className="flex items-center gap-1.5 text-[0.73rem] text-gray-500 cursor-pointer select-none">
                                                 <input type="checkbox" checked={filters.entityTypes.has(type)} onChange={() => toggleEntityType(type)} className="mr-0" />
                                                 {type}
@@ -326,10 +314,10 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
 
                                     <div className="px-2.5 py-2 flex flex-col gap-1 border-b border-gray-100 max-h-[180px] overflow-y-auto">
                                         <span className="text-[0.65rem] font-semibold tracking-widest uppercase text-gray-400 mb-1">Risk Level</span>
-                                        {ALL_RISK_LEVELS.map((level) => (
+                                        {RISK_LEVELS.map((level) => (
                                             <label key={level} className="flex items-center gap-1.5 text-[0.73rem] text-gray-500 cursor-pointer select-none">
                                                 <input type="checkbox" checked={filters.riskLevels.has(level)} onChange={() => toggleRiskLevel(level)} />
-                                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: RISK_DOT_COLORS[level] }} />
+                                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: RISK_COLOR[level] }} />
                                                 {level}
                                             </label>
                                         ))}

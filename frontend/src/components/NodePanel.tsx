@@ -2,9 +2,10 @@
  * Node details panel — Oravia style
  */
 import { useState, useEffect } from "react";
-import type { EntityResponse, RiskLevel, EntityType, TransactionResponse } from "../types";
+import type { EntityResponse, TransactionResponse } from "../types";
 import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
+import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
 
 interface NodePanelProps {
     node: EntityResponse;
@@ -14,35 +15,6 @@ interface NodePanelProps {
     onNavigateToAddress?: (address: string) => void;
 }
 
-const RISK_BADGE: Record<RiskLevel, string> = {
-    unknown: "bg-slate-100 text-slate-500",
-    low: "bg-green-100 text-green-700",
-    medium: "bg-yellow-100 text-yellow-700",
-    high: "bg-orange-100 text-orange-700",
-    critical: "bg-red-100 text-red-700",
-};
-
-const RISK_DOT: Record<RiskLevel, string> = {
-    unknown: "#94a3b8",
-    low: "#22c55e",
-    medium: "#eab308",
-    high: "#f97316",
-    critical: "#ef4444",
-};
-
-const ENTITY_LABEL: Record<EntityType, string> = {
-    EOA: "Externally Owned Account",
-    Contract: "Smart Contract",
-    Mixer: "Mixer",
-    LendingPool: "Lending Pool",
-    Bridge: "Bridge",
-    DEX: "Decentralised Exchange",
-    CEXHotWallet: "CEX Hot Wallet",
-    Application: "Application",
-    Unknown: "Unknown",
-};
-
-const sectionLabel = "text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 mb-2";
 const divider = "border-none border-t border-gray-100 m-0";
 const btnIcon =
     "w-[26px] h-[26px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900";
@@ -154,13 +126,9 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                         <span
                             className={`inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase ${RISK_BADGE[node.risk_level]}`}
                         >
-                            <span
-                                className="w-[5px] h-[5px] rounded-full inline-block"
-                                style={{ background: RISK_DOT[node.risk_level] }}
-                            />
                             {node.risk_level}
                         </span>
-                        <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase bg-violet-50 text-violet-700">
+                        <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase text-violet-500 border border-violet-500">
                             {ENTITY_LABEL[entityType]}
                         </span>
                     </div>
@@ -211,10 +179,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             <p className={sectionLabel}>Labels</p>
                             <div className="flex flex-wrap gap-1">
                                 {node.labels.map((label) => (
-                                    <span
-                                        key={label}
-                                        className="px-2 py-[3px] bg-gray-50 border border-gray-200 rounded text-[0.7rem] text-gray-500"
-                                    >
+                                    <span key={label} className={labelCls}>
                                         {label}
                                     </span>
                                 ))}

@@ -14,43 +14,21 @@ import {
 } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
 import type { EntityResponse, GroupDetailResponse, RiskLevel } from "../types";
+import {
+    RISK_LEVELS,
+    RISK_COLOR,
+    RISK_BADGE,
+    ENTITY_TYPES,
+    inputCls,
+    btnPrimary,
+    btnPrimarySm,
+    btnGhost,
+    btnDangerSm,
+} from "../constants";
 
 interface GroupsPageProps {
     onNavigateToExplorer: (address: string) => void;
 }
-
-const RISK_LEVELS: RiskLevel[] = ["unknown", "low", "medium", "high", "critical"];
-
-const RISK_COLORS: Record<RiskLevel, string> = {
-    unknown: "#94a3b8",
-    low: "#22c55e",
-    medium: "#eab308",
-    high: "#f97316",
-    critical: "#ef4444",
-};
-
-const RISK_BADGE_CLASSES: Record<RiskLevel, string> = {
-    unknown: "bg-slate-100 text-slate-500 border-slate-200",
-    low: "bg-green-50 text-green-700 border-green-200",
-    medium: "bg-yellow-50 text-yellow-700 border-yellow-200",
-    high: "bg-orange-50 text-orange-700 border-orange-200",
-    critical: "bg-red-50 text-red-700 border-red-200",
-};
-
-const inputCls =
-    "w-full px-2.5 py-[7px] border border-gray-200 rounded bg-white text-[0.8rem] text-gray-900 font-[inherit] outline-none transition-all focus:border-indigo-500 focus:shadow-[0_0_0_2px_rgba(99,102,241,0.15)]";
-
-const btnPrimary =
-    "inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-[0.8rem] font-semibold rounded-lg shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-y-0";
-
-const btnPrimarySm =
-    "inline-flex items-center justify-center gap-1.5 px-2 py-1 bg-gray-900 text-white text-[0.7rem] font-semibold rounded-lg shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-y-0";
-
-const btnGhost =
-    "inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-transparent text-gray-500 text-[0.8rem] font-medium rounded-lg border border-gray-200 transition-all hover:bg-gray-50";
-
-const btnDangerSm =
-    "inline-flex items-center justify-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-500 text-[0.72rem] font-semibold rounded-lg border border-red-200 transition-all hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed";
 
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
     return (
@@ -283,7 +261,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                             </span>
                                             <span
                                                 className="w-1.5 h-1.5 rounded-full shrink-0"
-                                                style={{ background: RISK_COLORS[g.risk_level] }}
+                                                style={{ background: RISK_COLOR[g.risk_level] }}
                                                 title={g.risk_level}
                                             />
                                         </div>
@@ -335,7 +313,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         value={newType}
                                         onChange={(e) => setNewType(e.target.value)}
                                     >
-                                        {["EOA","Contract","Mixer","LendingPool","Bridge","DEX","CEXHotWallet","Application","Unknown"].map((t) => (
+                                        {ENTITY_TYPES.map((t) => (
                                             <option key={t} value={t}>{t}</option>
                                         ))}
                                     </select>
@@ -375,7 +353,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         {selected.name ?? formatAddress(selected.address)}
                                     </h2>
                                     <span
-                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold tracking-wider uppercase border ${RISK_BADGE_CLASSES[selected.risk_level]}`}
+                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold tracking-wider uppercase border ${RISK_BADGE[selected.risk_level]}`}
                                     >
                                         {selected.risk_level}
                                     </span>
@@ -530,7 +508,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                                     {m.entity_type}
                                                                 </span>
                                                             )}
-                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE_CLASSES[m.risk_level]}`}>
+                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE[m.risk_level]}`}>
                                                                 {m.risk_level}
                                                             </span>
                                                             {m.labels.map((l) => (

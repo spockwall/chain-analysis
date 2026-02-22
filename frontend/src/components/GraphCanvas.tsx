@@ -8,7 +8,7 @@ import fcose from "cytoscape-fcose";
 import dagre from "cytoscape-dagre";
 import type { NeighborsResponse, TransactionResponse } from "../types";
 import { formatWei } from "../api/client";
-import { ENTITY_COLORS, RISK_RING } from "./graph/colors";
+import { ENTITY_COLORS, RISK_COLOR } from "../constants";
 import { GRAPH_STYLESHEET } from "./graph/stylesheet";
 import { runLayout, LAYOUT_FCOSE_INITIAL } from "./graph/layouts";
 
@@ -64,7 +64,6 @@ export function GraphCanvas({
         for (const node of data.nodes) {
             const entityType = node.entity_type || "Unknown";
             const label = node.name ? node.name : `${node.address.slice(0, 6)}…${node.address.slice(-4)}`;
-            const colors = ENTITY_COLORS[entityType];
             const memberCount = node.member_count ?? 0;
             els.push({
                 data: {
@@ -72,8 +71,8 @@ export function GraphCanvas({
                     label,
                     entityType,
                     riskLevel: node.risk_level,
-                    bgColor: colors.bg,
-                    borderColor: RISK_RING[node.risk_level],
+                    bgColor: ENTITY_COLORS[entityType],
+                    borderColor: RISK_COLOR[node.risk_level],
                     nodeKind: memberCount > 0 ? "group" : "entity",
                     memberCount,
                 },

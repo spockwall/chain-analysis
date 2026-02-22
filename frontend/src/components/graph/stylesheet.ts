@@ -3,10 +3,14 @@
  */
 // cytoscape's TS types for stylesheets are awkward; use any[] which is
 // what cytoscape.use() and the style option accept at runtime.
-import { EDGE_COLOR_DEFAULT, EDGE_COLOR_INCOMING, EDGE_COLOR_OUTGOING, EDGE_COLOR_PATH } from "./colors";
 
 // All entity nodes are this size — color alone distinguishes type.
 const NODE_SIZE = 18;
+
+const EDGE_COLOR_INCOMING = "#64748b88"; // slate-500 with alpha
+const EDGE_COLOR_OUTGOING = "#6080b088"; // slate-400 with alpha
+const EDGE_COLOR_PATH = "#3b82f6"; // blue-500
+const EDGE_COLOR_DEFAULT = "#e2e8f0"; // slate-200
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const GRAPH_STYLESHEET: any[] = [
