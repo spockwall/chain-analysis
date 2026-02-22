@@ -33,7 +33,8 @@ class ApiError extends Error {
 
 async function request<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  noContent = false
 ): Promise<T> {
   const url = `${API_BASE}${endpoint}`
 
@@ -53,6 +54,7 @@ async function request<T>(
     )
   }
 
+  if (noContent) return undefined as T
   return response.json()
 }
 
@@ -162,15 +164,7 @@ export async function updateEntity(
 }
 
 export async function deleteEntity(address: string): Promise<void> {
-  const url = `${API_BASE}/entities/${address}`
-  const response = await fetch(url, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-  })
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}))
-    throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status)
-  }
+  return request<void>(`/entities/${address}`, { method: 'DELETE' }, true)
 }
 
 export async function upsertEdge(
@@ -253,15 +247,7 @@ export async function updateGroup(address: string, body: GroupUpdateRequest): Pr
 }
 
 export async function deleteGroup(address: string): Promise<void> {
-  const url = `${API_BASE}/groups/${address}`
-  const response = await fetch(url, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-  })
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}))
-    throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status)
-  }
+  return request<void>(`/groups/${address}`, { method: 'DELETE' }, true)
 }
 
 // Graph stats endpoints (for ETL testing)

@@ -44,7 +44,7 @@ const btnPrimary =
     "inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-[0.8rem] font-semibold rounded-lg shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-y-0";
 
 const btnPrimarySm =
-    "inline-flex items-center justify-center gap-1.5 px-2.5 py-1 bg-gray-900 text-white text-[0.72rem] font-semibold rounded-lg shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-y-0";
+    "inline-flex items-center justify-center gap-1.5 px-2 py-1 bg-gray-900 text-white text-[0.7rem] font-semibold rounded-lg shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-y-0";
 
 const btnGhost =
     "inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-transparent text-gray-500 text-[0.8rem] font-medium rounded-lg border border-gray-200 transition-all hover:bg-gray-50";
@@ -82,6 +82,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
     const [memberLoading, setMemberLoading] = useState(false);
     const [selectedMember, setSelectedMember] = useState<EntityResponse | null>(null);
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [editMode, setEditMode] = useState(false);
 
     async function loadGroups() {
         setLoading(true);
@@ -107,6 +108,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
         setEditDesc((group.properties?.description as string) ?? "");
         setMemberInput("");
         setSelectedMember(null);
+        setEditMode(false);
     }
 
     async function handleSelectAddress(address: string) {
@@ -154,6 +156,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
             toast.success("Group updated");
             setSelected(updated);
             setGroups((prev) => prev.map((g) => (g.address === updated.address ? updated : g)));
+            setEditMode(false);
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : "Failed to update group");
         } finally {
@@ -293,7 +296,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
             <div className="flex-1 overflow-y-auto">
                 {/* Create form */}
                 {showCreateForm && (
-                    <div className="max-w-2xl mx-auto px-8 py-8 flex flex-col gap-5">
+                    <div className="max-w-[860px] mx-auto px-6 py-8 flex flex-col gap-5">
                         <div>
                             <p className="text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 mb-1">
                                 Groups
@@ -331,33 +334,81 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
 
                 {/* Detail view */}
                 {selected && !showCreateForm && (
-                    <div className="max-w-2xl mx-auto px-8 py-8 flex flex-col gap-5">
+                    <div className="max-w-[860px] mx-auto px-6 py-8 flex flex-col gap-5">
                         {/* Page header */}
-                        <div>
-                            <p className="text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 mb-1">
-                                Group
-                            </p>
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="min-w-0">
+                                <p className="text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 mb-1">
+                                    Group
+                                </p>
+                                <div className="flex items-center gap-2.5 flex-wrap">
                                     <h2 className="text-xl font-bold text-gray-900 m-0 leading-tight">
                                         {selected.name ?? formatAddress(selected.address)}
                                     </h2>
+                                    <span
+                                        className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold tracking-wider uppercase border ${RISK_BADGE_CLASSES[selected.risk_level]}`}
+                                    >
+                                        {selected.risk_level}
+                                    </span>
                                 </div>
-                                <span
-                                    className={`shrink-0 inline-flex items-center px-2.5 py-1 rounded-full text-[0.65rem] font-semibold tracking-widest uppercase border ${RISK_BADGE_CLASSES[selected.risk_level]}`}
-                                >
-                                    {selected.risk_level}
-                                </span>
+                                {selected.description && (
+                                    <p className="text-[0.82rem] text-gray-500 mt-1.5 mb-0 leading-relaxed">
+                                        {selected.description}
+                                    </p>
+                                )}
                             </div>
-                            {selected.description && (
-                                <p className="text-[0.82rem] text-gray-500 mt-2 mb-0 leading-relaxed">
-                                    {selected.description}
-                                </p>
-                            )}
+                            <button className={editMode ? btnGhost : btnPrimary} onClick={() => setEditMode((v) => !v)}>
+                                {editMode ? "Cancel" : "Edit"}
+                            </button>
                         </div>
 
-                        {/* Members card */}
+                        {/* Single combined card */}
                         <div className="bg-white border border-gray-200 rounded-xl shadow-[0_1px_2px_rgba(15,23,42,0.05)] overflow-hidden">
+                            {/* ── Edit section (shown first when editMode) ── */}
+                            {editMode && (
+                                <>
+                                    <div className="px-5 py-3.5 border-b border-gray-100">
+                                        <p className="text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 m-0">
+                                            Edit Group
+                                        </p>
+                                    </div>
+                                    <div className="px-5 py-4 flex flex-col gap-4">
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <FormField label="Name">
+                                                <input
+                                                    className={inputCls}
+                                                    value={editName}
+                                                    onChange={(e) => setEditName(e.target.value)}
+                                                />
+                                            </FormField>
+                                            <FormField label="Risk Level">
+                                                <select
+                                                    className={inputCls}
+                                                    value={editRisk}
+                                                    onChange={(e) => setEditRisk(e.target.value as RiskLevel)}
+                                                >
+                                                    {RISK_LEVELS.map((r) => (
+                                                        <option key={r} value={r}>
+                                                            {r}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </FormField>
+                                        </div>
+                                        <FormField label="Description">
+                                            <input
+                                                className={inputCls}
+                                                placeholder="Optional description…"
+                                                value={editDesc}
+                                                onChange={(e) => setEditDesc(e.target.value)}
+                                            />
+                                        </FormField>
+                                    </div>
+                                    <div className="border-t border-gray-200" />
+                                </>
+                            )}
+
+                            {/* ── Members section ── */}
                             <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
                                 <p className="text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 m-0">
                                     Members
@@ -377,7 +428,6 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                     const isExpanded = selectedMember?.address === m.address;
                                     return (
                                         <div key={m.address}>
-                                            {/* Member row */}
                                             <div
                                                 className={`flex items-center gap-2 px-5 py-2.5 transition-colors cursor-pointer ${isExpanded ? "bg-gray-50" : "hover:bg-gray-50"}`}
                                                 onClick={() => setSelectedMember(isExpanded ? null : m)}
@@ -404,62 +454,60 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                     >
                                                         <polyline points="6 9 12 15 18 9" />
                                                     </svg>
-                                                    <button
-                                                        className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-gray-300 transition-colors hover:text-red-500 hover:bg-red-50"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleRemoveMember(m.address);
-                                                        }}
-                                                        title="Remove member"
-                                                    >
-                                                        <svg
-                                                            width="11"
-                                                            height="11"
-                                                            viewBox="0 0 24 24"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            strokeWidth="2.5"
+                                                    {editMode && (
+                                                        <button
+                                                            className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-gray-300 transition-colors hover:text-red-500 hover:bg-red-50"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveMember(m.address);
+                                                            }}
+                                                            title="Remove member"
                                                         >
-                                                            <line x1="18" y1="6" x2="6" y2="18" />
-                                                            <line x1="6" y1="6" x2="18" y2="18" />
-                                                        </svg>
-                                                    </button>
+                                                            <svg
+                                                                width="11"
+                                                                height="11"
+                                                                viewBox="0 0 24 24"
+                                                                fill="none"
+                                                                stroke="currentColor"
+                                                                strokeWidth="2.5"
+                                                            >
+                                                                <line x1="18" y1="6" x2="6" y2="18" />
+                                                                <line x1="6" y1="6" x2="18" y2="18" />
+                                                            </svg>
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
-
-                                            {/* Expanded detail */}
                                             {isExpanded && (
                                                 <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 flex flex-col gap-3">
-                                                    {/* Meta row */}
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {m.entity_type && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold bg-violet-50 text-violet-700 border border-violet-200">
-                                                                {m.entity_type}
-                                                            </span>
-                                                        )}
-                                                        <span
-                                                            className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE_CLASSES[m.risk_level]}`}
-                                                        >
-                                                            {m.risk_level}
-                                                        </span>
-                                                        {m.labels.map((l) => (
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {m.entity_type && (
+                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+                                                                    {m.entity_type}
+                                                                </span>
+                                                            )}
                                                             <span
-                                                                key={l}
-                                                                className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-800 border border-gray-200"
+                                                                className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE_CLASSES[m.risk_level]}`}
                                                             >
-                                                                {l}
+                                                                {m.risk_level}
                                                             </span>
-                                                        ))}
-                                                        {/* View button */}
+                                                            {m.labels.map((l) => (
+                                                                <span
+                                                                    key={l}
+                                                                    className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-800 border border-gray-200"
+                                                                >
+                                                                    {l}
+                                                                </span>
+                                                            ))}
+                                                        </div>
                                                         <button
-                                                            className="ml-auto inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-900"
+                                                            className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-900 underline"
                                                             onClick={() => onNavigateToExplorer(m.address)}
                                                         >
                                                             View in Explorer
                                                         </button>
                                                     </div>
-
-                                                    {/* Stats row */}
                                                     {(m.transaction_count != null || m.first_seen_block != null) && (
                                                         <div className="flex gap-4">
                                                             {m.transaction_count != null && (
@@ -501,62 +549,29 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                 })}
                             </div>
 
-                            {/* Add member row */}
-                            <div className="flex gap-2 items-center px-5 py-3 border-t border-gray-100 bg-gray-50">
-                                <input
-                                    className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg px-2.5 py-[6px] font-mono text-[0.72rem] text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(15,23,42,0.06)]"
-                                    placeholder="0x… member address"
-                                    value={memberInput}
-                                    onChange={(e) => setMemberInput(e.target.value)}
-                                    onKeyDown={(e) => e.key === "Enter" && handleAddMember()}
-                                />
-                                <button
-                                    className={btnPrimarySm}
-                                    onClick={handleAddMember}
-                                    disabled={memberLoading || !memberInput.trim()}
-                                >
-                                    {memberLoading ? "…" : "Add"}
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Edit card */}
-                        <div className="bg-white border border-gray-200 rounded-xl shadow-[0_1px_2px_rgba(15,23,42,0.05)] overflow-hidden">
-                            <div className="px-5 py-3.5 border-b border-gray-100">
-                                <p className="text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 m-0">
-                                    Edit
-                                </p>
-                            </div>
-                            <div className="px-5 py-4 flex flex-col gap-4">
-                                <FormField label="Name">
+                            {/* Add member row — only shown in edit mode */}
+                            {editMode && (
+                                <div className="flex gap-2 items-center px-5 py-3 border-t border-gray-100 bg-gray-50">
                                     <input
-                                        className={inputCls}
-                                        value={editName}
-                                        onChange={(e) => setEditName(e.target.value)}
+                                        className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg px-2.5 py-[6px] font-mono text-[0.72rem] text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(15,23,42,0.06)]"
+                                        placeholder="0x… add member address"
+                                        value={memberInput}
+                                        onChange={(e) => setMemberInput(e.target.value)}
+                                        onKeyDown={(e) => e.key === "Enter" && handleAddMember()}
                                     />
-                                </FormField>
-                                <FormField label="Risk Level">
-                                    <select
-                                        className={inputCls}
-                                        value={editRisk}
-                                        onChange={(e) => setEditRisk(e.target.value as RiskLevel)}
+                                    <button
+                                        className={btnPrimarySm}
+                                        onClick={handleAddMember}
+                                        disabled={memberLoading || !memberInput.trim()}
                                     >
-                                        {RISK_LEVELS.map((r) => (
-                                            <option key={r} value={r}>
-                                                {r}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </FormField>
-                                <FormField label="Description">
-                                    <input
-                                        className={inputCls}
-                                        placeholder="Optional description…"
-                                        value={editDesc}
-                                        onChange={(e) => setEditDesc(e.target.value)}
-                                    />
-                                </FormField>
-                                <div className="flex items-center gap-2 pt-1">
+                                        {memberLoading ? "…" : "Add"}
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Action buttons — only shown in edit mode */}
+                            {editMode && (
+                                <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-gray-200">
                                     <button className={btnPrimary} onClick={handleSave} disabled={saving}>
                                         {saving ? "Saving…" : "Save Changes"}
                                     </button>
@@ -573,7 +588,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         Delete Group
                                     </button>
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </div>
                 )}
