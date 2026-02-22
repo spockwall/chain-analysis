@@ -18,8 +18,9 @@ Chain-Analysis is a blockchain transaction analysis platform for detecting and i
 
 **Frontend:**
 - React 18 + TypeScript (Vite)
+- React Router v6: URL-based page routing
 - Cytoscape.js for graph visualization (fcose layout)
-- Custom Oravia design system (CSS variables, no external UI library)
+- Tailwind CSS v3: Utility-first styling (fully migrated from custom CSS)
 
 **Data Sources:**
 - Allium (primary): Pre-decoded blockchain data via SQL
@@ -32,6 +33,10 @@ Chain-Analysis is a blockchain transaction analysis platform for detecting and i
 chain-analysis/
 ├── docker-compose.yml          # Neo4j, Postgres, Redis, MinIO, Backend, Frontend
 ├── .env.example                # Environment variables template
+├── etl-rs/                     # Rust ingestion worker (see Rust ETL section)
+│   ├── Cargo.toml              # Workspace manifest
+│   ├── chain-analysis-common/  # Shared types: Transaction, Trace, Entity, IngestionMessage
+│   └── chain-analysis-ingest/  # `ingest` binary: Allium HTTP client → Redis Streams writer
 ├── scripts/                    # Utility scripts (run by backend entrypoint on startup)
 │   ├── init_neo4j.py           # Creates Neo4j constraints + indexes
 │   ├── seed_neo4j.py           # Seeds sample Transaction nodes and entities
@@ -47,8 +52,9 @@ chain-analysis/
 │       │   ├── main.py         # FastAPI app + lifespan
 │       │   ├── models/         # Pydantic response models
 │       │   └── routes/
-│       │       ├── entities.py # Entity CRUD + neighbors + paths + /transactions/{hash}
-│       │       ├── stats.py    # Graph stats (node_count, transaction_count, etc.)
+│       │       ├── entities.py # Entity CRUD + neighbors + paths + /transactions/{hash} + group members
+│       │       ├── groups.py   # Group entity CRUD (list, create, get, patch, delete)
+│       │       ├── stats.py    # Graph stats (node_count, transaction_count, entity_types, risk_levels)
 │       │       ├── health.py   # /health/live + /health
 │       │       └── labels.py   # Known labels
 │       ├── core/
@@ -65,27 +71,38 @@ chain-analysis/
 │       └── db/                 # SQLAlchemy models + Alembic migrations
 └── frontend/
     ├── Dockerfile
-    ├── src/
-    │   ├── App.tsx             # App shell: ToastContext provider + tab navbar
-    │   ├── context/
-    │   │   └── ToastContext.tsx # Global toast context
-    │   ├── hooks/
-    │   │   ├── useToast.ts     # Toast state manager (success/error/loading/info)
-    │   │   ├── useGraph.ts
-    │   │   ├── useGraphStats.ts
-    │   │   └── useHealth.ts
-    │   ├── components/
-    │   │   ├── Toaster.tsx     # Fixed bottom-right toast stack (portal)
-    │   │   ├── GraphCanvas.tsx # Cytoscape.js wrapper
-    │   │   ├── NodePanel.tsx   # Selected-node side panel
-    │   │   └── SearchBar.tsx   # Address search input
-    │   ├── pages/
-    │   │   ├── GraphExplorerPage.tsx  # Main graph view
-    │   │   ├── ETLPage.tsx            # ETL pipeline management (full page)
-    │   │   └── DashboardPage.tsx      # System health + graph stats (full page)
-    │   ├── api/client.ts       # Fetch wrappers for all backend endpoints
-    │   └── types/index.ts      # TypeScript interfaces
-    └── index.css               # Oravia design tokens + all component styles
+    ├── tailwind.config.js      # Tailwind config with custom keyframes (toast-slide-in, slide-in)
+    └── src/
+        ├── App.tsx             # App shell: ToastContext + React Router routes + Nav
+        ├── context/
+        │   └── ToastContext.tsx # Global toast context
+        ├── hooks/
+        │   ├── useToast.ts     # Toast state manager (success/error/loading/info)
+        │   ├── useGraph.ts
+        │   ├── useGraphStats.ts
+        │   └── useHealth.ts
+        ├── components/
+        │   ├── Nav.tsx         # Top navbar with React Router NavLink tabs
+        │   ├── Footer.tsx      # App footer
+        │   ├── NavIcons.tsx    # SVG icon set for nav
+        │   ├── Toaster.tsx     # Fixed bottom-right toast stack (portal)
+        │   ├── GraphCanvas.tsx # Cytoscape.js wrapper
+        │   ├── NodePanel.tsx   # Selected-node side panel
+        │   ├── EdgePanel.tsx   # Selected-edge side panel
+        │   ├── SearchBar.tsx   # Address search input
+        │   └── graph/
+        │       ├── colors.ts   # Entity type → color map
+        │       ├── layouts.ts  # Cytoscape layout configs
+        │       └── stylesheet.ts # Cytoscape CSS stylesheet
+        ├── pages/
+        │   ├── HomePage.tsx           # Landing/home page
+        │   ├── GraphExplorerPage.tsx  # Main graph view (search, path finder, filter panel)
+        │   ├── GroupsPage.tsx         # Group management (collapsible sidebar + detail panel)
+        │   ├── ETLPage.tsx            # ETL pipeline management
+        │   └── DashboardPage.tsx      # System health + graph stats
+        ├── api/client.ts       # Fetch wrappers for all backend endpoints
+        ├── types/index.ts      # TypeScript interfaces
+        └── index.css           # CSS reset, design tokens (:root), grid-bg, app-shell, scrollbar
 ```
 
 ## Development Commands
@@ -121,6 +138,8 @@ This replaces the old `(Entity)-[:TRANSFER]->(Entity)` edge model. Transactions 
 
 **Transaction Node Properties:** `hash` (UNIQUE), `value` (wei str), `block_number`, `timestamp`, `gas_used`, `gas_price` (wei str), `from_address`, `to_address`
 
+**Group Membership:** `(member:Entity)-[:IN_GROUP]->(group:Entity)` — flat set, no parent/child hierarchy. Groups are plain entity nodes; membership is tracked via `IN_GROUP` relationships.
+
 **Key Constraints & Indexes:**
 ```cypher
 CREATE CONSTRAINT entity_address FOR (e:Entity) REQUIRE e.address IS UNIQUE;
@@ -128,6 +147,14 @@ CREATE CONSTRAINT tx_hash FOR (t:Transaction) REQUIRE t.hash IS UNIQUE;
 CREATE INDEX tx_block FOR (t:Transaction) ON (t.block_number);
 CREATE INDEX tx_ts    FOR (t:Transaction) ON (t.timestamp);
 ```
+
+### Group Entities
+
+Groups are ordinary Entity nodes that other entities can join via `IN_GROUP` relationships. Rules:
+- A group cannot be a member of itself
+- An address can only belong to one group at a time (409 if already a member)
+- A group with members cannot be deleted (409; remove all members first)
+- The `list_groups` query finds all entities that have at least one `IN_GROUP` member
 
 ### ETL Pipeline (Dagster Assets)
 
@@ -161,6 +188,14 @@ On every container start the backend runs these steps before serving:
 | GET | `/api/entities/{address}/neighbors` | Get 1-hop neighbors (returns nodes + transactions) |
 | GET | `/api/entities/{src}/paths/{tgt}` | Find paths between two entities |
 | GET | `/api/transactions/{hash}` | Fetch transaction node by hash |
+| GET | `/api/entities/{address}/members` | List group members |
+| POST | `/api/entities/{address}/members` | Add member to group |
+| DELETE | `/api/entities/{address}/members/{member_address}` | Remove member from group |
+| GET | `/api/groups` | List all groups |
+| POST | `/api/groups` | Create group |
+| GET | `/api/groups/{address}` | Get group with members |
+| PATCH | `/api/groups/{address}` | Update group (name, risk_level, description) |
+| DELETE | `/api/groups/{address}` | Delete group (fails if has members) |
 
 ### Three-Tier Storage Strategy
 
@@ -193,18 +228,109 @@ All queries use the Transaction-as-Node pattern:
 - Pydantic models for all API request/response schemas
 - SQLAlchemy async + asyncpg for PostgreSQL (no psycopg2)
 - Alembic env.py uses `asyncio.run(run_async_migrations())` pattern
+- 204 No Content responses: use raw `fetch` or `noContent=True` flag — never call `.json()` on empty body
 
 ### TypeScript (Frontend)
 - All user feedback via `useToastContext()` — never inline error divs
 - Cytoscape.js: lazy-load 1-2 hop neighborhoods, never load entire graph
 - Entity nodes: colored circles by `entity_type`; Transaction nodes: diamonds (`#3b82f6`)
 - Edges: `SENT` (entity→tx) and `RECEIVED` (tx→entity) rendered separately
-- Pages are full-page routed (not modal overlays), switched via navbar tabs
+- Pages are full-page routed via React Router v6, switched via `<NavLink>` tabs in `Nav.tsx`
+- All styling uses Tailwind CSS utility classes — `index.css` contains only reset, `:root` tokens, `.grid-bg`, `.app-shell`, scrollbar
+- API client `request()` helper accepts `noContent = true` for 204 endpoints to skip `.json()` parse
+
+### Tailwind Patterns
+- Local const strings for repeated class sets: `btnPrimary`, `btnPrimarySm`, `btnGhost`, `btnDangerSm`, `inputCls`, `sectionLabel`
+- Custom animations defined in `tailwind.config.js` `theme.extend.keyframes`: `toast-slide-in`, `slide-in`
+- Risk badge colors use explicit lookup objects (`RISK_BADGE_CLASSES`) rather than CSS custom properties
+- `!important` modifier (`!bg-gray-900`) used only when overriding hover states on active toggle buttons
 
 ### Neo4j Queries
 - Always parameterize queries (prevent injection)
 - Use `LIMIT` clauses to prevent runaway queries
 - Multi-hop traversals use quantified path patterns: `((-[:SENT]->(:Transaction)-[:RECEIVED]->){1..N})`
+- Group queries use `IN_GROUP` relationship (migrated from `MEMBER_OF` — run migration if upgrading from old data)
+
+### Rust ETL Ingestion Worker (`etl-rs/`)
+
+The Rust workspace sits at the **extract** stage of the pipeline — before Dagster. It fetches raw blockchain data from Allium and publishes it to Redis Streams, which Dagster then consumes.
+
+```
+[Allium API]
+     │   ← Rust binary (chain-analysis-ingest)
+     ▼
+[Redis Streams]
+     │   ← Python / Dagster assets
+     ▼
+[Neo4j + Postgres]
+```
+
+**Workspace crates:**
+
+| Crate | Role |
+|---|---|
+| `chain-analysis-common` | Shared domain types: `Transaction`, `Trace`, `Entity`, `Transfer`, `IngestionMessage`, `Config` |
+| `chain-analysis-ingest` | `ingest` CLI binary — Allium HTTP client + Redis Streams writer |
+
+**Key dependencies:** `alloy-primitives` (type-safe `Address`/`B256`/`U256`), `neo4rs`, `redis` (async streams), `tokio`, `serde_json`, `tracing`.
+
+**CLI usage:**
+```bash
+ingest --start-block 18000000 --end-block 18001000 [--dry-run]
+```
+
+**`IngestionMessage` envelope types** (serialised as tagged JSON to Redis):
+- `Transactions(Vec<Transaction>)` — raw tx batch
+- `Traces(Vec<Trace>)` — internal call traces
+- `Entities(Vec<Entity>)` — resolved entities
+- `Transfers(Vec<Transfer>)` — computed value transfers
+- `Progress { run_id, current_block, total_blocks, transactions_processed }`
+- `Complete { run_id, transactions_processed, traces_processed }`
+- `Error { run_id, message }`
+
+**Build:**
+```bash
+cd etl-rs
+cargo build --release          # produces target/release/ingest
+cargo test                     # unit tests (mock data + message roundtrip)
+```
+
+Without `ALLIUM_API_KEY` set the client returns deterministic mock transactions (3 per block) for local development.
+
+---
+
+## Roadmap
+
+### Rust ETL (`etl-rs/`)
+
+| Status | Item |
+|---|---|
+| ✅ Done | `chain-analysis-common` — shared domain types (`Transaction`, `Trace`, `Entity`, `Transfer`, `IngestionMessage`) |
+| ✅ Done | `chain-analysis-ingest` — `ingest` CLI binary: Allium HTTP client + Redis Streams writer + mock data fallback |
+| 🔲 TODO | `chain-analysis-process` crate — Redis consumer: decode `IngestionMessage`, resolve entities, classify EOA/Contract, write to Neo4j via `neo4rs` |
+| 🔲 TODO | Trace ingestion — fetch and publish `Trace` batches alongside transactions (currently `traces_processed` is hardcoded 0) |
+| 🔲 TODO | ERC-20 transfer decoding — parse `Transfer(address,address,uint256)` logs into `Transfer` messages |
+| 🔲 TODO | Retry + backoff logic in `ingest` main loop (currently logs error and continues) |
+| 🔲 TODO | Docker image for `ingest` binary — add to `docker-compose.yml` as an on-demand job container |
+| 🔲 TODO | Dagster `PipesSubprocessClient` integration — launch `ingest` as a Dagster asset op so block ranges are orchestrated by Dagster |
+
+### Backend
+
+| Status | Item |
+|---|---|
+| ✅ Done | Entity CRUD, neighbors, paths, transactions |
+| ✅ Done | Group management (`IN_GROUP` schema, `/api/groups` routes) |
+| 🔲 TODO | AML detection endpoint — expose `graph/queries.py` patterns via REST |
+| 🔲 TODO | PostgreSQL label sync — write resolved entities back to `known_labels` |
+
+### Frontend
+
+| Status | Item |
+|---|---|
+| ✅ Done | Graph Explorer, ETL Page, Dashboard, Groups Page |
+| ✅ Done | Tailwind CSS migration |
+| 🔲 TODO | AML pattern results viewer page |
+| 🔲 TODO | ETL Page wired to real Dagster run status |
 
 ## Environment Variables
 
