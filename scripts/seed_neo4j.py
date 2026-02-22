@@ -275,6 +275,7 @@ GROUP_NODES = [
             "name": "Tornado Cash Protocol",
             "risk_level": "critical",
             "entity_type": "Mixer",
+            "is_group": True,
         },
     },
     {
@@ -284,6 +285,7 @@ GROUP_NODES = [
             "name": "Uniswap Protocol",
             "risk_level": "low",
             "entity_type": "DEX",
+            "is_group": True,
         },
     },
 ]
@@ -303,7 +305,7 @@ GROUP_MEMBERSHIPS = [
 UPSERT_MEMBER_OF = """
 MATCH (parent:Entity {address: $parent})
 MATCH (child:Entity  {address: $child})
-MERGE (child)-[:MEMBER_OF {added_at: $added_at}]->(parent)
+MERGE (child)-[:IN_GROUP {added_at: $added_at}]->(parent)
 """
 
 # The TC_GROUP address — transactions target/originate from the group node directly
@@ -643,12 +645,12 @@ async def seed(uri: str, user: str, password: str) -> None:
         for node in GROUP_NODES:
             await upsert_node(session, node)
 
-    print(f"\nSeeding {len(GROUP_MEMBERSHIPS)} MEMBER_OF relationships...")
+    print(f"\nSeeding {len(GROUP_MEMBERSHIPS)} IN_GROUP relationships...")
     added_at = "2024-01-01T00:00:00+00:00"
     async with driver.session() as session:
         for parent_addr, child_addr in GROUP_MEMBERSHIPS:
             await session.run(UPSERT_MEMBER_OF, parent=parent_addr, child=child_addr, added_at=added_at)
-            print(f"  ✓ {child_addr[:18]}… → MEMBER_OF → {parent_addr[:18]}…")
+            print(f"  ✓ {child_addr[:18]}… → IN_GROUP → {parent_addr[:18]}…")
 
     async with driver.session() as session:
         result = await session.run("MATCH (n:Entity) RETURN count(n) AS nodes")

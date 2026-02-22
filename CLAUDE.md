@@ -344,3 +344,6 @@ Set in `docker-compose.yml` for local dev; required in `.env` for external deplo
 ## Documentation
 
 Full system documentation: `docs/chain-analysis_system_overview.pdf`
+
+## Notes
+- Currently, the entity edges are not used in the live graph data. But the code infrastructure around it still exists in several places. Safe to remove if needed. Maybe it will be used in the future.

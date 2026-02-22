@@ -170,7 +170,6 @@ export interface EdgeUpsertRequest {
 // Group management types
 
 export interface GroupCreateRequest {
-    address: string;
     name: string;
     entity_type?: string;
     risk_level?: string;

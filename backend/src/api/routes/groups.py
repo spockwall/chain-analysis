@@ -1,5 +1,7 @@
 """Group entity CRUD endpoints."""
 
+import uuid
+
 from fastapi import APIRouter, HTTPException
 
 from api.deps import GraphDBDep
@@ -60,9 +62,11 @@ def _build_group_detail(node: Node, members: list[Node]) -> GroupDetailResponse:
 
 @router.get("", response_model=GroupListResponse)
 async def list_groups(graph_db: GraphDBDep) -> GroupListResponse:
-    """List all group entities (those with at least one IN_GROUP member)."""
+    """List all group entities (nodes with is_group=true, plus any with IN_GROUP members)."""
     query = """
-    MATCH (member:Entity)-[:IN_GROUP]->(grp:Entity)
+    MATCH (grp:Entity)
+    WHERE grp.is_group = true
+    OPTIONAL MATCH (member:Entity)-[:IN_GROUP]->(grp)
     WITH grp, labels(grp) AS labels, count(member) AS member_count
     RETURN grp, labels, member_count
     ORDER BY member_count DESC
@@ -87,18 +91,17 @@ async def list_groups(graph_db: GraphDBDep) -> GroupListResponse:
 
 @router.post("", response_model=GroupDetailResponse, status_code=201)
 async def create_group(body: GroupCreateRequest, graph_db: GraphDBDep) -> GroupDetailResponse:
-    """Create a new group entity node."""
-    address = _validate_address(body.address)
-
-    existing = await graph_db.get_node(address)
-    if existing is not None:
-        raise HTTPException(status_code=409, detail=f"Entity {address} already exists")
+    """Create a new group entity node. Address is auto-generated."""
+    # Generate a deterministic-looking fake address from a UUID so it fits the 0x+40 hex format
+    raw = uuid.uuid4().hex  # 32 hex chars
+    address = ("0x" + raw + "0" * 8)[:42]  # pad to 42 chars
 
     labels = ["Entity", body.entity_type.value]
     properties: dict = {
         "risk_level": body.risk_level.value,
         "name": body.name,
         "entity_type": body.entity_type.value,
+        "is_group": True,
         **body.properties,
     }
     if body.description is not None:

@@ -16,10 +16,10 @@ interface NodePanelProps {
 
 const RISK_BADGE: Record<RiskLevel, string> = {
     unknown: "bg-slate-100 text-slate-500",
-    low:     "bg-green-100 text-green-700",
-    medium:  "bg-yellow-100 text-yellow-700",
-    high:    "bg-orange-100 text-orange-700",
-    critical:"bg-red-100 text-red-700",
+    low: "bg-green-100 text-green-700",
+    medium: "bg-yellow-100 text-yellow-700",
+    high: "bg-orange-100 text-orange-700",
+    critical: "bg-red-100 text-red-700",
 };
 
 const RISK_DOT: Record<RiskLevel, string> = {
@@ -44,7 +44,8 @@ const ENTITY_LABEL: Record<EntityType, string> = {
 
 const sectionLabel = "text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 mb-2";
 const divider = "border-none border-t border-gray-100 m-0";
-const btnIcon = "w-[26px] h-[26px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900";
+const btnIcon =
+    "w-[26px] h-[26px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900";
 
 export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress }: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
@@ -60,10 +61,16 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
         setMemberInput("");
         setMembersLoading(true);
         fetchGroupMembers(node.address)
-            .then((res) => { if (!cancelled) setMembers(res.members); })
+            .then((res) => {
+                if (!cancelled) setMembers(res.members);
+            })
             .catch(() => {})
-            .finally(() => { if (!cancelled) setMembersLoading(false); });
-        return () => { cancelled = true; };
+            .finally(() => {
+                if (!cancelled) setMembersLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
     }, [node.address]);
 
     const handleAddMember = async () => {
@@ -102,11 +109,38 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                     <h2 className="text-[1.25rem] font-semibold tracking-[-0.01em] text-gray-900 mb-1">
                         {node.name || "Unknown Entity"}
                     </h2>
-                    <p className="font-mono text-[0.8rem] text-gray-400">{formatAddress(node.address, 8)}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                        <p className="font-mono text-[0.72rem] text-gray-600 truncate flex-1 min-w-0 m-0">
+                            {node.address}
+                        </p>
+                        <button
+                            className="shrink-0 w-[22px] h-[22px] flex items-center justify-center rounded bg-transparent border-none cursor-pointer text-gray-400 transition-colors hover:text-gray-700 p-0"
+                            title="Copy address"
+                            onClick={() => {
+                                navigator.clipboard
+                                    .writeText(node.address)
+                                    .then(() => toast.success("Address copied"))
+                                    .catch(() => toast.error("Copy failed"));
+                            }}
+                        >
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                            >
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <button className={btnIcon} onClick={onClose} aria-label="Close panel">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
                 </button>
             </div>
@@ -117,8 +151,13 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                 <div>
                     <p className={sectionLabel}>Classification</p>
                     <div className="flex flex-wrap gap-1.5">
-                        <span className={`inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase ${RISK_BADGE[node.risk_level]}`}>
-                            <span className="w-[5px] h-[5px] rounded-full inline-block" style={{ background: RISK_DOT[node.risk_level] }} />
+                        <span
+                            className={`inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase ${RISK_BADGE[node.risk_level]}`}
+                        >
+                            <span
+                                className="w-[5px] h-[5px] rounded-full inline-block"
+                                style={{ background: RISK_DOT[node.risk_level] }}
+                            />
                             {node.risk_level}
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase bg-violet-50 text-violet-700">
@@ -137,19 +176,25 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             <div className="grid grid-cols-2 gap-3">
                                 {node.transaction_count != null && (
                                     <div>
-                                        <div className="text-[1.4rem] font-bold text-gray-900 tracking-[-0.02em] leading-none">{node.transaction_count.toLocaleString()}</div>
+                                        <div className="text-[1.4rem] font-bold text-gray-900 tracking-[-0.02em] leading-none">
+                                            {node.transaction_count.toLocaleString()}
+                                        </div>
                                         <div className="text-[0.7rem] text-gray-400 mt-[3px]">Transactions</div>
                                     </div>
                                 )}
                                 {node.first_seen_block && (
                                     <div>
-                                        <div className="text-[1rem] font-bold text-gray-900 leading-none">#{node.first_seen_block.toLocaleString()}</div>
+                                        <div className="text-[1rem] font-bold text-gray-900 leading-none">
+                                            #{node.first_seen_block.toLocaleString()}
+                                        </div>
                                         <div className="text-[0.7rem] text-gray-400 mt-[3px]">First seen</div>
                                     </div>
                                 )}
                                 {node.last_seen_block && (
                                     <div>
-                                        <div className="text-[1rem] font-bold text-gray-900 leading-none">#{node.last_seen_block.toLocaleString()}</div>
+                                        <div className="text-[1rem] font-bold text-gray-900 leading-none">
+                                            #{node.last_seen_block.toLocaleString()}
+                                        </div>
                                         <div className="text-[0.7rem] text-gray-400 mt-[3px]">Last seen</div>
                                     </div>
                                 )}
@@ -166,7 +211,10 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             <p className={sectionLabel}>Labels</p>
                             <div className="flex flex-wrap gap-1">
                                 {node.labels.map((label) => (
-                                    <span key={label} className="px-2 py-[3px] bg-gray-50 border border-gray-200 rounded text-[0.7rem] text-gray-500">
+                                    <span
+                                        key={label}
+                                        className="px-2 py-[3px] bg-gray-50 border border-gray-200 rounded text-[0.7rem] text-gray-500"
+                                    >
                                         {label}
                                     </span>
                                 ))}
@@ -175,26 +223,6 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                         <hr className={divider} />
                     </>
                 )}
-
-                {/* Address */}
-                <div>
-                    <p className={sectionLabel}>Address</p>
-                    <div className="flex items-center gap-2 px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-lg">
-                        <span className="flex-1 font-mono text-[0.7rem] text-gray-500 break-all leading-relaxed">{node.address}</span>
-                        <button
-                            className={btnIcon}
-                            title="Copy address"
-                            onClick={() => navigator.clipboard.writeText(node.address)}
-                        >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                <hr className={divider} />
 
                 {/* Actions */}
                 <div>
@@ -205,8 +233,16 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             onClick={onExpand}
                         >
                             Expand Neighbours
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                            >
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                                <polyline points="12 5 19 12 12 19" />
                             </svg>
                         </button>
                         <a
@@ -216,9 +252,17 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             className="w-full px-3.5 py-[9px] rounded-lg text-[0.78rem] font-semibold cursor-pointer flex items-center justify-between transition-colors bg-white text-gray-900 border border-gray-200 no-underline hover:bg-gray-50"
                         >
                             View on Etherscan
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <svg
+                                width="11"
+                                height="11"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                            >
                                 <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                                <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                                <polyline points="15 3 21 3 21 9" />
+                                <line x1="10" y1="14" x2="21" y2="3" />
                             </svg>
                         </a>
                     </div>
@@ -242,7 +286,10 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             {members.length > 0 && (
                                 <div className="flex flex-col gap-0.5 max-h-40 overflow-y-auto mb-1.5">
                                     {members.map((m) => (
-                                        <div key={m.address} className="flex items-center gap-1.5 px-1 py-[3px] rounded bg-gray-50 border border-gray-100">
+                                        <div
+                                            key={m.address}
+                                            className="flex items-center gap-1.5 px-1 py-[3px] rounded bg-gray-50 border border-gray-100"
+                                        >
                                             <button
                                                 className="flex-1 text-left bg-none border-none cursor-pointer font-mono text-[0.68rem] text-gray-900 p-0 truncate hover:underline"
                                                 title={m.address}
@@ -273,7 +320,9 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                     placeholder="0x… contract address"
                                     value={memberInput}
                                     onChange={(e) => setMemberInput(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === "Enter") handleAddMember(); }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") handleAddMember();
+                                    }}
                                 />
                                 <button
                                     className="shrink-0 px-2.5 py-1 bg-gray-900 text-white text-[0.7rem] font-semibold rounded border-none cursor-pointer transition-colors hover:bg-[#1e293b]"
@@ -303,21 +352,29 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                             onClick={() => onNavigateToAddress?.(counterparty)}
                                             title={`${isSent ? "Sent to" : "Received from"} ${counterparty}`}
                                         >
-                                            <span className={`font-bold text-[0.85rem] leading-none ${isSent ? "text-orange-500" : "text-green-500"}`}>
+                                            <span
+                                                className={`font-bold text-[0.85rem] leading-none ${isSent ? "text-orange-500" : "text-green-500"}`}
+                                            >
                                                 {isSent ? "↑" : "↓"}
                                             </span>
                                             <span className="text-[0.72rem] font-mono text-gray-500 overflow-hidden text-ellipsis whitespace-nowrap">
                                                 {formatAddress(counterparty, 4)}
                                             </span>
-                                            <span className="text-[0.7rem] font-semibold text-gray-900 whitespace-nowrap">{formatWei(tx.value)}</span>
+                                            <span className="text-[0.7rem] font-semibold text-gray-900 whitespace-nowrap">
+                                                {formatWei(tx.value)}
+                                            </span>
                                             {tx.block_number != null && (
-                                                <span className="text-[0.65rem] text-gray-400 whitespace-nowrap">#{tx.block_number.toLocaleString()}</span>
+                                                <span className="text-[0.65rem] text-gray-400 whitespace-nowrap">
+                                                    #{tx.block_number.toLocaleString()}
+                                                </span>
                                             )}
                                         </button>
                                     );
                                 })}
                                 {txForNode.length > 10 && (
-                                    <p className="text-[0.65rem] text-gray-400 text-center mt-1 mb-0">+{txForNode.length - 10} more</p>
+                                    <p className="text-[0.65rem] text-gray-400 text-center mt-1 mb-0">
+                                        +{txForNode.length - 10} more
+                                    </p>
                                 )}
                             </div>
                         </div>

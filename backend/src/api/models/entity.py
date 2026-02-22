@@ -56,7 +56,6 @@ class EntityResponse(BaseModel):
 class GroupCreateRequest(BaseModel):
     """Request model for creating a new group entity."""
 
-    address: str = Field(..., description="0x-prefixed Ethereum address, 42 chars")
     name: str = Field(..., description="Human-readable group name")
     entity_type: "EntityType" = Field(EntityType.CONTRACT, description="Entity type")
     risk_level: "RiskLevel" = Field(RiskLevel.UNKNOWN, description="Risk level")

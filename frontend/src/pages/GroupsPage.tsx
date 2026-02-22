@@ -74,13 +74,16 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
     const [editDesc, setEditDesc] = useState("");
     const [saving, setSaving] = useState(false);
 
-    const [newAddress, setNewAddress] = useState("");
     const [newName, setNewName] = useState("");
+    const [newDesc, setNewDesc] = useState("");
+    const [newType, setNewType] = useState<string>("Contract");
     const [creating, setCreating] = useState(false);
 
     const [memberInput, setMemberInput] = useState("");
-    const [memberLoading, setMemberLoading] = useState(false);
+    const [pendingMembers, setPendingMembers] = useState<string[]>([]);
+    const [removedMembers, setRemovedMembers] = useState<string[]>([]);
     const [selectedMember, setSelectedMember] = useState<EntityResponse | null>(null);
+
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [editMode, setEditMode] = useState(false);
 
@@ -107,6 +110,8 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
         setEditRisk(group.risk_level);
         setEditDesc((group.properties?.description as string) ?? "");
         setMemberInput("");
+        setPendingMembers([]);
+        setRemovedMembers([]);
         setSelectedMember(null);
         setEditMode(false);
     }
@@ -121,22 +126,27 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
     }
 
     async function handleCreate() {
-        if (!newAddress.trim() || !newName.trim()) {
-            toast.error("Address and name are required");
+        if (!newName.trim()) {
+            toast.error("Name is required");
             return;
         }
         setCreating(true);
         try {
-            const created = await createGroup({ address: newAddress.trim(), name: newName.trim() });
+            const created = await createGroup({
+                name: newName.trim(),
+                entity_type: newType,
+                description: newDesc.trim() || undefined,
+            });
             toast.success(`Group "${created.name}" created`);
             await loadGroups();
             setShowCreateForm(false);
-            setNewAddress("");
             setNewName("");
+            setNewDesc("");
+            setNewType("Contract");
             setSelected(created);
             setEditName(created.name ?? "");
             setEditRisk(created.risk_level);
-            setEditDesc("");
+            setEditDesc(created.description ?? "");
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : "Failed to create group");
         } finally {
@@ -148,17 +158,24 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
         if (!selected) return;
         setSaving(true);
         try {
-            const updated = await updateGroup(selected.address, {
+            await updateGroup(selected.address, {
                 name: editName || undefined,
                 risk_level: editRisk,
                 description: editDesc || undefined,
             });
-            toast.success("Group updated");
-            setSelected(updated);
-            setGroups((prev) => prev.map((g) => (g.address === updated.address ? updated : g)));
+            await Promise.all([
+                ...pendingMembers.map((addr) => addGroupMember(selected.address, addr)),
+                ...removedMembers.map((addr) => removeGroupMember(selected.address, addr)),
+            ]);
+            const refreshed = await fetchGroup(selected.address);
+            toast.success("Group saved");
+            setSelected(refreshed);
+            setGroups((prev) => prev.map((g) => (g.address === refreshed.address ? refreshed : g)));
+            setPendingMembers([]);
+            setRemovedMembers([]);
             setEditMode(false);
         } catch (err: unknown) {
-            toast.error(err instanceof Error ? err.message : "Failed to update group");
+            toast.error(err instanceof Error ? err.message : "Failed to save group");
         } finally {
             setSaving(false);
         }
@@ -177,35 +194,32 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
         }
     }
 
-    async function handleAddMember() {
-        if (!selected || !memberInput.trim()) return;
-        setMemberLoading(true);
-        try {
-            await addGroupMember(selected.address, memberInput.trim());
-            toast.success("Member added");
+    function handleStageMember() {
+        const addr = memberInput.trim().toLowerCase();
+        if (!addr) return;
+        if (pendingMembers.includes(addr)) {
             setMemberInput("");
-            const refreshed = await fetchGroup(selected.address);
-            setSelected(refreshed);
-            setGroups((prev) => prev.map((g) => (g.address === refreshed.address ? refreshed : g)));
-        } catch (err: unknown) {
-            toast.error(err instanceof Error ? err.message : "Failed to add member");
-        } finally {
-            setMemberLoading(false);
+            return;
         }
+        if (selected?.members.some((m) => m.address === addr && !removedMembers.includes(addr))) {
+            toast.error("Address is already a member");
+            return;
+        }
+        setPendingMembers((prev) => [...prev, addr]);
+        setMemberInput("");
     }
 
-    async function handleRemoveMember(childAddress: string) {
-        if (!selected) return;
-        if (!window.confirm("Remove this address from the group?")) return;
-        try {
-            await removeGroupMember(selected.address, childAddress);
-            toast.success("Member removed");
-            const refreshed = await fetchGroup(selected.address);
-            setSelected(refreshed);
-            setGroups((prev) => prev.map((g) => (g.address === refreshed.address ? refreshed : g)));
-        } catch (err: unknown) {
-            toast.error(err instanceof Error ? err.message : "Failed to remove member");
-        }
+    function handleUnstageMember(addr: string) {
+        setPendingMembers((prev) => prev.filter((a) => a !== addr));
+    }
+
+    function handleMarkRemove(addr: string) {
+        setRemovedMembers((prev) => [...prev, addr]);
+        if (selectedMember?.address === addr) setSelectedMember(null);
+    }
+
+    function handleUnmarkRemove(addr: string) {
+        setRemovedMembers((prev) => prev.filter((a) => a !== addr));
     }
 
     return (
@@ -305,20 +319,34 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                             <h2 className="text-xl font-bold text-gray-900 m-0">New Group</h2>
                         </div>
                         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-[0_1px_2px_rgba(15,23,42,0.05)] flex flex-col gap-4">
-                            <FormField label="Address">
+                            <div className="grid grid-cols-2 gap-4">
+                                <FormField label="Name">
+                                    <input
+                                        className={inputCls}
+                                        placeholder="e.g. Tornado Cash Protocol"
+                                        value={newName}
+                                        onChange={(e) => setNewName(e.target.value)}
+                                        onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                                    />
+                                </FormField>
+                                <FormField label="Type">
+                                    <select
+                                        className={inputCls}
+                                        value={newType}
+                                        onChange={(e) => setNewType(e.target.value)}
+                                    >
+                                        {["EOA","Contract","Mixer","LendingPool","Bridge","DEX","CEXHotWallet","Application","Unknown"].map((t) => (
+                                            <option key={t} value={t}>{t}</option>
+                                        ))}
+                                    </select>
+                                </FormField>
+                            </div>
+                            <FormField label="Description">
                                 <input
                                     className={inputCls}
-                                    placeholder="0x…"
-                                    value={newAddress}
-                                    onChange={(e) => setNewAddress(e.target.value)}
-                                />
-                            </FormField>
-                            <FormField label="Name">
-                                <input
-                                    className={inputCls}
-                                    placeholder="Protocol name…"
-                                    value={newName}
-                                    onChange={(e) => setNewName(e.target.value)}
+                                    placeholder="Optional description…"
+                                    value={newDesc}
+                                    onChange={(e) => setNewDesc(e.target.value)}
                                 />
                             </FormField>
                             <div className="flex gap-2 pt-1">
@@ -358,7 +386,17 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                     </p>
                                 )}
                             </div>
-                            <button className={editMode ? btnGhost : btnPrimary} onClick={() => setEditMode((v) => !v)}>
+                            <button
+                                className={editMode ? btnGhost : btnPrimary}
+                                onClick={() => {
+                                    if (editMode) {
+                                        setPendingMembers([]);
+                                        setRemovedMembers([]);
+                                        setMemberInput("");
+                                    }
+                                    setEditMode((v) => !v);
+                                }}
+                            >
                                 {editMode ? "Cancel" : "Edit"}
                             </button>
                         </div>
@@ -415,23 +453,26 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                     Members
                                 </p>
                                 <span className="text-[0.72rem] font-semibold text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">
-                                    {selected.member_count}
+                                    {selected.member_count - removedMembers.length + pendingMembers.length}
                                 </span>
                             </div>
 
                             <div className="flex flex-col divide-y divide-gray-100">
-                                {selected.members.length === 0 && (
+                                {selected.members.length === 0 && pendingMembers.length === 0 && (
                                     <p className="text-[0.78rem] text-gray-400 text-center px-5 py-5 m-0">
                                         No members yet.
                                     </p>
                                 )}
+
+                                {/* Existing members */}
                                 {selected.members.map((m) => {
-                                    const isExpanded = selectedMember?.address === m.address;
+                                    const isRemoved = removedMembers.includes(m.address);
+                                    const isExpanded = !isRemoved && selectedMember?.address === m.address;
                                     return (
-                                        <div key={m.address}>
+                                        <div key={m.address} className={isRemoved ? "opacity-40" : ""}>
                                             <div
-                                                className={`flex items-center gap-2 px-5 py-2.5 transition-colors cursor-pointer ${isExpanded ? "bg-gray-50" : "hover:bg-gray-50"}`}
-                                                onClick={() => setSelectedMember(isExpanded ? null : m)}
+                                                className={`flex items-center gap-2 px-5 py-2.5 transition-colors ${isRemoved ? "bg-red-50 cursor-default" : "cursor-pointer " + (isExpanded ? "bg-gray-50" : "hover:bg-gray-50")}`}
+                                                onClick={() => !isRemoved && setSelectedMember(isExpanded ? null : m)}
                                             >
                                                 <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                                                     {m.name && (
@@ -439,43 +480,44 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                             {m.name}
                                                         </span>
                                                     )}
-                                                    <span className="font-mono text-[0.68rem] text-gray-500 break-all">
+                                                    <span className={`font-mono text-[0.68rem] break-all ${isRemoved ? "text-red-400 line-through" : "text-gray-500"}`}>
                                                         {m.address}
                                                     </span>
                                                 </div>
                                                 <div className="shrink-0 flex items-center gap-1.5">
-                                                    <svg
-                                                        width="12"
-                                                        height="12"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeWidth="2.5"
-                                                        className={`text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                                                    >
-                                                        <polyline points="6 9 12 15 18 9" />
-                                                    </svg>
-                                                    {editMode && (
-                                                        <button
-                                                            className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-gray-300 transition-colors hover:text-red-500 hover:bg-red-50"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleRemoveMember(m.address);
-                                                            }}
-                                                            title="Remove member"
+                                                    {!isRemoved && (
+                                                        <svg
+                                                            width="12"
+                                                            height="12"
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            strokeWidth="2.5"
+                                                            className={`text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
                                                         >
-                                                            <svg
-                                                                width="11"
-                                                                height="11"
-                                                                viewBox="0 0 24 24"
-                                                                fill="none"
-                                                                stroke="currentColor"
-                                                                strokeWidth="2.5"
+                                                            <polyline points="6 9 12 15 18 9" />
+                                                        </svg>
+                                                    )}
+                                                    {editMode && (
+                                                        isRemoved ? (
+                                                            <button
+                                                                className="text-[0.65rem] text-red-400 underline px-1"
+                                                                onClick={(e) => { e.stopPropagation(); handleUnmarkRemove(m.address); }}
                                                             >
-                                                                <line x1="18" y1="6" x2="6" y2="18" />
-                                                                <line x1="6" y1="6" x2="18" y2="18" />
-                                                            </svg>
-                                                        </button>
+                                                                Undo
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-gray-300 transition-colors hover:text-red-500 hover:bg-red-50"
+                                                                onClick={(e) => { e.stopPropagation(); handleMarkRemove(m.address); }}
+                                                                title="Remove member"
+                                                            >
+                                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                                                </svg>
+                                                            </button>
+                                                        )
                                                     )}
                                                 </div>
                                             </div>
@@ -488,16 +530,11 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                                     {m.entity_type}
                                                                 </span>
                                                             )}
-                                                            <span
-                                                                className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE_CLASSES[m.risk_level]}`}
-                                                            >
+                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE_CLASSES[m.risk_level]}`}>
                                                                 {m.risk_level}
                                                             </span>
                                                             {m.labels.map((l) => (
-                                                                <span
-                                                                    key={l}
-                                                                    className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-800 border border-gray-200"
-                                                                >
+                                                                <span key={l} className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-800 border border-gray-200">
                                                                     {l}
                                                                 </span>
                                                             ))}
@@ -513,32 +550,20 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                         <div className="flex gap-4">
                                                             {m.transaction_count != null && (
                                                                 <div className="flex flex-col gap-0.5">
-                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">
-                                                                        Txns
-                                                                    </span>
-                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">
-                                                                        {m.transaction_count.toLocaleString()}
-                                                                    </span>
+                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">Txns</span>
+                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">{m.transaction_count.toLocaleString()}</span>
                                                                 </div>
                                                             )}
                                                             {m.first_seen_block != null && (
                                                                 <div className="flex flex-col gap-0.5">
-                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">
-                                                                        First block
-                                                                    </span>
-                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">
-                                                                        #{m.first_seen_block.toLocaleString()}
-                                                                    </span>
+                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">First block</span>
+                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">#{m.first_seen_block.toLocaleString()}</span>
                                                                 </div>
                                                             )}
                                                             {m.last_seen_block != null && (
                                                                 <div className="flex flex-col gap-0.5">
-                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">
-                                                                        Last block
-                                                                    </span>
-                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">
-                                                                        #{m.last_seen_block.toLocaleString()}
-                                                                    </span>
+                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">Last block</span>
+                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">#{m.last_seen_block.toLocaleString()}</span>
                                                                 </div>
                                                             )}
                                                         </div>
@@ -548,25 +573,38 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         </div>
                                     );
                                 })}
+
+                                {/* Pending (staged) members */}
+                                {pendingMembers.map((addr) => (
+                                    <div key={addr} className="flex items-center gap-2 px-5 py-2.5 bg-green-50">
+                                        <div className="flex-1 min-w-0">
+                                            <span className="font-mono text-[0.68rem] text-green-700 break-all">{addr}</span>
+                                            <span className="ml-2 text-[0.62rem] text-green-500 font-semibold uppercase tracking-wider">pending</span>
+                                        </div>
+                                        <button
+                                            className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-green-300 transition-colors hover:text-red-500 hover:bg-red-50"
+                                            onClick={() => handleUnstageMember(addr)}
+                                            title="Remove staged member"
+                                        >
+                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <line x1="18" y1="6" x2="6" y2="18" />
+                                                <line x1="6" y1="6" x2="18" y2="18" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                ))}
                             </div>
 
-                            {/* Add member row — only shown in edit mode */}
+                            {/* Add member input — only shown in edit mode */}
                             {editMode && (
-                                <div className="flex gap-2 items-center px-5 py-3 border-t border-gray-100 bg-gray-50">
+                                <div className="px-5 py-3 border-t border-gray-100 bg-gray-50">
                                     <input
-                                        className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg px-2.5 py-[6px] font-mono text-[0.72rem] text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-gray-400 focus:shadow-[0_0_0_2px_rgba(15,23,42,0.06)]"
-                                        placeholder="0x… add member address"
+                                        className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-[6px] font-mono text-[0.72rem] text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-indigo-400 focus:shadow-[0_0_0_2px_rgba(99,102,241,0.15)]"
+                                        placeholder="0x… type address and press Enter to stage"
                                         value={memberInput}
                                         onChange={(e) => setMemberInput(e.target.value)}
-                                        onKeyDown={(e) => e.key === "Enter" && handleAddMember()}
+                                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleStageMember(); } }}
                                     />
-                                    <button
-                                        className={btnPrimarySm}
-                                        onClick={handleAddMember}
-                                        disabled={memberLoading || !memberInput.trim()}
-                                    >
-                                        {memberLoading ? "…" : "Add"}
-                                    </button>
                                 </div>
                             )}
 
