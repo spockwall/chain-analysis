@@ -60,18 +60,18 @@ def _build_group_detail(node: Node, members: list[Node]) -> GroupDetailResponse:
 
 @router.get("", response_model=GroupListResponse)
 async def list_groups(graph_db: GraphDBDep) -> GroupListResponse:
-    """List all group entities (those with at least one MEMBER_OF child)."""
+    """List all group entities (those with at least one IN_GROUP member)."""
     query = """
-    MATCH (parent:Entity)<-[:MEMBER_OF]-(child:Entity)
-    WITH parent, labels(parent) AS labels, count(child) AS member_count
-    RETURN parent, labels, member_count
+    MATCH (member:Entity)-[:IN_GROUP]->(grp:Entity)
+    WITH grp, labels(grp) AS labels, count(member) AS member_count
+    RETURN grp, labels, member_count
     ORDER BY member_count DESC
     """
     records = await graph_db.execute_query(query)
 
     groups: list[GroupDetailResponse] = []
     for record in records:
-        node_data = dict(record["parent"])
+        node_data = dict(record["grp"])
         node_address = node_data.pop("address")
         node_data["member_count"] = record["member_count"]
         node = Node(

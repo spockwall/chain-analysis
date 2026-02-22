@@ -206,7 +206,7 @@ export async function addGroupMember(
 ): Promise<GroupMemberResponse> {
   return request<GroupMemberResponse>(`/entities/${address}/members`, {
     method: 'POST',
-    body: JSON.stringify({ child_address: childAddress }),
+    body: JSON.stringify({ member_address: childAddress }),
   })
 }
 

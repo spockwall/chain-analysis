@@ -29,7 +29,7 @@ export interface EntityResponse {
 }
 
 export interface GroupMemberResponse {
-  parent_address: string
+  group_address: string
   members: EntityResponse[]
   total: number
 }

@@ -205,43 +205,43 @@ class GraphDatabase(Protocol):
         """
         ...
 
-    async def add_group_member(self, parent_address: str, child_address: str) -> None:
+    async def add_group_member(self, group_address: str, member_address: str) -> None:
         """
-        Add a child entity as a member of a parent group entity.
+        Add an entity as a member of a group.
 
-        Creates a (child:Entity)-[:MEMBER_OF]->(parent:Entity) relationship.
+        Creates a (member:Entity)-[:IN_GROUP]->(group:Entity) relationship.
         """
         ...
 
-    async def remove_group_member(self, parent_address: str, child_address: str) -> None:
+    async def remove_group_member(self, group_address: str, member_address: str) -> None:
         """
-        Remove a child entity from a parent group entity.
+        Remove an entity from a group.
 
-        Deletes the (child:Entity)-[:MEMBER_OF]->(parent:Entity) relationship.
+        Deletes the (member:Entity)-[:IN_GROUP]->(group:Entity) relationship.
         """
         ...
 
-    async def get_group_members(self, parent_address: str) -> list[Node]:
+    async def get_group_members(self, group_address: str) -> list[Node]:
         """
-        Get all member entities of a group entity.
+        Get all member entities of a group.
 
         Args:
-            parent_address: Address of the parent group entity
+            group_address: Address of the group entity
 
         Returns:
             List of Node objects for each member entity
         """
         ...
 
-    async def get_group_parent(self, child_address: str) -> Node | None:
+    async def get_group_parent(self, member_address: str) -> Node | None:
         """
-        Return the parent group node that this address belongs to, or None.
+        Return the group node that this address belongs to, or None.
 
         Args:
-            child_address: Entity address to check membership for
+            member_address: Entity address to check membership for
 
         Returns:
-            Parent Node if the address is a member of a group, None otherwise
+            Group Node if the address is a member of a group, None otherwise
         """
         ...
 

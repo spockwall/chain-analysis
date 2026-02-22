@@ -190,8 +190,8 @@ class Neo4jAdapter:
         """Get a single node by address, including member_count for group entities."""
         query = """
         MATCH (e:Entity {address: $address})
-        OPTIONAL MATCH (child:Entity)-[:MEMBER_OF]->(e)
-        RETURN e, labels(e) AS labels, count(child) AS member_count
+        OPTIONAL MATCH (member:Entity)-[:IN_GROUP]->(e)
+        RETURN e, labels(e) AS labels, count(member) AS member_count
         """
         result = await self.execute_query(query, {"address": address})
         if not result:
@@ -207,35 +207,35 @@ class Neo4jAdapter:
             properties=node_data,
         )
 
-    async def add_group_member(self, parent_address: str, child_address: str) -> None:
-        """Add a child entity as a member of a parent group via MEMBER_OF relationship."""
+    async def add_group_member(self, group_address: str, member_address: str) -> None:
+        """Add an entity as a member of a group via IN_GROUP relationship."""
         from datetime import datetime, timezone
         query = """
-        MATCH (parent:Entity {address: $parent})
-        MERGE (child:Entity {address: $child})
-        MERGE (child)-[:MEMBER_OF {added_at: $now}]->(parent)
+        MATCH (grp:Entity {address: $group})
+        MERGE (member:Entity {address: $member})
+        MERGE (member)-[:IN_GROUP {added_at: $now}]->(grp)
         """
         now = datetime.now(timezone.utc).isoformat()
-        await self.execute_query(query, {"parent": parent_address, "child": child_address, "now": now})
+        await self.execute_query(query, {"group": group_address, "member": member_address, "now": now})
 
-    async def remove_group_member(self, parent_address: str, child_address: str) -> None:
-        """Remove the MEMBER_OF relationship between child and parent."""
+    async def remove_group_member(self, group_address: str, member_address: str) -> None:
+        """Remove the IN_GROUP relationship between a member and its group."""
         query = """
-        MATCH (child:Entity {address: $child})-[r:MEMBER_OF]->(parent:Entity {address: $parent})
+        MATCH (member:Entity {address: $member})-[r:IN_GROUP]->(grp:Entity {address: $group})
         DELETE r
         """
-        await self.execute_query(query, {"parent": parent_address, "child": child_address})
+        await self.execute_query(query, {"group": group_address, "member": member_address})
 
-    async def get_group_members(self, parent_address: str) -> list[Node]:
-        """Return all entities that are members of the given parent group."""
+    async def get_group_members(self, group_address: str) -> list[Node]:
+        """Return all entities that are members of the given group."""
         query = """
-        MATCH (child:Entity)-[:MEMBER_OF]->(parent:Entity {address: $parent})
-        RETURN child, labels(child) AS labels
+        MATCH (member:Entity)-[:IN_GROUP]->(grp:Entity {address: $group})
+        RETURN member, labels(member) AS labels
         """
-        result = await self.execute_query(query, {"parent": parent_address})
+        result = await self.execute_query(query, {"group": group_address})
         nodes: list[Node] = []
         for record in result:
-            node_data = dict(record["child"])
+            node_data = dict(record["member"])
             node_address = node_data.pop("address")
             nodes.append(Node(
                 address=node_address,
@@ -244,17 +244,17 @@ class Neo4jAdapter:
             ))
         return nodes
 
-    async def get_group_parent(self, child_address: str) -> "Node | None":
-        """Return the parent group node this address belongs to, or None."""
+    async def get_group_parent(self, member_address: str) -> "Node | None":
+        """Return the group node this address belongs to, or None."""
         query = """
-        MATCH (child:Entity {address: $child})-[:MEMBER_OF]->(parent:Entity)
-        RETURN parent, labels(parent) AS labels
+        MATCH (member:Entity {address: $member})-[:IN_GROUP]->(grp:Entity)
+        RETURN grp, labels(grp) AS labels
         """
-        result = await self.execute_query(query, {"child": child_address})
+        result = await self.execute_query(query, {"member": member_address})
         if not result:
             return None
         record = result[0]
-        node_data = dict(record["parent"])
+        node_data = dict(record["grp"])
         node_address = node_data.pop("address")
         return Node(
             address=node_address,

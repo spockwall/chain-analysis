@@ -94,15 +94,15 @@ class GroupListResponse(BaseModel):
 
 
 class GroupMemberRequest(BaseModel):
-    """Request model for adding a contract member to a group entity."""
+    """Request model for adding a member to a group entity."""
 
-    child_address: str = Field(..., description="Contract address to add as member")
+    member_address: str = Field(..., description="Contract address to add as member")
 
 
 class GroupMemberResponse(BaseModel):
     """Response model for group member operations."""
 
-    parent_address: str = Field(..., description="Parent group entity address")
+    group_address: str = Field(..., description="Group entity address")
     members: list["EntityResponse"] = Field(..., description="Member entities")
     total: int = Field(..., description="Total number of members")
 

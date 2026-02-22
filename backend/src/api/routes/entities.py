@@ -491,7 +491,7 @@ async def get_group_members(
     members = await graph_db.get_group_members(address)
     member_responses = [_node_obj_to_response(m) for m in members]
     return GroupMemberResponse(
-        parent_address=address,
+        group_address=address,
         members=member_responses,
         total=len(member_responses),
     )
@@ -503,47 +503,52 @@ async def add_group_member(
     body: GroupMemberRequest,
     graph_db: GraphDBDep,
 ) -> GroupMemberResponse:
-    """Add a contract address as a member of a group entity."""
+    """Add an address as a member of a group entity."""
     address = _validate_address(address)
-    child_address = _validate_address(body.child_address, "child_address")
+    member_address = _validate_address(body.member_address, "member_address")
 
-    if address == child_address:
-        raise HTTPException(status_code=400, detail="Parent and child addresses must differ")
+    if address == member_address:
+        raise HTTPException(status_code=400, detail="A group cannot be a member of itself")
 
-    parent_node = await graph_db.get_node(address)
-    if parent_node is None:
-        raise HTTPException(status_code=404, detail="Parent entity not found")
+    group_node = await graph_db.get_node(address)
+    if group_node is None:
+        raise HTTPException(status_code=404, detail="Group entity not found")
 
-    # Check if the child already belongs to a different group
-    existing_parent = await graph_db.get_group_parent(child_address)
-    if existing_parent and existing_parent.address != address:
+    # Check if the member is already in any group
+    existing_group = await graph_db.get_group_parent(member_address)
+    if existing_group:
+        if existing_group.address == address:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Address {member_address} is already a member of this group",
+            )
         raise HTTPException(
             status_code=409,
-            detail=f"Address {child_address} is already a member of group {existing_parent.address} "
-                   f"({existing_parent.properties.get('name', existing_parent.address)})",
+            detail=f"Address {member_address} is already a member of group "
+                   f"{existing_group.properties.get('name', existing_group.address)}",
         )
 
-    await graph_db.add_group_member(address, child_address)
+    await graph_db.add_group_member(address, member_address)
 
     members = await graph_db.get_group_members(address)
     member_responses = [_node_obj_to_response(m) for m in members]
     return GroupMemberResponse(
-        parent_address=address,
+        group_address=address,
         members=member_responses,
         total=len(member_responses),
     )
 
 
-@write_router.delete("/{address}/members/{child_address}", status_code=204)
+@write_router.delete("/{address}/members/{member_address}", status_code=204)
 async def remove_group_member(
     address: str,
-    child_address: str,
+    member_address: str,
     graph_db: GraphDBDep,
 ) -> None:
-    """Remove a contract member from a group entity."""
+    """Remove a member from a group entity."""
     address = _validate_address(address)
-    child_address = _validate_address(child_address, "child_address")
-    await graph_db.remove_group_member(address, child_address)
+    member_address = _validate_address(member_address, "member_address")
+    await graph_db.remove_group_member(address, member_address)
 
 
 # ── Transaction endpoints ──────────────────────────────────────────────────────

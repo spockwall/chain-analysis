@@ -223,7 +223,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                     onClick={() => setSidebarOpen(false)}
                                     className="text-[0.72rem] font-bold tracking-wider uppercase text-gray-400"
                                 >
-                                    Groups {"<"}
+                                    {"<"} Groups
                                 </button>
                                 <div className="flex items-center gap-1.5">
                                     <button
