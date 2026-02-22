@@ -41,6 +41,14 @@ class Base(DeclarativeBase):
 # =============================================================================
 
 
+class UserRole(str, PyEnum):
+    """Application user role."""
+
+    ADMIN = "admin"  # Full control — manage users, operators, all data
+    OPERATOR = "operator"  # Data provider / analyst — can ingest and annotate
+    USER = "user"  # Read-only viewer; future subscribe-API tier
+
+
 class TaskStatus(str, PyEnum):
     """Label task status."""
 
@@ -85,6 +93,27 @@ class IngestionStatus(str, PyEnum):
 # =============================================================================
 # Models
 # =============================================================================
+
+
+class User(Base):
+    """Application user with authentication credentials."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(50), default=UserRole.USER.value, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Labeler(Base):
@@ -152,9 +181,7 @@ class LabelTask(Base):
         "Annotation", back_populates="task"
     )
 
-    __table_args__ = (
-        Index("ix_label_tasks_status_priority", "status", "priority"),
-    )
+    __table_args__ = (Index("ix_label_tasks_status_priority", "status", "priority"),)
 
 
 class Annotation(Base):
@@ -212,14 +239,18 @@ class KnownLabel(Base):
     # Label data
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     entity_type: Mapped[EntityType | None] = mapped_column(Enum(EntityType))
-    category: Mapped[str | None] = mapped_column(String(100))  # e.g., "exchange", "defi"
+    category: Mapped[str | None] = mapped_column(
+        String(100)
+    )  # e.g., "exchange", "defi"
     subcategory: Mapped[str | None] = mapped_column(String(100))
     risk_level: Mapped[RiskLevel] = mapped_column(
         Enum(RiskLevel), default=RiskLevel.UNKNOWN
     )
 
     # Source tracking
-    source: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g., "etherscan"
+    source: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )  # e.g., "etherscan"
     source_url: Mapped[str | None] = mapped_column(String(500))
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -254,7 +285,9 @@ class IngestionRun(Base):
     chain_id: Mapped[int] = mapped_column(Integer, default=1)
     start_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
     end_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    data_source: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g., "allium"
+    data_source: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # e.g., "allium"
 
     # Status
     status: Mapped[IngestionStatus] = mapped_column(

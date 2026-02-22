@@ -31,6 +31,11 @@ dependencies = [
     # HTTP Client
     "httpx>=0.28.0",
 
+    # Auth
+    "python-jose[cryptography]>=3.3.0",
+    "bcrypt>=4.0.0",
+    "email-validator>=2.1.0",
+
     # Utilities
     "python-dotenv>=1.0.0",
     "loguru>=0.7.0",

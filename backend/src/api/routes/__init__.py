@@ -1,5 +1,6 @@
 """API route modules."""
 
+from .auth import router as auth_router
 from .entities import (
     router as entities_router,
     transactions_router,
@@ -11,6 +12,7 @@ from .labels import router as labels_router
 from .stats import router as stats_router
 
 __all__ = [
+    "auth_router",
     "entities_router",
     "entities_write_router",
     "groups_router",

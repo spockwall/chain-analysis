@@ -1,5 +1,6 @@
 """Pydantic models for API request/response."""
 
+from .auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
 from .entity import (
     EntityResponse,
     EntityType,
@@ -9,6 +10,12 @@ from .entity import (
 )
 
 __all__ = [
+    # Auth
+    "LoginRequest",
+    "RegisterRequest",
+    "TokenResponse",
+    "UserResponse",
+    # Entity
     "EntityResponse",
     "EntityType",
     "RiskLevel",

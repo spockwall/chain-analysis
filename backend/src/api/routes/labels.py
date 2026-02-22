@@ -173,7 +173,10 @@ async def create_annotation(
         Created annotation
     """
     # Validate address format
-    if not annotation.entity_address.startswith("0x") or len(annotation.entity_address) != 42:
+    if (
+        not annotation.entity_address.startswith("0x")
+        or len(annotation.entity_address) != 42
+    ):
         raise HTTPException(status_code=400, detail="Invalid address format")
 
     address = annotation.entity_address.lower()
@@ -207,7 +210,9 @@ async def create_annotation(
             "task_id": annotation.task_id,
             "labeler_id": labeler_id,
             "address": address,
-            "entity_type": annotation.entity_type.value if annotation.entity_type else None,
+            "entity_type": (
+                annotation.entity_type.value if annotation.entity_type else None
+            ),
             "risk_level": annotation.risk_level.value,
             "labels": annotation.labels,
             "notes": annotation.notes,

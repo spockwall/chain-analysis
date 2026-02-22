@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     etherscan_api_key: str | None = None
 
     # =========================================================================
+    # Auth / JWT
+    # =========================================================================
+    jwt_secret_key: str = "change-me-in-production-use-a-long-random-secret"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24  # 24 hours
+
+    # =========================================================================
     # API Configuration
     # =========================================================================
     api_host: str = "0.0.0.0"
