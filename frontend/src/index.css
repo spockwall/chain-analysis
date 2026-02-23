@@ -42,16 +42,28 @@
 /* ============================================================
    Reset & Base
    ============================================================ */
-*, *::before, *::after { box-sizing: border-box; }
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
 
-html, body, #root {
+html,
+body,
+#root {
     height: 100%;
     margin: 0;
     padding: 0;
 }
 
 body {
-    font-family: "Outfit", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family:
+        "Outfit",
+        "Inter",
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
     font-size: 14px;
     line-height: 1.6;
     color: var(--text-primary);
@@ -77,14 +89,23 @@ body {
 .app-shell {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    height: calc(100vh - 115px);
 }
 
 /* ============================================================
    Scrollbar
    ============================================================ */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
-
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #cbd5e1;
+}

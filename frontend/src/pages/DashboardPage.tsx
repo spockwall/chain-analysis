@@ -3,15 +3,18 @@
  */
 import { useHealth } from "../hooks/useHealth";
 import { useGraphStats } from "../hooks/useGraphStats";
-
+import { btnSecondary } from "@/constants";
 const sectionLabel = "text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400";
-const btnSecondary = "inline-flex items-center justify-center px-2.5 py-1 bg-white text-gray-700 text-[0.72rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50 disabled:opacity-45 disabled:cursor-not-allowed";
 
 export function DashboardPage() {
     const { health, loading, error, lastChecked, refresh } = useHealth({
         refreshInterval: 30000,
     });
-    const { stats, loading: statsLoading, refresh: refreshStats } = useGraphStats({
+    const {
+        stats,
+        loading: statsLoading,
+        refresh: refreshStats,
+    } = useGraphStats({
         refreshInterval: 30000,
     });
 
@@ -28,12 +31,16 @@ export function DashboardPage() {
 
                 {/* Overall status banner */}
                 {health && (
-                    <div className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border mb-6 ${
-                        overallHealthy
-                            ? "border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.06)]"
-                            : "border-[rgba(234,179,8,0.3)] bg-[rgba(234,179,8,0.06)]"
-                    }`}>
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${overallHealthy ? "bg-green-500" : "bg-yellow-500"}`} />
+                    <div
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border mb-6 ${
+                            overallHealthy
+                                ? "border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.06)]"
+                                : "border-[rgba(234,179,8,0.3)] bg-[rgba(234,179,8,0.06)]"
+                        }`}
+                    >
+                        <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${overallHealthy ? "bg-green-500" : "bg-yellow-500"}`}
+                        />
                         <span className="text-[0.85rem] font-semibold text-gray-900">
                             {overallHealthy ? "All Systems Operational" : "Degraded — some services unhealthy"}
                         </span>
@@ -52,9 +59,14 @@ export function DashboardPage() {
                         <>
                             <div className="grid grid-cols-4 gap-3">
                                 <StatItem value={stats.node_count.toLocaleString()} label="Total Entities" />
-                                <StatItem value={(stats.transaction_count ?? 0).toLocaleString()} label="Transactions" />
                                 <StatItem
-                                    value={((stats.risk_levels["high"] ?? 0) + (stats.risk_levels["critical"] ?? 0)).toLocaleString()}
+                                    value={(stats.transaction_count ?? 0).toLocaleString()}
+                                    label="Transactions"
+                                />
+                                <StatItem
+                                    value={(
+                                        (stats.risk_levels["high"] ?? 0) + (stats.risk_levels["critical"] ?? 0)
+                                    ).toLocaleString()}
                                     label="High Risk"
                                 />
                                 <StatItem value={String(Object.keys(stats.entity_types).length)} label="Entity Types" />
@@ -62,7 +74,10 @@ export function DashboardPage() {
                             {Object.keys(stats.entity_types).length > 0 && (
                                 <div className="flex flex-wrap gap-1 mt-3.5">
                                     {Object.entries(stats.entity_types).map(([type, count]) => (
-                                        <span key={type} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded text-[0.7rem] text-gray-600">
+                                        <span
+                                            key={type}
+                                            className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded text-[0.7rem] text-gray-600"
+                                        >
                                             {type}: {count}
                                         </span>
                                     ))}
@@ -92,9 +107,7 @@ export function DashboardPage() {
                         </div>
                     </div>
 
-                    {error && (
-                        <p className="text-[0.78rem] text-red-500 mb-2.5">{error}</p>
-                    )}
+                    {error && <p className="text-[0.78rem] text-red-500 mb-2.5">{error}</p>}
 
                     {health ? (
                         <div className="grid grid-cols-2 gap-2">
@@ -103,18 +116,20 @@ export function DashboardPage() {
                                     key={service}
                                     className="flex items-center gap-2.5 px-3.5 py-2.5 border border-gray-200 rounded-lg bg-gray-50"
                                 >
-                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${healthy ? "bg-green-500" : "bg-red-500"}`} />
+                                    <span
+                                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${healthy ? "bg-green-500" : "bg-red-500"}`}
+                                    />
                                     <span className="flex-1 text-[0.8rem] text-gray-900 capitalize">{service}</span>
-                                    <span className={`text-[0.65rem] font-semibold uppercase tracking-[0.04em] ${healthy ? "text-green-700" : "text-red-700"}`}>
+                                    <span
+                                        className={`text-[0.65rem] font-semibold uppercase tracking-[0.04em] ${healthy ? "text-green-700" : "text-red-700"}`}
+                                    >
                                         {healthy ? "OK" : "Down"}
                                     </span>
                                 </div>
                             ))}
                         </div>
                     ) : (
-                        !loading && (
-                            <p className="text-[0.78rem] text-gray-400">No health data yet.</p>
-                        )
+                        !loading && <p className="text-[0.78rem] text-gray-400">No health data yet.</p>
                     )}
                 </div>
             </div>

@@ -314,7 +314,9 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         onChange={(e) => setNewType(e.target.value)}
                                     >
                                         {ENTITY_TYPES.map((t) => (
-                                            <option key={t} value={t}>{t}</option>
+                                            <option key={t} value={t}>
+                                                {t}
+                                            </option>
                                         ))}
                                     </select>
                                 </FormField>
@@ -458,7 +460,9 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                             {m.name}
                                                         </span>
                                                     )}
-                                                    <span className={`font-mono text-[0.68rem] break-all ${isRemoved ? "text-red-400 line-through" : "text-gray-500"}`}>
+                                                    <span
+                                                        className={`font-mono text-[0.68rem] break-all ${isRemoved ? "text-red-400 line-through" : "text-gray-500"}`}
+                                                    >
                                                         {m.address}
                                                     </span>
                                                 </div>
@@ -476,27 +480,39 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                             <polyline points="6 9 12 15 18 9" />
                                                         </svg>
                                                     )}
-                                                    {editMode && (
-                                                        isRemoved ? (
+                                                    {editMode &&
+                                                        (isRemoved ? (
                                                             <button
                                                                 className="text-[0.65rem] text-red-400 underline px-1"
-                                                                onClick={(e) => { e.stopPropagation(); handleUnmarkRemove(m.address); }}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleUnmarkRemove(m.address);
+                                                                }}
                                                             >
                                                                 Undo
                                                             </button>
                                                         ) : (
                                                             <button
                                                                 className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-gray-300 transition-colors hover:text-red-500 hover:bg-red-50"
-                                                                onClick={(e) => { e.stopPropagation(); handleMarkRemove(m.address); }}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleMarkRemove(m.address);
+                                                                }}
                                                                 title="Remove member"
                                                             >
-                                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                                <svg
+                                                                    width="11"
+                                                                    height="11"
+                                                                    viewBox="0 0 24 24"
+                                                                    fill="none"
+                                                                    stroke="currentColor"
+                                                                    strokeWidth="2.5"
+                                                                >
                                                                     <line x1="18" y1="6" x2="6" y2="18" />
                                                                     <line x1="6" y1="6" x2="18" y2="18" />
                                                                 </svg>
                                                             </button>
-                                                        )
-                                                    )}
+                                                        ))}
                                                 </div>
                                             </div>
                                             {isExpanded && (
@@ -508,11 +524,16 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                                     {m.entity_type}
                                                                 </span>
                                                             )}
-                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE[m.risk_level]}`}>
+                                                            <span
+                                                                className={`inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border ${RISK_BADGE[m.risk_level]}`}
+                                                            >
                                                                 {m.risk_level}
                                                             </span>
                                                             {m.labels.map((l) => (
-                                                                <span key={l} className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-800 border border-gray-200">
+                                                                <span
+                                                                    key={l}
+                                                                    className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] text-gray-800 border border-gray-200"
+                                                                >
                                                                     {l}
                                                                 </span>
                                                             ))}
@@ -528,20 +549,32 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                         <div className="flex gap-4">
                                                             {m.transaction_count != null && (
                                                                 <div className="flex flex-col gap-0.5">
-                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">Txns</span>
-                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">{m.transaction_count.toLocaleString()}</span>
+                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">
+                                                                        Txns
+                                                                    </span>
+                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">
+                                                                        {m.transaction_count.toLocaleString()}
+                                                                    </span>
                                                                 </div>
                                                             )}
                                                             {m.first_seen_block != null && (
                                                                 <div className="flex flex-col gap-0.5">
-                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">First block</span>
-                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">#{m.first_seen_block.toLocaleString()}</span>
+                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">
+                                                                        First block
+                                                                    </span>
+                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">
+                                                                        #{m.first_seen_block.toLocaleString()}
+                                                                    </span>
                                                                 </div>
                                                             )}
                                                             {m.last_seen_block != null && (
                                                                 <div className="flex flex-col gap-0.5">
-                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">Last block</span>
-                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">#{m.last_seen_block.toLocaleString()}</span>
+                                                                    <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">
+                                                                        Last block
+                                                                    </span>
+                                                                    <span className="text-[0.82rem] font-semibold text-gray-900">
+                                                                        #{m.last_seen_block.toLocaleString()}
+                                                                    </span>
                                                                 </div>
                                                             )}
                                                         </div>
@@ -556,15 +589,26 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                 {pendingMembers.map((addr) => (
                                     <div key={addr} className="flex items-center gap-2 px-5 py-2.5 bg-green-50">
                                         <div className="flex-1 min-w-0">
-                                            <span className="font-mono text-[0.68rem] text-green-700 break-all">{addr}</span>
-                                            <span className="ml-2 text-[0.62rem] text-green-500 font-semibold uppercase tracking-wider">pending</span>
+                                            <span className="font-mono text-[0.68rem] text-green-700 break-all">
+                                                {addr}
+                                            </span>
+                                            <span className="ml-2 text-[0.62rem] text-green-500 font-semibold uppercase tracking-wider">
+                                                pending
+                                            </span>
                                         </div>
                                         <button
                                             className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-green-300 transition-colors hover:text-red-500 hover:bg-red-50"
                                             onClick={() => handleUnstageMember(addr)}
                                             title="Remove staged member"
                                         >
-                                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                            <svg
+                                                width="11"
+                                                height="11"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2.5"
+                                            >
                                                 <line x1="18" y1="6" x2="6" y2="18" />
                                                 <line x1="6" y1="6" x2="18" y2="18" />
                                             </svg>
@@ -581,7 +625,12 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         placeholder="0x… type address and press Enter to stage"
                                         value={memberInput}
                                         onChange={(e) => setMemberInput(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleStageMember(); } }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                handleStageMember();
+                                            }
+                                        }}
                                     />
                                 </div>
                             )}

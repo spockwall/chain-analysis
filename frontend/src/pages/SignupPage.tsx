@@ -5,12 +5,9 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToastContext } from "../context/ToastContext";
-
-const inputCls =
-    "w-full px-3 py-2.5 border border-gray-200 rounded-lg bg-white text-[0.85rem] text-gray-900 font-[inherit] outline-none transition-all focus:border-indigo-500 focus:shadow-[0_0_0_3px_rgba(99,102,241,0.12)] placeholder:text-gray-400";
-
-const btnPrimary =
-    "w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-900 text-white text-[0.9rem] font-semibold rounded-lg shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:translate-y-0";
+import { DotCube } from "../components/DotCube";
+import { Background } from "../components/Background";
+import { inputCls, btnPrimary } from "@/constants";
 
 export function SignupPage() {
     const { register, isAuthenticated } = useAuth();
@@ -57,30 +54,9 @@ export function SignupPage() {
     }
 
     return (
-        <div
-            className="min-h-screen flex flex-col items-center justify-center px-4 font-[Outfit,Inter,sans-serif]"
-            style={{
-                backgroundColor: "#f5f5f5",
-                backgroundImage:
-                    "linear-gradient(#e2e2e2 1px, transparent 1px), linear-gradient(90deg, #e2e2e2 1px, transparent 1px)",
-                backgroundSize: "48px 48px",
-            }}
-        >
-            {/* Logo link */}
-            <Link
-                to="/"
-                className="flex items-center gap-2.5 font-bold text-base text-gray-900 no-underline tracking-tight mb-8"
-            >
-                <span className="w-8 h-8 bg-gray-900 rounded-[5px] flex items-center justify-center">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                    </svg>
-                </span>
-                Chain Analysis
-            </Link>
-
+        <Background useDotCube={false}>
             {/* Card */}
-            <div className="w-full max-w-[420px] bg-white border border-gray-200 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.08)] overflow-hidden">
+            <div className="mt-5 z-10 w-full max-w-[420px] bg-white border border-gray-200 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.08)] overflow-hidden">
                 {/* Header */}
                 <div className="px-7 pt-7 pb-5 border-b border-gray-100">
                     <p className="text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400 mb-1">
@@ -240,7 +216,7 @@ export function SignupPage() {
                 </div>
             </div>
 
-            <p className="text-[0.7rem] text-gray-400 mt-6">Chain Analysis · AML Intelligence Platform</p>
-        </div>
+            <p className="z-10 text-[0.7rem] text-gray-400 mt-6">Chain Analysis · AML Intelligence Platform</p>
+        </Background>
     );
 }
