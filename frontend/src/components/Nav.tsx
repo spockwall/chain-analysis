@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Route, Routes, useNavigate, useLocation } from "react-router-dom";
 import { SearchBar } from "./SearchBar";
 import { LogoIcon, ExplorerIcon, GroupsIcon, EtlIcon, DashboardIcon } from "./NavIcons";
 import { useAuth } from "../context/AuthContext";
@@ -32,6 +32,7 @@ const MENU_ITEMS: Array<{
 
 export function Nav() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { user, isAuthenticated, logout } = useAuth();
     const [open, setOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -225,6 +226,16 @@ export function Nav() {
                             )}
                         </div>
                     </div>
+                )}
+
+                {/* Login link for unauthenticated users on home page */}
+                {!isAuthenticated && location.pathname === "/" && (
+                    <NavLink
+                        to="/login"
+                        className="px-4 py-1.5 rounded-full bg-gray-900 text-white text-[0.8rem] font-medium shadow-sm hover:bg-gray-800 transition-colors no-underline"
+                    >
+                        Sign in
+                    </NavLink>
                 )}
             </div>
         </nav>
