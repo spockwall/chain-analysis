@@ -11,9 +11,12 @@ import {
     upsertEntity,
     updateEntity,
     deleteEntity,
+    upsertTransaction,
+    deleteTransaction,
     formatAddress,
+    type TransactionUpsertRequest,
 } from "../api/client";
-import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel } from "../types";
+import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 import {
     ENTITY_TYPES,
     RISK_LEVELS,
@@ -65,6 +68,17 @@ export function ETLPage() {
 
     const [deleteAddr, setDeleteAddr] = useState("");
     const [deleteLoading, setDeleteLoading] = useState(false);
+
+    const [txHash, setTxHash] = useState("");
+    const [txFromAddr, setTxFromAddr] = useState("");
+    const [txToAddr, setTxToAddr] = useState("");
+    const [txValue, setTxValue] = useState("");
+    const [txBlock, setTxBlock] = useState("");
+    const [txLoading, setTxLoading] = useState(false);
+    const [txResult, setTxResult] = useState<TransactionResponse | null>(null);
+
+    const [deleteTxHash, setDeleteTxHash] = useState("");
+    const [deleteTxLoading, setDeleteTxLoading] = useState(false);
 
     const overallHealthy = health?.status === "healthy";
 
@@ -143,6 +157,62 @@ export function ETLPage() {
             toast.error(err instanceof Error ? err.message : "Request failed");
         } finally {
             setDeleteLoading(false);
+        }
+    };
+
+    const handleTxUpsert = async () => {
+        const hash = txHash.trim();
+        if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+            toast.error("Hash must be 0x followed by 64 hex characters.");
+            return;
+        }
+        if (!isValidAddress(txFromAddr.trim().toLowerCase())) {
+            toast.error("Invalid from_address format.");
+            return;
+        }
+        if (!isValidAddress(txToAddr.trim().toLowerCase())) {
+            toast.error("Invalid to_address format.");
+            return;
+        }
+        setTxLoading(true);
+        setTxResult(null);
+        const id = toast.loading("Upserting transaction…");
+        try {
+            const body: TransactionUpsertRequest = {
+                from_address: txFromAddr.trim().toLowerCase(),
+                to_address: txToAddr.trim().toLowerCase(),
+                ...(txValue.trim() && { value: txValue.trim() }),
+                ...(txBlock.trim() && { block_number: parseInt(txBlock.trim(), 10) }),
+            };
+            const result = await upsertTransaction(hash, body);
+            setTxResult(result);
+            toast.dismiss(id);
+            toast.success(`Upserted tx: ${hash.slice(0, 10)}…`);
+            refreshStats();
+        } catch (err) {
+            toast.dismiss(id);
+            toast.error(err instanceof Error ? err.message : "Request failed");
+        } finally {
+            setTxLoading(false);
+        }
+    };
+
+    const handleTxDelete = async () => {
+        const hash = deleteTxHash.trim();
+        if (!hash) return;
+        setDeleteTxLoading(true);
+        const id = toast.loading("Deleting transaction…");
+        try {
+            await deleteTransaction(hash);
+            toast.dismiss(id);
+            toast.success(`Deleted tx: ${hash.slice(0, 10)}…`);
+            setDeleteTxHash("");
+            refreshStats();
+        } catch (err) {
+            toast.dismiss(id);
+            toast.error(err instanceof Error ? err.message : "Request failed");
+        } finally {
+            setDeleteTxLoading(false);
         }
     };
 
@@ -414,6 +484,83 @@ export function ETLPage() {
                             </div>
                         </div>
                     )}
+                </Section>
+
+                {/* Upsert Transaction */}
+                <Section title="Upsert Transaction">
+                    <div className="flex flex-col gap-2">
+                        <input
+                            value={txHash}
+                            onChange={(e) => setTxHash(e.target.value)}
+                            placeholder="0x… transaction hash (66 chars)"
+                            className={monoCls}
+                        />
+                        <div className="flex gap-2">
+                            <input
+                                value={txFromAddr}
+                                onChange={(e) => setTxFromAddr(e.target.value)}
+                                placeholder="from_address (0x…)"
+                                className={`${monoCls} flex-1`}
+                            />
+                            <input
+                                value={txToAddr}
+                                onChange={(e) => setTxToAddr(e.target.value)}
+                                placeholder="to_address (0x…)"
+                                className={`${monoCls} flex-1`}
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                value={txValue}
+                                onChange={(e) => setTxValue(e.target.value)}
+                                placeholder="value in wei (optional)"
+                                className={inputCls}
+                            />
+                            <input
+                                value={txBlock}
+                                onChange={(e) => setTxBlock(e.target.value)}
+                                placeholder="block number (optional)"
+                                className={inputCls}
+                            />
+                        </div>
+                    </div>
+                    <div className="mt-2.5">
+                        <button
+                            onClick={handleTxUpsert}
+                            disabled={txLoading || !txHash.trim() || !txFromAddr.trim() || !txToAddr.trim()}
+                            className={btnPrimary}
+                        >
+                            {txLoading ? "…" : "PUT Transaction"}
+                        </button>
+                    </div>
+                    {txResult && (
+                        <div className="mt-2.5">
+                            <p className={`${sectionLabel} mb-1.5`}>Result</p>
+                            <div className={propsBlock}>
+                                <pre className="m-0 font-mono">{JSON.stringify(txResult, null, 2)}</pre>
+                            </div>
+                        </div>
+                    )}
+                </Section>
+
+                {/* Delete Transaction */}
+                <Section title="Delete Transaction">
+                    <div className="flex gap-2">
+                        <input
+                            value={deleteTxHash}
+                            onChange={(e) => setDeleteTxHash(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleTxDelete()}
+                            placeholder="0x… transaction hash to delete"
+                            className={monoCls}
+                        />
+                        <button
+                            onClick={handleTxDelete}
+                            disabled={deleteTxLoading || !deleteTxHash.trim()}
+                            className={btnDanger}
+                        >
+                            {deleteTxLoading ? "…" : "Delete"}
+                        </button>
+                    </div>
                 </Section>
 
                 {/* Delete Node */}

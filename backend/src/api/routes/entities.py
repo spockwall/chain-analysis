@@ -15,6 +15,7 @@ from api.models.entity import (
     PathResponse,
     RiskLevel,
     TransactionResponse,
+    TransactionUpsertRequest,
 )
 
 router = APIRouter(prefix="/entities", tags=["entities"])
@@ -462,28 +463,10 @@ async def remove_group_member(
 
 # ── Transaction endpoints ──────────────────────────────────────────────────────
 
-@transactions_router.get("/{hash}", response_model=TransactionResponse)
-async def get_transaction(
-    hash: str,
-    graph_db: GraphDBDep,
-) -> TransactionResponse:
-    """
-    Get a transaction node by hash.
-
-    Args:
-        hash: Transaction hash (0x-prefixed)
-
-    Returns:
-        Transaction information including from/to addresses, value, and metadata
-    """
-    tx = await graph_db.get_transaction(hash)
-
-    if tx is None:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Transaction not found")
-
+def _tx_to_response(tx, hash: str) -> TransactionResponse:
+    """Convert a Transaction dataclass to TransactionResponse."""
     return TransactionResponse(
-        hash=tx.hash,
+        hash=hash,
         from_address=tx.from_address,
         to_address=tx.to_address,
         value=tx.properties.get("value"),
@@ -495,4 +478,83 @@ async def get_transaction(
             k: v for k, v in tx.properties.items()
             if k not in {"value", "block_number", "timestamp", "gas_used", "gas_price"}
         },
+    )
+
+
+@transactions_router.get("/{hash}", response_model=TransactionResponse)
+async def get_transaction(
+    hash: str,
+    graph_db: GraphDBDep,
+) -> TransactionResponse:
+    """Get a transaction node by hash."""
+    tx = await graph_db.get_transaction(hash)
+    if tx is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return _tx_to_response(tx, hash)
+
+
+@transactions_router.put("/{hash}", response_model=TransactionResponse)
+async def upsert_transaction(
+    hash: str,
+    body: TransactionUpsertRequest,
+    graph_db: GraphDBDep,
+) -> TransactionResponse:
+    """
+    Create or update a Transaction node in Neo4j.
+
+    Uses MERGE semantics — safe to call repeatedly with the same hash.
+    Also creates SENT/RECEIVED relationships to the from/to Entity nodes
+    (the Entity nodes must already exist).
+    """
+    if not hash.startswith("0x") or len(hash) != 66:
+        raise HTTPException(status_code=400, detail="Invalid transaction hash format")
+    hash = hash.lower()
+    from_address = _validate_address(body.from_address, "from_address")
+    to_address = _validate_address(body.to_address, "to_address")
+
+    properties: dict = {**body.properties}
+    if body.value is not None:
+        properties["value"] = body.value
+    if body.block_number is not None:
+        properties["block_number"] = body.block_number
+    if body.timestamp is not None:
+        properties["timestamp"] = body.timestamp.isoformat()
+    if body.gas_used is not None:
+        properties["gas_used"] = body.gas_used
+    if body.gas_price is not None:
+        properties["gas_price"] = body.gas_price
+
+    from core.ports.graph_db import Transaction
+    tx = Transaction(hash=hash, from_address=from_address, to_address=to_address, properties=properties)
+    await graph_db.upsert_transactions([tx])
+
+    return TransactionResponse(
+        hash=hash,
+        from_address=from_address,
+        to_address=to_address,
+        value=body.value,
+        block_number=body.block_number,
+        timestamp=body.timestamp,
+        gas_used=body.gas_used,
+        gas_price=body.gas_price,
+        properties=body.properties,
+    )
+
+
+@transactions_router.delete("/{hash}", status_code=204)
+async def delete_transaction(
+    hash: str,
+    graph_db: GraphDBDep,
+) -> None:
+    """
+    Delete a Transaction node and its SENT/RECEIVED relationships from Neo4j.
+    """
+
+    tx = await graph_db.get_transaction(hash)
+    if tx is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    await graph_db.execute_query(
+        "MATCH (t:Transaction {hash: $hash}) DETACH DELETE t",
+        {"hash": hash},
     )

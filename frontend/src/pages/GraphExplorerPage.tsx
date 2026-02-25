@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { GraphCanvas, type LayoutName, type GraphFilters } from "../components/GraphCanvas";
 import { NodePanel } from "../components/NodePanel";
-import { EdgePanel } from "../components/EdgePanel";
+import { TxPanel } from "../components/TxPanel";
 import { useToastContext } from "../context/ToastContext";
 import type { EntityResponse, NeighborsResponse, PathResponse, TransactionResponse } from "../types";
 import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction } from "../api/client";
@@ -13,6 +13,7 @@ import { Background } from "../components/Background";
 
 interface GraphExplorerPageProps {
     initialAddress?: string | null;
+    initialTxHash?: string | null;
     onAddressLoad?: () => void;
 }
 
@@ -26,7 +27,7 @@ const DEFAULT_FILTERS: GraphFilters = {
 const monoInput =
     "w-60 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none transition-colors focus:border-blue-400";
 
-export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplorerPageProps) {
+export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad }: GraphExplorerPageProps) {
     const toast = useToastContext();
     const [graphData, setGraphData] = useState<NeighborsResponse | null>(null);
     const [selectedNode, setSelectedNode] = useState<EntityResponse | null>(null);
@@ -51,14 +52,32 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialAddress]);
 
+    useEffect(() => {
+        if (initialTxHash) {
+            handleTxSearch(initialTxHash);
+            onAddressLoad?.();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialTxHash]);
+
     const handleSearch = async (address: string) => {
         setLoading(true);
         const loadId = toast.loading("Fetching graph data…");
         try {
-            const [entity, neighbors] = await Promise.all([
+            const [entityResult, neighborsResult] = await Promise.allSettled([
                 fetchEntity(address),
                 fetchNeighbors(address, { depth: 1, limit: 50 }),
             ]);
+
+            // Tolerate 404 — synthesise a stub so the canvas can still render
+            const entity: EntityResponse =
+                entityResult.status === "fulfilled"
+                    ? entityResult.value
+                    : { address, risk_level: "unknown", labels: [], properties: {} };
+
+            if (neighborsResult.status === "rejected") throw neighborsResult.reason;
+
+            const neighbors = neighborsResult.value;
             setSelectedNode(entity);
             const centerInNodes = neighbors.nodes.some((n) => n.address === entity.address);
             const nodes = centerInNodes ? neighbors.nodes : [entity, ...neighbors.nodes];
@@ -70,6 +89,19 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
             toast.error(err instanceof Error ? err.message : "Failed to fetch data");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleTxSearch = async (hash: string) => {
+        const loadId = toast.loading("Fetching transaction…");
+        try {
+            const tx = await fetchTransaction(hash);
+            setSelectedNode(null);
+            setSelectedEdge(tx);
+            toast.dismiss(loadId);
+        } catch (err) {
+            toast.dismiss(loadId);
+            toast.error(err instanceof Error ? err.message : "Transaction not found");
         }
     };
 
@@ -531,10 +563,11 @@ export function GraphExplorerPage({ initialAddress, onAddressLoad }: GraphExplor
                             />
                         )}
                         {selectedEdge && (
-                            <EdgePanel
+                            <TxPanel
                                 tx={selectedEdge}
                                 onClose={() => setSelectedEdge(null)}
                                 onNavigateToAddress={handleNodeSelect}
+                                onExploreAddress={handleSearch}
                             />
                         )}
                     </aside>

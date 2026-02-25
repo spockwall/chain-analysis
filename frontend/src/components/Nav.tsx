@@ -76,7 +76,10 @@ export function Nav() {
                 <Route
                     path="/explorer"
                     element={
-                        <SearchBar onSearch={(addr) => navigate(`/explorer?address=${encodeURIComponent(addr)}`)} />
+                        <SearchBar
+                            onSearch={(addr) => navigate(`/explorer?address=${encodeURIComponent(addr)}`)}
+                            onSearchTx={(hash) => navigate(`/explorer?tx=${encodeURIComponent(hash)}`)}
+                        />
                     }
                 />
                 <Route path="*" element={null} />

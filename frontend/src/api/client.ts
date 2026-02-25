@@ -147,6 +147,28 @@ export async function fetchTransaction(hash: string): Promise<TransactionRespons
     return request<TransactionResponse>(`/transactions/${hash}`);
 }
 
+export interface TransactionUpsertRequest {
+    from_address: string;
+    to_address: string;
+    value?: string;
+    block_number?: number;
+    timestamp?: string;
+    gas_used?: number;
+    gas_price?: string;
+    properties?: Record<string, unknown>;
+}
+
+export async function upsertTransaction(hash: string, body: TransactionUpsertRequest): Promise<TransactionResponse> {
+    return request<TransactionResponse>(`/transactions/${hash}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function deleteTransaction(hash: string): Promise<void> {
+    return request<void>(`/transactions/${hash}`, { method: "DELETE" }, true);
+}
+
 // Health endpoints
 
 export async function checkHealth(): Promise<HealthResponse> {

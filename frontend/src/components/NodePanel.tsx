@@ -6,6 +6,7 @@ import type { EntityResponse, TransactionResponse } from "../types";
 import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
 import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
+import { CopyButton } from "./CopyButton";
 
 interface NodePanelProps {
     node: EntityResponse;
@@ -85,28 +86,11 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                         <p className="font-mono text-[0.72rem] text-gray-600 truncate flex-1 min-w-0 m-0">
                             {node.address}
                         </p>
-                        <button
-                            className="shrink-0 w-[22px] h-[22px] flex items-center justify-center rounded bg-transparent border-none cursor-pointer text-gray-400 transition-colors hover:text-gray-700 p-0"
-                            title="Copy address"
-                            onClick={() => {
-                                navigator.clipboard
-                                    .writeText(node.address)
-                                    .then(() => toast.success("Address copied"))
-                                    .catch(() => toast.error("Copy failed"));
-                            }}
-                        >
-                            <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                            >
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                            </svg>
-                        </button>
+                        <CopyButton
+                            text={node.address}
+                            onCopy={() => toast.success("Address copied")}
+                            onError={() => toast.error("Copy failed")}
+                        />
                     </div>
                 </div>
                 <button className={btnIcon} onClick={onClose} aria-label="Close panel">

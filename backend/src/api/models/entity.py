@@ -110,6 +110,21 @@ class GroupMemberResponse(BaseModel):
     total: int = Field(..., description="Total number of members")
 
 
+class TransactionUpsertRequest(BaseModel):
+    """Request model for creating or updating a Transaction node."""
+
+    from_address: str = Field(..., description="Sender address (0x-prefixed, 42 chars)")
+    to_address: str = Field(..., description="Receiver address (0x-prefixed, 42 chars)")
+    value: str | None = Field(None, description="Value in wei (as string)")
+    block_number: int | None = Field(None, description="Block number")
+    timestamp: datetime | None = Field(None, description="Transaction timestamp")
+    gas_used: int | None = Field(None, description="Gas used")
+    gas_price: str | None = Field(None, description="Gas price in wei (as string)")
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Extra properties"
+    )
+
+
 class TransactionResponse(BaseModel):
     """Response model for a Transaction node."""
 

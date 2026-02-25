@@ -11,11 +11,13 @@ import "./index.css";
 function ExplorerRoute() {
     const [params, setParams] = useSearchParams();
     const address = params.get("address");
+    const tx = params.get("tx");
     return (
         <GraphExplorerPage
             initialAddress={address}
+            initialTxHash={tx}
             onAddressLoad={() => {
-                if (address) setParams({}, { replace: true });
+                if (address || tx) setParams({}, { replace: true });
             }}
         />
     );

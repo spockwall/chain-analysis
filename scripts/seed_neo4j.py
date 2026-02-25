@@ -315,55 +315,55 @@ TRANSACTIONS = [
     # ── Peel chain ────────────────────────────────────────────────────────────
     # Suspect → Tornado Cash 10 ETH (member contract — pre-group historical txs)
     {
-        "hash": "0xaaa001",
+        "hash": "0xaaa0010000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xaaaa000000000000000000000000000000000001",
         "to_address": "0x910cbd523d972eb0a6f4cae4618ad62622b39dbf",
         "props": {"value": "10000000000000000000", "block_number": 18000001},
     },
     {
-        "hash": "0xaaa002",
+        "hash": "0xaaa0020000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xaaaa000000000000000000000000000000000001",
         "to_address": "0x910cbd523d972eb0a6f4cae4618ad62622b39dbf",
         "props": {"value": "10000000000000000000", "block_number": 18000050},
     },
     # Tornado Cash 10 ETH → Peel Hop 1
     {
-        "hash": "0xaaa003",
+        "hash": "0xaaa0030000000000000000000000000000000000000000000000000000000000",
         "from_address": "0x910cbd523d972eb0a6f4cae4618ad62622b39dbf",
         "to_address": "0xaaaa000000000000000000000000000000000002",
         "props": {"value": "100000000000000000000", "block_number": 18001000},
     },
     # Hop 1 → Hop 2
     {
-        "hash": "0xaaa004",
+        "hash": "0xaaa0040000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xaaaa000000000000000000000000000000000002",
         "to_address": "0xaaaa000000000000000000000000000000000003",
         "props": {"value": "99000000000000000000", "block_number": 18001100},
     },
     # Hop 2 → Hop 3
     {
-        "hash": "0xaaa005",
+        "hash": "0xaaa0050000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xaaaa000000000000000000000000000000000003",
         "to_address": "0xaaaa000000000000000000000000000000000004",
         "props": {"value": "98000000000000000000", "block_number": 18001200},
     },
     # Hop 3 exits to Binance
     {
-        "hash": "0xaaa006",
+        "hash": "0xaaa0060000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xaaaa000000000000000000000000000000000004",
         "to_address": "0x28c6c06298d514db089934071355e5743bf21d60",
         "props": {"value": "97000000000000000000", "block_number": 18001300},
     },
     # Suspect also uses Uniswap (layering)
     {
-        "hash": "0xaaa007",
+        "hash": "0xaaa0070000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xaaaa000000000000000000000000000000000001",
         "to_address": "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
         "props": {"value": "50000000000000000000", "block_number": 18000200},
     },
     # Hop 3 also re-deposits into TC 100 ETH (double-mixer)
     {
-        "hash": "0xaaa010",
+        "hash": "0xaaa0100000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xaaaa000000000000000000000000000000000004",
         "to_address": "0xa160cdab225685da1d56aa342ad8841c3b53f291",
         "props": {"value": "100000000000000000000", "block_number": 18002000},
@@ -371,69 +371,69 @@ TRANSACTIONS = [
 
     # ── Fan-out structuring ───────────────────────────────────────────────────
     {
-        "hash": "0xbbb001",
+        "hash": "0xbbb0010000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000001",
         "to_address": "0xbbbb000000000000000000000000000000000002",
         "props": {"value": "98000000000000000000", "block_number": 18002001},
     },
     {
-        "hash": "0xbbb002",
+        "hash": "0xbbb0020000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000001",
         "to_address": "0xbbbb000000000000000000000000000000000003",
         "props": {"value": "98000000000000000000", "block_number": 18002002},
     },
     {
-        "hash": "0xbbb003",
+        "hash": "0xbbb0030000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000001",
         "to_address": "0xbbbb000000000000000000000000000000000004",
         "props": {"value": "98000000000000000000", "block_number": 18002003},
     },
     {
-        "hash": "0xbbb004",
+        "hash": "0xbbb0040000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000001",
         "to_address": "0xbbbb000000000000000000000000000000000005",
         "props": {"value": "98000000000000000000", "block_number": 18002004},
     },
     {
-        "hash": "0xbbb005",
+        "hash": "0xbbb0050000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000001",
         "to_address": "0xbbbb000000000000000000000000000000000006",
         "props": {"value": "98000000000000000000", "block_number": 18002005},
     },
     # All smurfs deposit into Coinbase (fan-in)
     {
-        "hash": "0xbbb011",
+        "hash": "0xbbb0110000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000002",
         "to_address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3",
         "props": {"value": "97000000000000000000", "block_number": 18003001},
     },
     {
-        "hash": "0xbbb012",
+        "hash": "0xbbb0120000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000003",
         "to_address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3",
         "props": {"value": "97000000000000000000", "block_number": 18003002},
     },
     {
-        "hash": "0xbbb013",
+        "hash": "0xbbb0130000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000004",
         "to_address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3",
         "props": {"value": "97000000000000000000", "block_number": 18003003},
     },
     {
-        "hash": "0xbbb014",
+        "hash": "0xbbb0140000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000005",
         "to_address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3",
         "props": {"value": "97000000000000000000", "block_number": 18003004},
     },
     {
-        "hash": "0xbbb015",
+        "hash": "0xbbb0150000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000006",
         "to_address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3",
         "props": {"value": "97000000000000000000", "block_number": 18003005},
     },
     # Whale uses Aave (obscure source)
     {
-        "hash": "0xbbb020",
+        "hash": "0xbbb0200000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xbbbb000000000000000000000000000000000001",
         "to_address": "0x7d2768de32b0b80b7a3454c06bdac94a69ddc7a9",
         "props": {"value": "200000000000000000000", "block_number": 18001500},
@@ -442,21 +442,21 @@ TRANSACTIONS = [
     # ── Deposits → Tornado Cash Protocol group node ───────────────────────────
     # Depositor A — three 0.1 ETH deposits
     {
-        "hash": "0xdd0001",
+        "hash": "0xdd00010000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000001",
         "to_address": TC_GROUP,
         "props": {"value": "100000000000000000", "block_number": 18100001,
                   "gas_used": 21000, "gas_price": "20000000000"},
     },
     {
-        "hash": "0xdd0002",
+        "hash": "0xdd00020000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000001",
         "to_address": TC_GROUP,
         "props": {"value": "100000000000000000", "block_number": 18100050,
                   "gas_used": 21000, "gas_price": "20000000000"},
     },
     {
-        "hash": "0xdd0003",
+        "hash": "0xdd00030000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000001",
         "to_address": TC_GROUP,
         "props": {"value": "100000000000000000", "block_number": 18100100,
@@ -464,14 +464,14 @@ TRANSACTIONS = [
     },
     # Depositor B — two 1 ETH deposits
     {
-        "hash": "0xdd0004",
+        "hash": "0xdd00040000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000002",
         "to_address": TC_GROUP,
         "props": {"value": "1000000000000000000", "block_number": 18100200,
                   "gas_used": 21000, "gas_price": "25000000000"},
     },
     {
-        "hash": "0xdd0005",
+        "hash": "0xdd00050000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000002",
         "to_address": TC_GROUP,
         "props": {"value": "1000000000000000000", "block_number": 18100300,
@@ -479,7 +479,7 @@ TRANSACTIONS = [
     },
     # Depositor C — 10 ETH deposit
     {
-        "hash": "0xdd0006",
+        "hash": "0xdd00060000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000003",
         "to_address": TC_GROUP,
         "props": {"value": "10000000000000000000", "block_number": 18100400,
@@ -487,7 +487,7 @@ TRANSACTIONS = [
     },
     # Depositor D — 100 ETH deposit (critical amount)
     {
-        "hash": "0xdd0007",
+        "hash": "0xdd00070000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000004",
         "to_address": TC_GROUP,
         "props": {"value": "100000000000000000000", "block_number": 18100500,
@@ -495,7 +495,7 @@ TRANSACTIONS = [
     },
     # Depositor E — 10 ETH deposit (CEX-linked source)
     {
-        "hash": "0xdd0008",
+        "hash": "0xdd00080000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xdddd000000000000000000000000000000000005",
         "to_address": TC_GROUP,
         "props": {"value": "10000000000000000000", "block_number": 18100600,
@@ -504,42 +504,42 @@ TRANSACTIONS = [
 
     # ── Withdrawals ← Tornado Cash Protocol group node ────────────────────────
     {
-        "hash": "0xww0001",
+        "hash": "0xww00010000000000000000000000000000000000000000000000000000000000",
         "from_address": TC_GROUP,
         "to_address": "0xeeee000000000000000000000000000000000001",
         "props": {"value": "100000000000000000", "block_number": 18105001,
                   "gas_used": 21000, "gas_price": "18000000000"},
     },
     {
-        "hash": "0xww0002",
+        "hash": "0xww00020000000000000000000000000000000000000000000000000000000000",
         "from_address": TC_GROUP,
         "to_address": "0xeeee000000000000000000000000000000000002",
         "props": {"value": "100000000000000000", "block_number": 18105100,
                   "gas_used": 21000, "gas_price": "18000000000"},
     },
     {
-        "hash": "0xww0003",
+        "hash": "0xww00030000000000000000000000000000000000000000000000000000000000",
         "from_address": TC_GROUP,
         "to_address": "0xeeee000000000000000000000000000000000003",
         "props": {"value": "1000000000000000000", "block_number": 18105200,
                   "gas_used": 21000, "gas_price": "20000000000"},
     },
     {
-        "hash": "0xww0004",
+        "hash": "0xww00040000000000000000000000000000000000000000000000000000000000",
         "from_address": TC_GROUP,
         "to_address": "0xeeee000000000000000000000000000000000004",
         "props": {"value": "10000000000000000000", "block_number": 18105300,
                   "gas_used": 21000, "gas_price": "22000000000"},
     },
     {
-        "hash": "0xww0005",
+        "hash": "0xww00050000000000000000000000000000000000000000000000000000000000",
         "from_address": TC_GROUP,
         "to_address": "0xeeee000000000000000000000000000000000005",
         "props": {"value": "100000000000000000000", "block_number": 18105400,
                   "gas_used": 21000, "gas_price": "25000000000"},
     },
     {
-        "hash": "0xww0006",
+        "hash": "0xww00060000000000000000000000000000000000000000000000000000000000",
         "from_address": TC_GROUP,
         "to_address": "0xeeee000000000000000000000000000000000006",
         "props": {"value": "10000000000000000000", "block_number": 18105500,
@@ -549,7 +549,7 @@ TRANSACTIONS = [
     # ── Post-withdrawal exit flows ────────────────────────────────────────────
     # Wallet E immediately bridges to Polygon (rapid exit)
     {
-        "hash": "0xex0001",
+        "hash": "0xex00010000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xeeee000000000000000000000000000000000005",
         "to_address": "0x40ec5b33f54e0e8a33a975908c5ba1c14e5bbbdf",
         "props": {"value": "99000000000000000000", "block_number": 18105450,
@@ -557,7 +557,7 @@ TRANSACTIONS = [
     },
     # Wallet D cashes out to Binance
     {
-        "hash": "0xex0002",
+        "hash": "0xex00020000000000000000000000000000000000000000000000000000000000",
         "from_address": "0xeeee000000000000000000000000000000000004",
         "to_address": "0x28c6c06298d514db089934071355e5743bf21d60",
         "props": {"value": "9900000000000000000", "block_number": 18105350,
