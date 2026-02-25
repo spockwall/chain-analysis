@@ -8,12 +8,14 @@ import { useToastContext } from "../context/ToastContext";
 import {
     fetchEntity,
     fetchNeighbors,
+    fetchTransaction,
     upsertEntity,
     updateEntity,
     deleteEntity,
     upsertTransaction,
     deleteTransaction,
     formatAddress,
+    formatWei,
     type TransactionUpsertRequest,
 } from "../api/client";
 import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
@@ -57,6 +59,10 @@ export function ETLPage() {
     const [searchLoading, setSearchLoading] = useState(false);
     const [entityResult, setEntityResult] = useState<EntityResponse | null>(null);
     const [neighborsResult, setNeighborsResult] = useState<NeighborsResponse | null>(null);
+
+    const [txLookupHash, setTxLookupHash] = useState("");
+    const [txLookupLoading, setTxLookupLoading] = useState(false);
+    const [txLookupResult, setTxLookupResult] = useState<TransactionResponse | null>(null);
 
     const [upsertAddr, setUpsertAddr] = useState("");
     const [upsertType, setUpsertType] = useState<EntityType>("EOA");
@@ -106,6 +112,28 @@ export function ETLPage() {
             toast.error(err instanceof Error ? err.message : "Request failed");
         } finally {
             setSearchLoading(false);
+        }
+    };
+
+    const handleTxLookup = async () => {
+        const hash = txLookupHash.trim();
+        if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+            toast.error("Hash must be 0x followed by 64 hex characters.");
+            return;
+        }
+        setTxLookupLoading(true);
+        setTxLookupResult(null);
+        const id = toast.loading("Looking up transaction…");
+        try {
+            const result = await fetchTransaction(hash);
+            setTxLookupResult(result);
+            toast.dismiss(id);
+            toast.success(`Found: ${hash.slice(0, 10)}…`);
+        } catch (err) {
+            toast.dismiss(id);
+            toast.error(err instanceof Error ? err.message : "Request failed");
+        } finally {
+            setTxLookupLoading(false);
         }
     };
 
@@ -406,6 +434,68 @@ export function ETLPage() {
                                     Showing 10 of {neighborsResult.nodes.length}
                                 </p>
                             )}
+                        </div>
+                    )}
+                </Section>
+
+                {/* Lookup Transaction */}
+                <Section title="Lookup Transaction">
+                    <div className="flex gap-2">
+                        <input
+                            value={txLookupHash}
+                            onChange={(e) => setTxLookupHash(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleTxLookup()}
+                            placeholder="0x… transaction hash (66 chars)"
+                            className={monoCls}
+                        />
+                        <button
+                            onClick={handleTxLookup}
+                            disabled={txLookupLoading || !txLookupHash.trim()}
+                            className={btnPrimary}
+                        >
+                            {txLookupLoading ? "…" : "Search"}
+                        </button>
+                    </div>
+                    {txLookupResult && (
+                        <div className="mt-3 p-3 border border-gray-200 rounded-lg">
+                            {/* Value stat */}
+                            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5">
+                                <div className="flex flex-col">
+                                    <span className="text-[0.68rem] font-medium uppercase tracking-[0.14em] text-gray-500">
+                                        Value transferred
+                                    </span>
+                                    <span className="mt-1 font-mono text-[0.9rem] font-semibold text-gray-900 leading-none">
+                                        {formatWei(txLookupResult.value)}
+                                    </span>
+                                </div>
+                                <a
+                                    href={`/explorer?tx=${encodeURIComponent(txLookupResult.hash)}`}
+                                    className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-[7px] text-[0.76rem] font-semibold text-gray-900 hover:bg-gray-50 transition-colors"
+                                >
+                                    Open in Explorer
+                                </a>
+                            </div>
+                            {/* FROM / TO address cards */}
+                            <div className="flex flex-col gap-1.5 mb-3">
+                                {[
+                                    { badge: "FROM", addr: txLookupResult.from_address },
+                                    { badge: "TO", addr: txLookupResult.to_address },
+                                ].map(({ badge, addr }) => (
+                                    <div
+                                        key={badge}
+                                        className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg"
+                                    >
+                                        <span
+                                            className={`inline-flex w-12 items-center justify-center px-1.5 py-[2px] rounded text-[0.6rem] font-bold tracking-widest uppercase shrink-0 text-slate-500`}
+                                        >
+                                            {badge}
+                                        </span>
+                                        <span className="font-mono text-[0.72rem] text-gray-700 truncate" title={addr}>
+                                            {addr}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </Section>
