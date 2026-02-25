@@ -121,16 +121,16 @@ class LabelService:
 
     async def get_next_task(
         self,
-        labeler_id: int,
+        user_id: int,
         category: str | None = None,
     ) -> dict[str, Any] | None:
         """
-        Get the next pending task for a labeler.
+        Get the next pending task for a user.
 
-        Assigns the task to the labeler and returns it.
+        Assigns the task to the user and returns it.
 
         Args:
-            labeler_id: ID of the labeler
+            user_id: ID of the user
             category: Optional category filter
 
         Returns:
@@ -154,20 +154,20 @@ class LabelService:
 
         task = result[0]
 
-        # Assign to labeler
+        # Assign to user
         await self._relational_db.execute(
             """
             UPDATE label_tasks
-            SET assignee_id = :labeler_id,
+            SET assignee_id = :user_id,
                 status = 'in_progress',
                 assigned_at = NOW(),
                 updated_at = NOW()
             WHERE id = :task_id
             """,
-            {"labeler_id": labeler_id, "task_id": task["id"]},
+            {"user_id": user_id, "task_id": task["id"]},
         )
 
-        task["assignee_id"] = labeler_id
+        task["assignee_id"] = user_id
         task["status"] = "in_progress"
 
         return task
@@ -175,7 +175,7 @@ class LabelService:
     async def submit_annotation_and_update_graph(
         self,
         task_id: int,
-        labeler_id: int,
+        user_id: int | None,
         entity_address: str,
         entity_type: str | None,
         risk_level: str,
@@ -188,7 +188,7 @@ class LabelService:
 
         Args:
             task_id: Task ID
-            labeler_id: Labeler ID
+            user_id: User ID (nullable)
             entity_address: Entity address
             entity_type: Entity type classification
             risk_level: Risk level
@@ -205,19 +205,19 @@ class LabelService:
         result = await self._relational_db.execute(
             """
             INSERT INTO annotations (
-                task_id, labeler_id, entity_address, entity_type,
+                task_id, user_id, entity_address, entity_type,
                 risk_level, labels, notes, confidence
             )
             VALUES (
-                :task_id, :labeler_id, :address, :entity_type,
+                :task_id, :user_id, :address, :entity_type,
                 :risk_level, :labels, :notes, :confidence
             )
-            RETURNING id, task_id, labeler_id, entity_address, entity_type,
+            RETURNING id, task_id, user_id, entity_address, entity_type,
                       risk_level, labels, notes, confidence, created_at
             """,
             {
                 "task_id": task_id,
-                "labeler_id": labeler_id,
+                "user_id": user_id,
                 "address": address,
                 "entity_type": entity_type,
                 "risk_level": risk_level,
@@ -248,7 +248,7 @@ class LabelService:
         properties: dict[str, Any] = {
             "risk_level": risk_level,
             "labeled_at": datetime.utcnow().isoformat(),
-            "labeled_by": labeler_id,
+            "labeled_by": user_id,
         }
         if entity_type:
             properties["entity_type"] = entity_type
@@ -305,15 +305,15 @@ class LabelService:
             """
         )
 
-        # Top labelers
-        top_labelers = await self._relational_db.execute(
+        # Top annotators (users with most annotations)
+        top_annotators = await self._relational_db.execute(
             """
             SELECT
-                l.username,
+                u.username,
                 COUNT(a.id) as annotation_count
-            FROM labelers l
-            JOIN annotations a ON l.id = a.labeler_id
-            GROUP BY l.id, l.username
+            FROM users u
+            JOIN annotations a ON u.id = a.user_id
+            GROUP BY u.id, u.username
             ORDER BY annotation_count DESC
             LIMIT 10
             """
@@ -331,6 +331,6 @@ class LabelService:
         return {
             "tasks_by_status": {row["status"]: row["count"] for row in task_stats},
             "annotations_by_risk": {row["risk_level"]: row["count"] for row in risk_stats},
-            "top_labelers": top_labelers,
+            "top_annotators": top_annotators,
             "annotations_last_24h": recent_count[0]["count"] if recent_count else 0,
         }

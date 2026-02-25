@@ -189,26 +189,22 @@ async def create_annotation(
     if not task_result:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # For now, use a placeholder labeler_id (in production, get from auth)
-    labeler_id = 1
-
-    # Insert annotation
+    # Insert annotation (user_id is nullable — populated once auth is wired)
     result = await db.execute(
         """
         INSERT INTO annotations (
-            task_id, labeler_id, entity_address, entity_type,
+            task_id, user_id, entity_address, entity_type,
             risk_level, labels, notes, evidence, confidence
         )
         VALUES (
-            :task_id, :labeler_id, :address, :entity_type,
+            :task_id, NULL, :address, :entity_type,
             :risk_level, :labels, :notes, :evidence, :confidence
         )
-        RETURNING id, task_id, labeler_id, entity_address, entity_type,
+        RETURNING id, task_id, user_id, entity_address, entity_type,
                   risk_level, labels, notes, confidence, created_at
         """,
         {
             "task_id": annotation.task_id,
-            "labeler_id": labeler_id,
             "address": address,
             "entity_type": (
                 annotation.entity_type.value if annotation.entity_type else None
@@ -238,7 +234,7 @@ async def create_annotation(
     return AnnotationResponse(
         id=row["id"],
         task_id=row["task_id"],
-        labeler_id=row["labeler_id"],
+        user_id=row["user_id"],
         entity_address=row["entity_address"],
         entity_type=row["entity_type"],
         risk_level=row["risk_level"],
@@ -273,7 +269,7 @@ async def get_entity_annotations(
 
     result = await db.execute(
         """
-        SELECT id, task_id, labeler_id, entity_address, entity_type,
+        SELECT id, task_id, user_id, entity_address, entity_type,
                risk_level, labels, notes, confidence, created_at
         FROM annotations
         WHERE entity_address = :address
@@ -287,7 +283,7 @@ async def get_entity_annotations(
         AnnotationResponse(
             id=row["id"],
             task_id=row["task_id"],
-            labeler_id=row["labeler_id"],
+            user_id=row["user_id"],
             entity_address=row["entity_address"],
             entity_type=row["entity_type"],
             risk_level=row["risk_level"],

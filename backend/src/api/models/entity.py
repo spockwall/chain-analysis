@@ -60,7 +60,9 @@ class GroupCreateRequest(BaseModel):
     entity_type: "EntityType" = Field(EntityType.CONTRACT, description="Entity type")
     risk_level: "RiskLevel" = Field(RiskLevel.UNKNOWN, description="Risk level")
     description: str | None = Field(None, description="Optional group description")
-    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Extra properties"
+    )
 
 
 class GroupUpdateRequest(BaseModel):
@@ -69,7 +71,9 @@ class GroupUpdateRequest(BaseModel):
     name: str | None = Field(None, description="New group name")
     risk_level: "RiskLevel | None" = Field(None, description="New risk level")
     description: str | None = Field(None, description="New description")
-    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Extra properties"
+    )
 
 
 class GroupDetailResponse(BaseModel):
@@ -146,7 +150,9 @@ class NeighborsResponse(BaseModel):
         ..., description="Transaction nodes in the neighborhood"
     )
     total_nodes: int = Field(..., description="Total number of nodes returned")
-    total_transactions: int = Field(..., description="Total number of transactions returned")
+    total_transactions: int = Field(
+        ..., description="Total number of transactions returned"
+    )
 
 
 class PathNode(BaseModel):
@@ -179,11 +185,17 @@ class NodeUpsertRequest(BaseModel):
     """Request model for creating or updating a node."""
 
     address: str = Field(..., description="Ethereum address (0x-prefixed, 42 chars)")
-    entity_type: EntityType | None = Field(None, description="Entity type classification")
+    entity_type: EntityType | None = Field(
+        None, description="Entity type classification"
+    )
     risk_level: RiskLevel = Field(RiskLevel.UNKNOWN, description="Risk level")
     name: str | None = Field(None, description="Human-readable name")
-    labels: list[str] = Field(default_factory=list, description="Additional labels/tags")
-    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+    labels: list[str] = Field(
+        default_factory=list, description="Additional labels/tags"
+    )
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Extra properties"
+    )
 
 
 class EdgeUpsertRequest(BaseModel):
@@ -191,11 +203,15 @@ class EdgeUpsertRequest(BaseModel):
 
     source: str = Field(..., description="Source address (0x-prefixed, 42 chars)")
     target: str = Field(..., description="Target address (0x-prefixed, 42 chars)")
-    edge_type: str = Field("TRANSFER", description="Edge type (TRANSFER, CALLS, DEPLOYED)")
+    edge_type: str = Field(
+        "TRANSFER", description="Edge type (TRANSFER, CALLS, DEPLOYED)"
+    )
     value: str | None = Field(None, description="Value in wei (as string)")
     tx_hash: str | None = Field(None, description="Transaction hash")
     block_number: int | None = Field(None, description="Block number")
-    properties: dict[str, Any] = Field(default_factory=dict, description="Extra properties")
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Extra properties"
+    )
 
 
 class LabelTaskCreate(BaseModel):
@@ -242,7 +258,7 @@ class AnnotationResponse(BaseModel):
 
     id: int
     task_id: int
-    labeler_id: int
+    user_id: int | None
     entity_address: str
     entity_type: EntityType | None
     risk_level: RiskLevel
@@ -250,3 +266,131 @@ class AnnotationResponse(BaseModel):
     notes: str | None
     confidence: float | None
     created_at: datetime
+
+
+# ── Entity Features (migration 003) ───────────────────────────────────────────
+
+
+class EntityFeaturesResponse(BaseModel):
+    """Response model for computed on-chain behavioural features of an entity."""
+
+    address: str = Field(..., description="Ethereum address")
+    chain_id: int = Field(1, description="Chain ID (1 = Ethereum mainnet)")
+
+    # Timestamps / Activity
+    first_seen_at: datetime | None = Field(
+        None, description="First on-chain appearance"
+    )
+    last_seen_at: datetime | None = Field(
+        None, description="Most recent on-chain activity"
+    )
+    activity_interval_avg_sec: float | None = Field(
+        None, description="Average interval between recent transactions (seconds)"
+    )
+    active_hour_distribution: list[float] | None = Field(
+        None, description="24-element float array — activity ratio per UTC hour"
+    )
+
+    # Balance
+    balance_avg_wei: str | None = Field(
+        None, description="Average wallet balance in wei"
+    )
+    balance_max_wei: str | None = Field(
+        None, description="Maximum observed wallet balance in wei"
+    )
+
+    # Behaviour flags
+    has_deployed_contract: bool = Field(
+        False, description="Whether this address has ever deployed a contract"
+    )
+    is_labeled: bool = Field(
+        False, description="Whether this address is matched in known_labels"
+    )
+
+    # Graph topology
+    out_degree: int = Field(0, description="Number of outgoing transactions sent")
+    in_degree: int = Field(0, description="Number of incoming transactions received")
+    unique_interacted_entities: int = Field(
+        0, description="Unique addresses interacted with (in + out union)"
+    )
+
+    # Risk indicators
+    same_type_transfer_count: int = Field(
+        0, description="Transfers sent to addresses of the same entity type"
+    )
+    same_amount_transfer_count: int = Field(
+        0, description="Transfers with identical outgoing amount (structuring pattern)"
+    )
+
+    # Volume
+    volume_in_wei: str | None = Field(None, description="Total incoming value in wei")
+    volume_out_wei: str | None = Field(None, description="Total outgoing value in wei")
+
+    # System
+    computed_at: datetime | None = Field(
+        None, description="Timestamp of the last ETL computation"
+    )
+    updated_at: datetime | None = Field(None, description="Last row update time")
+
+
+class EntityFeaturesUpsertRequest(BaseModel):
+    """Request model for creating or updating entity features (e.g. from ETL pipeline)."""
+
+    chain_id: int = Field(1, description="Chain ID (default: 1 = Ethereum mainnet)")
+
+    # Timestamps / Activity
+    first_seen_at: datetime | None = Field(
+        None, description="First on-chain appearance"
+    )
+    last_seen_at: datetime | None = Field(
+        None, description="Most recent on-chain activity"
+    )
+    activity_interval_avg_sec: float | None = Field(
+        None, description="Average interval between recent transactions (seconds)"
+    )
+    active_hour_distribution: list[float] | None = Field(
+        None,
+        description="24-element float array — activity ratio per UTC hour",
+        min_length=24,
+        max_length=24,
+    )
+
+    # Balance (wei as string to avoid precision loss)
+    balance_avg_wei: str | None = Field(
+        None, description="Average wallet balance in wei"
+    )
+    balance_max_wei: str | None = Field(
+        None, description="Maximum observed wallet balance in wei"
+    )
+
+    # Behaviour flags
+    has_deployed_contract: bool = Field(
+        False, description="Whether this address has ever deployed a contract"
+    )
+    is_labeled: bool = Field(
+        False, description="Whether this address is matched in known_labels"
+    )
+
+    # Graph topology
+    out_degree: int = Field(0, ge=0, description="Number of outgoing transactions")
+    in_degree: int = Field(0, ge=0, description="Number of incoming transactions")
+    unique_interacted_entities: int = Field(
+        0, ge=0, description="Unique counterparty addresses"
+    )
+
+    # Risk indicators
+    same_type_transfer_count: int = Field(
+        0, ge=0, description="Transfers to same-type wallets"
+    )
+    same_amount_transfer_count: int = Field(
+        0, ge=0, description="Transfers with identical amount"
+    )
+
+    # Volume (wei as string)
+    volume_in_wei: str | None = Field(None, description="Total incoming value in wei")
+    volume_out_wei: str | None = Field(None, description="Total outgoing value in wei")
+
+    # System
+    computed_at: datetime | None = Field(
+        None, description="Timestamp of the ETL computation"
+    )

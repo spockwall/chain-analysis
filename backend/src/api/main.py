@@ -67,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api")
     app.include_router(entities_write_router, prefix="/api")
     app.include_router(entities_router, prefix="/api")
+    app.include_router(features_router, prefix="/api")
     app.include_router(transactions_router, prefix="/api")
     app.include_router(labels_router, prefix="/api")
     app.include_router(stats_router, prefix="/api")

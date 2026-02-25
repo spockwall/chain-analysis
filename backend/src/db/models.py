@@ -2,9 +2,10 @@
 SQLAlchemy models for PostgreSQL.
 
 These tables store:
-- Labeling workflow data (labelers, tasks, annotations)
+- Labeling workflow data (label tasks, annotations)
 - Known entity references
 - ETL ingestion metadata
+- Users and authentication
 """
 
 from datetime import datetime
@@ -17,9 +18,11 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -116,31 +119,6 @@ class User(Base):
     )
 
 
-class Labeler(Base):
-    """Human analyst who performs labeling tasks."""
-
-    __tablename__ = "labelers"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-    # Relationships
-    assigned_tasks: Mapped[list["LabelTask"]] = relationship(
-        "LabelTask", back_populates="assignee"
-    )
-    annotations: Mapped[list["Annotation"]] = relationship(
-        "Annotation", back_populates="labeler"
-    )
-
-
 class LabelTask(Base):
     """A labeling task for an entity or subgraph."""
 
@@ -160,7 +138,11 @@ class LabelTask(Base):
 
     # Assignment
     assignee_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("labelers.id"), nullable=True
+        Integer,
+        ForeignKey(
+            "users.id", ondelete="SET NULL", name="fk_label_tasks_assignee_users"
+        ),
+        nullable=True,
     )
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -174,9 +156,7 @@ class LabelTask(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
-    assignee: Mapped[Labeler | None] = relationship(
-        "Labeler", back_populates="assigned_tasks"
-    )
+    assignee: Mapped["User | None"] = relationship("User", foreign_keys=[assignee_id])
     annotations: Mapped[list["Annotation"]] = relationship(
         "Annotation", back_populates="task"
     )
@@ -185,7 +165,7 @@ class LabelTask(Base):
 
 
 class Annotation(Base):
-    """A label annotation submitted by a labeler."""
+    """A label annotation submitted by a user."""
 
     __tablename__ = "annotations"
 
@@ -193,8 +173,12 @@ class Annotation(Base):
     task_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("label_tasks.id"), nullable=False
     )
-    labeler_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("labelers.id"), nullable=False
+    user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "users.id", ondelete="SET NULL", name="fk_annotations_user_users"
+        ),
+        nullable=True,
     )
     entity_address: Mapped[str] = mapped_column(String(42), nullable=False, index=True)
 
@@ -217,10 +201,10 @@ class Annotation(Base):
 
     # Relationships
     task: Mapped[LabelTask] = relationship("LabelTask", back_populates="annotations")
-    labeler: Mapped[Labeler] = relationship("Labeler", back_populates="annotations")
+    user: Mapped["User | None"] = relationship("User", foreign_keys=[user_id])
 
     __table_args__ = (
-        Index("ix_annotations_entity_labeler", "entity_address", "labeler_id"),
+        Index("ix_annotations_entity_user", "entity_address", "user_id"),
     )
 
 
@@ -313,4 +297,93 @@ class IngestionRun(Base):
     __table_args__ = (
         Index("ix_ingestion_runs_status", "status"),
         Index("ix_ingestion_runs_blocks", "chain_id", "start_block", "end_block"),
+    )
+
+
+class EntityFeatures(Base):
+    """
+    Computed on-chain behavioural features for each entity address.
+
+    Populated by the `computed_features` Dagster ETL asset and persisted here
+    for structured querying, ML feature engineering, and risk dashboards.
+    Primary key is (address, chain_id) but address alone is used as PK for
+    simplicity since the system currently targets Ethereum mainnet only.
+    """
+
+    __tablename__ = "entity_features"
+
+    address: Mapped[str] = mapped_column(String(42), primary_key=True)
+    chain_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    # ── Timestamps / Activity ────────────────────────────────────────────────
+    # First on-chain appearance (creation time)
+    first_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Most recent on-chain activity
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Average interval between recent transactions (seconds)
+    activity_interval_avg_sec: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )
+    # Active timezone distribution: 24-element float list, one value per UTC hour
+    # e.g. [0.0, 0.0, 0.12, ..., 0.45]
+    active_hour_distribution: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # ── Balance ──────────────────────────────────────────────────────────────
+    # Average wallet balance in wei
+    balance_avg_wei: Mapped[int | None] = mapped_column(
+        Numeric(precision=78, scale=0), nullable=True
+    )
+    # Maximum observed wallet balance in wei
+    balance_max_wei: Mapped[int | None] = mapped_column(
+        Numeric(precision=78, scale=0), nullable=True
+    )
+
+    # ── Behaviour Flags ──────────────────────────────────────────────────────
+    # Whether this address has ever deployed a contract
+    has_deployed_contract: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Whether this address is matched in the known_labels reference table
+    is_labeled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # ── Graph Topology ───────────────────────────────────────────────────────
+    # Out-degree: number of outgoing transactions sent
+    out_degree: Mapped[int] = mapped_column(Integer, default=0)
+    # In-degree: number of incoming transactions received
+    in_degree: Mapped[int] = mapped_column(Integer, default=0)
+    # Number of unique entities interacted with (union of in + out counterparties)
+    unique_interacted_entities: Mapped[int] = mapped_column(Integer, default=0)
+
+    # ── Behaviour Patterns (Risk Indicators) ─────────────────────────────────
+    # Number of transfers sent to addresses of the same entity type
+    same_type_transfer_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Number of transfers with the same outgoing amount (structuring / round-number pattern)
+    same_amount_transfer_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # ── Volume ───────────────────────────────────────────────────────────────
+    volume_in_wei: Mapped[int | None] = mapped_column(
+        Numeric(precision=78, scale=0), nullable=True
+    )
+    volume_out_wei: Mapped[int | None] = mapped_column(
+        Numeric(precision=78, scale=0), nullable=True
+    )
+
+    # ── System Fields ────────────────────────────────────────────────────────
+    # Timestamp of the ETL run that last computed these features
+    computed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_entity_features_chain_last_seen", "chain_id", "last_seen_at"),
+        Index(
+            "ix_entity_features_risk_indicators",
+            "same_amount_transfer_count",
+            "out_degree",
+        ),
     )

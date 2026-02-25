@@ -3,13 +3,11 @@ from .models import (
     Base,
     IngestionRun,
     KnownLabel,
-    Labeler,
     LabelTask,
 )
 
 __all__ = [
     "Base",
-    "Labeler",
     "LabelTask",
     "Annotation",
     "KnownLabel",

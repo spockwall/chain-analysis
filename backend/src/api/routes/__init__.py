@@ -6,6 +6,7 @@ from .entities import (
     transactions_router,
     write_router as entities_write_router,
 )
+from .features import router as features_router
 from .groups import router as groups_router
 from .health import router as health_router
 from .labels import router as labels_router
@@ -15,6 +16,7 @@ __all__ = [
     "auth_router",
     "entities_router",
     "entities_write_router",
+    "features_router",
     "groups_router",
     "health_router",
     "labels_router",
