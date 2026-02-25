@@ -93,15 +93,66 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     };
 
     const handleTxSearch = async (hash: string) => {
+        setLoading(true);
         const loadId = toast.loading("Fetching transaction…");
         try {
             const tx = await fetchTransaction(hash);
+
+            // Load neighbors for both endpoints in parallel, tolerating 404s
+            const [fromNeighbors, toNeighbors] = await Promise.allSettled([
+                fetchNeighbors(tx.from_address, { depth: 1, limit: 50 }),
+                fetchNeighbors(tx.to_address, { depth: 1, limit: 50 }),
+            ]);
+
+            // Merge nodes and transactions from both sides, deduplicating by address/hash
+            const seenAddresses = new Set<string>();
+            const seenHashes = new Set<string>();
+            const mergedNodes: NeighborsResponse["nodes"] = [];
+            const mergedTxs: NeighborsResponse["transactions"] = [];
+
+            for (const result of [fromNeighbors, toNeighbors]) {
+                if (result.status === "rejected") continue;
+                for (const n of result.value.nodes) {
+                    if (!seenAddresses.has(n.address)) {
+                        seenAddresses.add(n.address);
+                        mergedNodes.push(n);
+                    }
+                }
+                for (const t of result.value.transactions) {
+                    if (!seenHashes.has(t.hash)) {
+                        seenHashes.add(t.hash);
+                        mergedTxs.push(t);
+                    }
+                }
+            }
+
+            // Ensure both endpoint stubs are present even if they have no Entity node
+            for (const addr of [tx.from_address, tx.to_address]) {
+                if (!seenAddresses.has(addr)) {
+                    seenAddresses.add(addr);
+                    mergedNodes.push({ address: addr, risk_level: "unknown", labels: [], properties: {} });
+                }
+            }
+
+            // Ensure the looked-up tx itself is in the list
+            if (!seenHashes.has(tx.hash)) mergedTxs.push(tx);
+
             setSelectedNode(null);
             setSelectedEdge(tx);
+            setGraphData({
+                center_address: tx.from_address,
+                nodes: mergedNodes,
+                transactions: mergedTxs,
+                total_nodes: mergedNodes.length,
+                total_transactions: mergedTxs.length,
+            });
+            setPathResult(null);
             toast.dismiss(loadId);
         } catch (err) {
             toast.dismiss(loadId);
             toast.error(err instanceof Error ? err.message : "Transaction not found");
+        } finally {
+            setLoading(false);
         }
     };
 
