@@ -11,11 +11,9 @@ import {
     upsertEntity,
     updateEntity,
     deleteEntity,
-    upsertEdge,
-    deleteEdge,
     formatAddress,
 } from "../api/client";
-import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
+import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel } from "../types";
 import {
     ENTITY_TYPES,
     RISK_LEVELS,
@@ -67,19 +65,6 @@ export function ETLPage() {
 
     const [deleteAddr, setDeleteAddr] = useState("");
     const [deleteLoading, setDeleteLoading] = useState(false);
-
-    const [txHash, setTxHash] = useState("");
-    const [txFrom, setTxFrom] = useState("");
-    const [txTo, setTxTo] = useState("");
-    const [txValue, setTxValue] = useState("");
-    const [txBlock, setTxBlock] = useState("");
-    const [txLoading, setTxLoading] = useState(false);
-    const [txResult, setTxResult] = useState<TransactionResponse | null>(null);
-
-    const [delEdgeSrc, setDelEdgeSrc] = useState("");
-    const [delEdgeTgt, setDelEdgeTgt] = useState("");
-    const [delEdgeType, setDelEdgeType] = useState("TRANSFER");
-    const [delEdgeLoading, setDelEdgeLoading] = useState(false);
 
     const overallHealthy = health?.status === "healthy";
 
@@ -158,80 +143,6 @@ export function ETLPage() {
             toast.error(err instanceof Error ? err.message : "Request failed");
         } finally {
             setDeleteLoading(false);
-        }
-    };
-
-    const handleTxUpsert = async () => {
-        const from = txFrom.trim().toLowerCase();
-        const to = txTo.trim().toLowerCase();
-        const hash = txHash.trim();
-        if (!hash) {
-            toast.error("Transaction hash is required.");
-            return;
-        }
-        if (!isValidAddress(from)) {
-            toast.error("Invalid from address.");
-            return;
-        }
-        if (!isValidAddress(to)) {
-            toast.error("Invalid to address.");
-            return;
-        }
-        setTxLoading(true);
-        setTxResult(null);
-        const id = toast.loading("Upserting transaction…");
-        try {
-            await upsertEdge(from, to, {
-                source: from,
-                target: to,
-                edge_type: "TRANSFER",
-                value: txValue || undefined,
-                tx_hash: hash,
-                block_number: txBlock ? parseInt(txBlock, 10) : undefined,
-            });
-            const result: TransactionResponse = {
-                hash,
-                from_address: from,
-                to_address: to,
-                value: txValue || null,
-                block_number: txBlock ? parseInt(txBlock, 10) : null,
-                properties: {},
-            };
-            setTxResult(result);
-            toast.dismiss(id);
-            toast.success(`Transaction upserted: ${hash.slice(0, 14)}…`);
-            refreshStats();
-        } catch (err) {
-            toast.dismiss(id);
-            toast.error(err instanceof Error ? err.message : "Request failed");
-        } finally {
-            setTxLoading(false);
-        }
-    };
-
-    const handleEdgeDelete = async () => {
-        const src = delEdgeSrc.trim().toLowerCase();
-        const tgt = delEdgeTgt.trim().toLowerCase();
-        if (!isValidAddress(src)) {
-            toast.error("Invalid source address.");
-            return;
-        }
-        if (!isValidAddress(tgt)) {
-            toast.error("Invalid target address.");
-            return;
-        }
-        setDelEdgeLoading(true);
-        const id = toast.loading("Deleting edge…");
-        try {
-            await deleteEdge(src, tgt, delEdgeType || "TRANSFER");
-            toast.dismiss(id);
-            toast.success(`Deleted edge: ${formatAddress(src)} → ${formatAddress(tgt)}`);
-            refreshStats();
-        } catch (err) {
-            toast.dismiss(id);
-            toast.error(err instanceof Error ? err.message : "Request failed");
-        } finally {
-            setDelEdgeLoading(false);
         }
     };
 
@@ -525,94 +436,6 @@ export function ETLPage() {
                     </div>
                 </Section>
 
-                {/* Upsert Transaction */}
-                <Section title="Upsert Transaction Node">
-                    <div className="flex flex-col gap-2">
-                        <input
-                            value={txHash}
-                            onChange={(e) => setTxHash(e.target.value)}
-                            placeholder="Transaction hash (0x…)"
-                            className={monoCls}
-                        />
-                        <div className="flex gap-2">
-                            <input
-                                value={txFrom}
-                                onChange={(e) => setTxFrom(e.target.value)}
-                                placeholder="From 0x…"
-                                className={monoCls}
-                            />
-                            <input
-                                value={txTo}
-                                onChange={(e) => setTxTo(e.target.value)}
-                                placeholder="To 0x…"
-                                className={monoCls}
-                            />
-                        </div>
-                        <div className="flex gap-2">
-                            <input
-                                value={txValue}
-                                onChange={(e) => setTxValue(e.target.value)}
-                                placeholder="Value in wei (optional)"
-                                className={inputCls}
-                            />
-                            <input
-                                value={txBlock}
-                                onChange={(e) => setTxBlock(e.target.value)}
-                                placeholder="Block number (optional)"
-                                className="w-44 shrink-0 px-2.5 py-[7px] border border-gray-200 rounded-lg text-[0.78rem] font-[inherit] bg-white text-gray-900 outline-none focus:border-gray-400"
-                            />
-                        </div>
-                    </div>
-                    <div className="mt-2.5">
-                        <button
-                            onClick={handleTxUpsert}
-                            disabled={txLoading || !txHash.trim() || !txFrom.trim() || !txTo.trim()}
-                            className={btnPrimary}
-                        >
-                            {txLoading ? "…" : "Upsert Transaction"}
-                        </button>
-                    </div>
-                    {txResult && (
-                        <div className="mt-2.5">
-                            <p className={`${sectionLabel} mb-1.5`}>Result</p>
-                            <div className={propsBlock}>
-                                <pre className="m-0 font-mono">{JSON.stringify(txResult, null, 2)}</pre>
-                            </div>
-                        </div>
-                    )}
-                </Section>
-
-                {/* Delete Edge */}
-                <Section title="Delete Edge">
-                    <div className="flex gap-2">
-                        <input
-                            value={delEdgeSrc}
-                            onChange={(e) => setDelEdgeSrc(e.target.value)}
-                            placeholder="Source 0x…"
-                            className={monoCls}
-                        />
-                        <input
-                            value={delEdgeTgt}
-                            onChange={(e) => setDelEdgeTgt(e.target.value)}
-                            placeholder="Target 0x…"
-                            className={monoCls}
-                        />
-                        <input
-                            value={delEdgeType}
-                            onChange={(e) => setDelEdgeType(e.target.value)}
-                            placeholder="Edge type"
-                            className="w-32 shrink-0 px-2.5 py-[7px] border border-gray-200 rounded-lg text-[0.78rem] font-[inherit] bg-white text-gray-900 outline-none focus:border-gray-400"
-                        />
-                        <button
-                            onClick={handleEdgeDelete}
-                            disabled={delEdgeLoading || !delEdgeSrc.trim() || !delEdgeTgt.trim()}
-                            className={btnDanger}
-                        >
-                            {delEdgeLoading ? "…" : "Delete"}
-                        </button>
-                    </div>
-                </Section>
-
                 {/* Instructions */}
                 <Section title="Testing Instructions">
                     <div className="p-3.5 border border-gray-200 rounded-lg bg-gray-50 text-[0.78rem] leading-[1.7] text-gray-600">
@@ -636,8 +459,8 @@ export function ETLPage() {
                                 update it
                             </li>
                             <li>
-                                Use <strong>Upsert Transaction</strong> to create a Transaction node with SENT/RECEIVED
-                                relationships
+                                Use the Graph Explorer to verify transaction nodes and neighbors are correctly linked
+                                via SENT/RECEIVED relationships
                             </li>
                         </ol>
                     </div>

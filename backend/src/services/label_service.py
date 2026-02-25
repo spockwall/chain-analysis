@@ -60,14 +60,14 @@ class LabelService:
                     {"address": n.address, "labels": n.labels}
                     for n in subgraph.nodes
                 ],
-                "edges": [
+                "transactions": [
                     {
-                        "source": e.source,
-                        "target": e.target,
-                        "type": e.edge_type,
-                        "value": e.properties.get("value"),
+                        "hash": tx.hash,
+                        "from_address": tx.from_address,
+                        "to_address": tx.to_address,
+                        "value": tx.properties.get("value"),
                     }
-                    for e in subgraph.edges
+                    for tx in subgraph.transactions
                 ],
             }
 

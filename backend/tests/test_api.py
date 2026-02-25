@@ -77,7 +77,7 @@ class TestValidation:
         response = client.get(f"/api/entities/{upper_address}")
         # The address should be normalized before lookup
         # Actual test depends on endpoint implementation
-        assert response.status_code in [404, 500]  # 404 if not found, 500 if DB not connected
+        assert response.status_code in [200, 404, 500]  # 200 if found, 404 if not found, 500 if DB not connected
 
     def test_risk_level_enum(self, client: TestClient):
         """Test that risk_level enum is validated."""

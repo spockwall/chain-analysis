@@ -63,17 +63,6 @@ export interface GroupMemberResponse {
     total: number;
 }
 
-export interface EdgeResponse {
-    source: string;
-    target: string;
-    edge_type: string;
-    value?: string | null;
-    block_number?: number | null;
-    timestamp?: string | null;
-    tx_hash?: string | null;
-    properties: Record<string, unknown>;
-}
-
 export interface TransactionResponse {
     hash: string;
     from_address: string;
@@ -154,16 +143,6 @@ export interface NodeUpsertRequest {
     risk_level?: RiskLevel;
     name?: string | null;
     labels?: string[];
-    properties?: Record<string, unknown>;
-}
-
-export interface EdgeUpsertRequest {
-    source: string;
-    target: string;
-    edge_type?: string;
-    value?: string | null;
-    tx_hash?: string | null;
-    block_number?: number | null;
     properties?: Record<string, unknown>;
 }
 

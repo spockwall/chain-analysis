@@ -6,8 +6,6 @@ from fastapi import APIRouter, HTTPException, Query
 
 from api.deps import GraphDBDep
 from api.models.entity import (
-    EdgeResponse,
-    EdgeUpsertRequest,
     EntityResponse,
     EntityType,
     GroupMemberRequest,
@@ -40,23 +38,6 @@ def _node_to_response(node: dict) -> EntityResponse:
         properties={k: v for k, v in props.items() if k not in {
             "entity_type", "risk_level", "name", "first_seen_block",
             "last_seen_block", "tx_count", "member_count"
-        }},
-    )
-
-
-def _edge_to_response(edge: dict) -> EdgeResponse:
-    """Convert a graph edge to EdgeResponse."""
-    props = edge.get("properties", {})
-    return EdgeResponse(
-        source=edge.get("source", ""),
-        target=edge.get("target", ""),
-        edge_type=edge.get("edge_type", "TRANSFER"),
-        value=props.get("value"),
-        block_number=props.get("block_number"),
-        timestamp=props.get("timestamp"),
-        tx_hash=props.get("tx_hash"),
-        properties={k: v for k, v in props.items() if k not in {
-            "value", "block_number", "timestamp", "tx_hash"
         }},
     )
 
@@ -109,7 +90,6 @@ async def get_neighbors(
     graph_db: GraphDBDep,
     depth: int = Query(1, ge=1, le=3, description="Number of hops"),
     direction: Literal["in", "out", "both"] = Query("both", description="Edge direction"),
-    edge_types: list[str] | None = Query(None, description="Filter by edge types"),
     limit: int = Query(100, ge=1, le=500, description="Maximum nodes to return"),
 ) -> NeighborsResponse:
     """
@@ -119,11 +99,10 @@ async def get_neighbors(
         address: Center node address
         depth: Number of hops (1-3)
         direction: Edge direction filter
-        edge_types: Optional edge type filter (TRANSFER, CALLS, etc.)
         limit: Maximum number of nodes to return
 
     Returns:
-        Subgraph containing nodes and edges in the neighborhood
+        Subgraph containing entity nodes and transaction nodes in the neighborhood
     """
     # Validate address format
     if not address.startswith("0x") or len(address) != 42:
@@ -135,7 +114,6 @@ async def get_neighbors(
         address=address,
         depth=depth,
         direction=direction,
-        edge_types=edge_types,
         limit=limit,
     )
 
@@ -184,17 +162,15 @@ async def find_paths(
     target: str,
     graph_db: GraphDBDep,
     max_depth: int = Query(10, ge=1, le=20, description="Maximum path length"),
-    edge_types: list[str] | None = Query(None, description="Filter by edge types"),
     limit: int = Query(10, ge=1, le=50, description="Maximum paths to return"),
 ) -> PathResponse:
     """
-    Find paths between two entities.
+    Find paths between two entities via Transaction nodes.
 
     Args:
         source: Source entity address
         target: Target entity address
-        max_depth: Maximum path length
-        edge_types: Optional edge type filter
+        max_depth: Maximum number of entity-to-entity hops
         limit: Maximum number of paths to return
 
     Returns:
@@ -212,7 +188,6 @@ async def find_paths(
         source=source,
         target=target,
         max_depth=max_depth,
-        edge_types=edge_types,
         limit=limit,
     )
 
@@ -391,72 +366,6 @@ async def delete_entity(
     await graph_db.execute_query(
         "MATCH (n:Entity {address: $address}) DETACH DELETE n",
         {"address": address},
-    )
-
-
-# ── Edge write endpoints ───────────────────────────────────────────────────────
-
-@write_router.put("/{source}/edges/{target}", response_model=EdgeResponse)
-async def upsert_edge(
-    source: str,
-    target: str,
-    body: EdgeUpsertRequest,
-    graph_db: GraphDBDep,
-) -> EdgeResponse:
-    """
-    Create or update a directed edge between two entities.
-
-    Uses MERGE semantics — safe to call repeatedly with the same source/target/type.
-    Both nodes are created if they don't exist.
-    """
-    source = _validate_address(source, "source")
-    target = _validate_address(target, "target")
-    if source == target:
-        raise HTTPException(status_code=400, detail="Source and target must differ")
-
-    properties: dict = {**body.properties}
-    if body.value is not None:
-        properties["value"] = body.value
-    if body.tx_hash is not None:
-        properties["tx_hash"] = body.tx_hash
-    if body.block_number is not None:
-        properties["block_number"] = body.block_number
-
-    from core.ports.graph_db import Edge
-    edge = Edge(source=source, target=target, edge_type=body.edge_type, properties=properties)
-    await graph_db.upsert_edges([edge])
-
-    return EdgeResponse(
-        source=source,
-        target=target,
-        edge_type=body.edge_type,
-        value=body.value,
-        tx_hash=body.tx_hash,
-        block_number=body.block_number,
-        properties=properties,
-    )
-
-
-@write_router.delete("/{source}/edges/{target}", status_code=204)
-async def delete_edge(
-    source: str,
-    target: str,
-    graph_db: GraphDBDep,
-    edge_type: str = Query("TRANSFER", description="Edge type to delete"),
-) -> None:
-    """
-    Delete a directed edge between two entities.
-    """
-    source = _validate_address(source, "source")
-    target = _validate_address(target, "target")
-
-    await graph_db.execute_query(
-        """
-        MATCH (a:Entity {address: $source})-[r]->(b:Entity {address: $target})
-        WHERE type(r) = $edge_type
-        DELETE r
-        """,
-        {"source": source, "target": target, "edge_type": edge_type},
     )
 
 

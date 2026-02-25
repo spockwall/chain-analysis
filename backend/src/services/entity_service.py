@@ -98,7 +98,6 @@ class EntityService:
             address=address,
             depth=max_depth,
             direction="out",
-            edge_types=["TRANSFER"],
             limit=500,
         )
 
@@ -115,12 +114,11 @@ class EntityService:
                 source=address,
                 target=node.address,
                 max_depth=max_depth,
-                edge_types=["TRANSFER"],
                 limit=1,
             )
 
             if paths:
-                distance = len(paths[0].edges)
+                distance = len(paths[0].transactions)
                 # Risk decays with distance
                 propagated_risk = source_risk * (0.5 ** distance)
                 risk_scores[node.address] = propagated_risk
@@ -172,7 +170,6 @@ class EntityService:
                 address=addr,
                 depth=1,
                 direction="in",
-                edge_types=["TRANSFER"],
                 limit=100,
             )
 
@@ -197,7 +194,7 @@ class EntityService:
                     direct_connections.append({
                         "from": addr1,
                         "to": addr2,
-                        "path_length": len(paths[0].edges),
+                        "path_length": len(paths[0].transactions),
                     })
 
         # Calculate cluster likelihood

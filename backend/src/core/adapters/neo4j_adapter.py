@@ -6,7 +6,7 @@ from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
-from core.ports.graph_db import Edge, GraphDatabase, Node, Path, Subgraph, Transaction
+from core.ports.graph_db import GraphDatabase, Node, Path, Subgraph, Transaction
 from libs import logger
 
 
@@ -97,37 +97,6 @@ class Neo4jAdapter:
             result = await self.execute_query(fallback_query, {"nodes": node_data})
 
         return result[0]["count"] if result else 0
-
-    async def upsert_edges(self, edges: list[Edge]) -> int:
-        """Upsert edges using MERGE with UNWIND for batching."""
-        if not edges:
-            return 0
-
-        # Group edges by type for batch processing
-        edges_by_type: dict[str, list[dict[str, Any]]] = {}
-        for edge in edges:
-            if edge.edge_type not in edges_by_type:
-                edges_by_type[edge.edge_type] = []
-            edges_by_type[edge.edge_type].append({
-                "source": edge.source,
-                "target": edge.target,
-                "properties": edge.properties,
-            })
-
-        total_count = 0
-        for edge_type, edge_data in edges_by_type.items():
-            query = f"""
-            UNWIND $edges AS edge
-            MATCH (s:Entity {{address: edge.source}})
-            MATCH (t:Entity {{address: edge.target}})
-            MERGE (s)-[r:{edge_type}]->(t)
-            SET r += edge.properties
-            RETURN count(r) AS count
-            """
-            result = await self.execute_query(query, {"edges": edge_data})
-            total_count += result[0]["count"] if result else 0
-
-        return total_count
 
     async def upsert_transactions(self, txs: list[Transaction]) -> int:
         """Upsert Transaction nodes with SENT/RECEIVED relationships."""
@@ -267,7 +236,6 @@ class Neo4jAdapter:
         address: str,
         depth: int = 1,
         direction: str = "both",
-        edge_types: list[str] | None = None,
         limit: int = 100,
     ) -> Subgraph:
         """Get the neighborhood of a node via Transaction nodes."""
@@ -325,7 +293,7 @@ class Neo4jAdapter:
         )
 
         if not result:
-            return Subgraph(nodes=[], edges=[], transactions=[], center_address=address)
+            return Subgraph(nodes=[], transactions=[], center_address=address)
 
         record = result[0]
 
@@ -365,7 +333,6 @@ class Neo4jAdapter:
 
         return Subgraph(
             nodes=nodes,
-            edges=[],
             transactions=transactions,
             center_address=address,
         )
@@ -375,7 +342,6 @@ class Neo4jAdapter:
         source: str,
         target: str,
         max_depth: int = 10,
-        edge_types: list[str] | None = None,
         limit: int = 10,
     ) -> list[Path]:
         """Find paths between two entities via Transaction nodes.
@@ -418,7 +384,7 @@ class Neo4jAdapter:
                     addr = node_data.pop("address", "")
                     entity_nodes.append(Node(address=addr, properties=node_data))
 
-            paths.append(Path(nodes=entity_nodes, edges=[], transactions=tx_nodes))
+            paths.append(Path(nodes=entity_nodes, transactions=tx_nodes))
 
         return paths
 

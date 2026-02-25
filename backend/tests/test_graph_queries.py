@@ -16,13 +16,15 @@ class TestQueryBuilder:
         assert "MERGE" in query
         assert "Entity" in query
 
-    def test_upsert_transfers_query(self):
-        """Test transfer upsert query generation."""
-        query = QueryBuilder.upsert_transfers()
+    def test_upsert_transactions_query(self):
+        """Test transaction upsert query generation."""
+        query = QueryBuilder.upsert_transactions()
 
-        assert "UNWIND $edges" in query
+        assert "UNWIND $txs" in query
         assert "MERGE" in query
-        assert "TRANSFER" in query
+        assert "Transaction" in query
+        assert "SENT" in query
+        assert "RECEIVED" in query
 
     def test_get_entity_stats(self):
         """Test entity stats query."""
@@ -49,7 +51,8 @@ class TestAMLPatternQueries:
 
         assert isinstance(result, QueryResult)
         assert result.params["start_address"] == address
-        assert "TRANSFER" in result.query
+        assert "SENT" in result.query
+        assert "RECEIVED" in result.query
         assert "chain_addresses" in result.query
 
     def test_detect_structuring(self):
@@ -57,13 +60,14 @@ class TestAMLPatternQueries:
         address = "0x28c6c06298d514db089934071355e5743bf21d60"
         result = AMLPatternQueries.detect_structuring(
             address=address,
-            time_window_hours=24,
-            min_transactions=5,
+            block_window=100,
+            min_receivers=3,
         )
 
         assert isinstance(result, QueryResult)
         assert result.params["address"] == address
-        assert "transaction_count" in result.query
+        assert result.params["block_window"] == 100
+        assert "fan_out" in result.query
 
     def test_detect_round_trip(self):
         """Test round-trip detection query."""
@@ -74,20 +78,23 @@ class TestAMLPatternQueries:
         )
 
         assert isinstance(result, QueryResult)
-        assert "path_addresses" in result.query
-        assert "hop_count" in result.query
+        assert result.params["address"] == address
+        assert "SENT" in result.query
+        assert "RECEIVED" in result.query
 
     def test_detect_fan_out_fan_in(self):
         """Test fan-out/fan-in detection query."""
         address = "0x28c6c06298d514db089934071355e5743bf21d60"
         result = AMLPatternQueries.detect_fan_out_fan_in(
             source_address=address,
-            min_fan_out=5,
+            min_receivers=5,
         )
 
         assert isinstance(result, QueryResult)
-        assert "fan_out_nodes" in result.query
-        assert "collector" in result.query
+        assert result.params["address"] == address
+        assert result.params["min_receivers"] == 5
+        assert "intermediaries" in result.query
+        assert "final_receivers" in result.query
 
     def test_detect_mixer_interaction_default_mixers(self):
         """Test mixer interaction detection with default mixers."""
@@ -120,9 +127,10 @@ class TestAMLPatternQueries:
         )
 
         assert isinstance(result, QueryResult)
+        assert result.params["address"] == address
         assert "high_risk_entity" in result.query
         assert "risk_level" in result.query
-        assert "shortestPath" in result.query
+        assert "path_transactions" in result.query
 
 
 class TestQueryResult:

@@ -110,21 +110,6 @@ class GroupMemberResponse(BaseModel):
     total: int = Field(..., description="Total number of members")
 
 
-class EdgeResponse(BaseModel):
-    """Response model for an edge (transfer/call)."""
-
-    source: str = Field(..., description="Source address")
-    target: str = Field(..., description="Target address")
-    edge_type: str = Field(..., description="Edge type (TRANSFER, CALLS, etc.)")
-    value: str | None = Field(None, description="Value in wei (as string)")
-    block_number: int | None = Field(None, description="Block number")
-    timestamp: datetime | None = Field(None, description="Transaction timestamp")
-    tx_hash: str | None = Field(None, description="Transaction hash")
-    properties: dict[str, Any] = Field(
-        default_factory=dict, description="Additional properties"
-    )
-
-
 class TransactionResponse(BaseModel):
     """Response model for a Transaction node."""
 
@@ -163,15 +148,6 @@ class PathNode(BaseModel):
     name: str | None = None
 
 
-class PathEdge(BaseModel):
-    """Edge in a path."""
-
-    source: str
-    target: str
-    edge_type: str
-    value: str | None = None
-
-
 class PathResponse(BaseModel):
     """Response model for path finding."""
 
@@ -197,21 +173,6 @@ class NodeUpsertRequest(BaseModel):
         default_factory=dict, description="Extra properties"
     )
 
-
-class EdgeUpsertRequest(BaseModel):
-    """Request model for creating or updating an edge."""
-
-    source: str = Field(..., description="Source address (0x-prefixed, 42 chars)")
-    target: str = Field(..., description="Target address (0x-prefixed, 42 chars)")
-    edge_type: str = Field(
-        "TRANSFER", description="Edge type (TRANSFER, CALLS, DEPLOYED)"
-    )
-    value: str | None = Field(None, description="Value in wei (as string)")
-    tx_hash: str | None = Field(None, description="Transaction hash")
-    block_number: int | None = Field(None, description="Block number")
-    properties: dict[str, Any] = Field(
-        default_factory=dict, description="Extra properties"
-    )
 
 
 class LabelTaskCreate(BaseModel):

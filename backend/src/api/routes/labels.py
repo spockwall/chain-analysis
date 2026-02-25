@@ -87,19 +87,27 @@ async def list_label_tasks(
     Returns:
         List of tasks
     """
-    query = """
-        SELECT id, entity_address, status, priority, title, description,
-               assignee_id, created_at, updated_at
-        FROM label_tasks
-        WHERE (:status IS NULL OR status = :status)
-        ORDER BY priority DESC, created_at DESC
-        LIMIT :limit OFFSET :offset
-    """
+    if status is not None:
+        query = """
+            SELECT id, entity_address, status, priority, title, description,
+                   assignee_id, created_at, updated_at
+            FROM label_tasks
+            WHERE status = :status
+            ORDER BY priority DESC, created_at DESC
+            LIMIT :limit OFFSET :offset
+        """
+        params: dict = {"status": status, "limit": limit, "offset": offset}
+    else:
+        query = """
+            SELECT id, entity_address, status, priority, title, description,
+                   assignee_id, created_at, updated_at
+            FROM label_tasks
+            ORDER BY priority DESC, created_at DESC
+            LIMIT :limit OFFSET :offset
+        """
+        params = {"limit": limit, "offset": offset}
 
-    result = await db.execute(
-        query,
-        {"status": status, "limit": limit, "offset": offset},
-    )
+    result = await db.execute(query, params)
 
     return [
         LabelTaskResponse(

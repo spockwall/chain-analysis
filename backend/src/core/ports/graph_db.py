@@ -16,20 +16,6 @@ class Node:
 
 
 @dataclass
-class Edge:
-    """Represents a graph edge (TRANSFER, CALLS, etc.).
-
-    .. deprecated::
-        Use Transaction instead. Kept for backwards compatibility.
-    """
-
-    source: str
-    target: str
-    edge_type: str
-    properties: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
 class Transaction:
     """Represents a Transaction node in the graph.
 
@@ -48,7 +34,6 @@ class Path:
     """Represents a path between two nodes."""
 
     nodes: list[Node]
-    edges: list[Edge]
     total_value: str | None = None  # Wei as string to avoid precision loss
     transactions: list["Transaction"] = field(default_factory=list)
 
@@ -58,7 +43,6 @@ class Subgraph:
     """Represents a subgraph (neighborhood exploration result)."""
 
     nodes: list[Node]
-    edges: list[Edge]
     center_address: str | None = None
     transactions: list["Transaction"] = field(default_factory=list)
 
@@ -102,21 +86,6 @@ class GraphDatabase(Protocol):
 
         Returns:
             Number of nodes upserted
-        """
-        ...
-
-    async def upsert_edges(self, edges: list[Edge]) -> int:
-        """
-        Upsert edges using MERGE semantics.
-
-        .. deprecated::
-            Use upsert_transactions() instead.
-
-        Args:
-            edges: List of edges to upsert
-
-        Returns:
-            Number of edges upserted
         """
         ...
 
@@ -164,7 +133,6 @@ class GraphDatabase(Protocol):
         address: str,
         depth: int = 1,
         direction: str = "both",
-        edge_types: list[str] | None = None,
         limit: int = 100,
     ) -> Subgraph:
         """
@@ -174,7 +142,6 @@ class GraphDatabase(Protocol):
             address: Center node address
             depth: Number of hops
             direction: "in", "out", or "both"
-            edge_types: Filter by edge types
             limit: Maximum number of nodes to return
 
         Returns:
@@ -187,7 +154,6 @@ class GraphDatabase(Protocol):
         source: str,
         target: str,
         max_depth: int = 10,
-        edge_types: list[str] | None = None,
         limit: int = 10,
     ) -> list[Path]:
         """
@@ -197,7 +163,6 @@ class GraphDatabase(Protocol):
             source: Source node address
             target: Target node address
             max_depth: Maximum path length
-            edge_types: Filter by edge types
             limit: Maximum number of paths to return
 
         Returns:

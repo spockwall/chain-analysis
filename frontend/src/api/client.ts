@@ -5,8 +5,6 @@
 import type {
     AuthResponse,
     EntityResponse,
-    EdgeResponse,
-    EdgeUpsertRequest,
     GroupCreateRequest,
     GroupDetailResponse,
     GroupListResponse,
@@ -100,7 +98,6 @@ export async function fetchEntity(address: string): Promise<EntityResponse> {
 export interface NeighborsOptions {
     depth?: number;
     direction?: "in" | "out" | "both";
-    edgeTypes?: string[];
     limit?: number;
 }
 
@@ -112,9 +109,6 @@ export async function fetchNeighbors(address: string, options: NeighborsOptions 
     }
     if (options.direction) {
         params.set("direction", options.direction);
-    }
-    if (options.edgeTypes?.length) {
-        options.edgeTypes.forEach((t) => params.append("edge_types", t));
     }
     if (options.limit !== undefined) {
         params.set("limit", options.limit.toString());
@@ -128,7 +122,6 @@ export async function fetchNeighbors(address: string, options: NeighborsOptions 
 
 export interface PathOptions {
     maxDepth?: number;
-    edgeTypes?: string[];
     limit?: number;
 }
 
@@ -137,9 +130,6 @@ export async function fetchPaths(source: string, target: string, options: PathOp
 
     if (options.maxDepth !== undefined) {
         params.set("max_depth", options.maxDepth.toString());
-    }
-    if (options.edgeTypes?.length) {
-        options.edgeTypes.forEach((t) => params.append("edge_types", t));
     }
     if (options.limit !== undefined) {
         params.set("limit", options.limit.toString());
@@ -167,7 +157,7 @@ export async function checkHealth(): Promise<HealthResponse> {
     return response.json();
 }
 
-// Node / edge mutation endpoints
+// Node mutation endpoints
 
 export async function upsertEntity(address: string, body: NodeUpsertRequest): Promise<EntityResponse> {
     return request<EntityResponse>(`/entities/${address}`, {
@@ -185,25 +175,6 @@ export async function updateEntity(address: string, body: NodeUpsertRequest): Pr
 
 export async function deleteEntity(address: string): Promise<void> {
     return request<void>(`/entities/${address}`, { method: "DELETE" }, true);
-}
-
-export async function upsertEdge(source: string, target: string, body: EdgeUpsertRequest): Promise<EdgeResponse> {
-    return request<EdgeResponse>(`/entities/${source}/edges/${target}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-    });
-}
-
-export async function deleteEdge(source: string, target: string, edgeType = "TRANSFER"): Promise<void> {
-    const url = `${API_BASE}/entities/${source}/edges/${target}?edge_type=${encodeURIComponent(edgeType)}`;
-    const response = await fetch(url, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-    });
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new ApiError(errorData.detail || `HTTP ${response.status}`, response.status);
-    }
 }
 
 // Group member endpoints
