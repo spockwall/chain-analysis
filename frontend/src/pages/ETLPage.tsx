@@ -206,10 +206,22 @@ export function ETLPage() {
         setTxResult(null);
         const id = toast.loading("Upserting transaction…");
         try {
+            // Convert ETH input to wei string for storage (1 ETH = 1e18 wei)
+            let valueWei: string | undefined;
+            if (txValue.trim()) {
+                const ethFloat = parseFloat(txValue.trim());
+                if (isNaN(ethFloat) || ethFloat < 0) {
+                    toast.dismiss(id);
+                    toast.error("Value must be a non-negative number in ETH.");
+                    setTxLoading(false);
+                    return;
+                }
+                valueWei = BigInt(Math.round(ethFloat * 1e18)).toString();
+            }
             const body: TransactionUpsertRequest = {
                 from_address: txFromAddr.trim().toLowerCase(),
                 to_address: txToAddr.trim().toLowerCase(),
-                ...(txValue.trim() && { value: txValue.trim() }),
+                ...(valueWei !== undefined && { value: valueWei }),
                 ...(txBlock.trim() && { block_number: parseInt(txBlock.trim(), 10) }),
             };
             const result = await upsertTransaction(hash, body);
@@ -603,7 +615,7 @@ export function ETLPage() {
                             <input
                                 value={txValue}
                                 onChange={(e) => setTxValue(e.target.value)}
-                                placeholder="value in wei (optional)"
+                                placeholder="value in ETH (optional)"
                                 className={inputCls}
                             />
                             <input

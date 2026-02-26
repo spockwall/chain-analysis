@@ -262,10 +262,20 @@ export function formatAddress(address: string, length = 8): string {
 export function formatWei(wei: string | null | undefined): string {
     if (!wei) return "0";
 
-    const eth = Number(wei);
-    if (!isFinite(eth)) return wei;
+    // Values are stored as wei integers (e.g. "10000000000000000000" = 10 ETH)
+    // Use BigInt for parsing to avoid precision loss on large integers,
+    // then convert to ETH float for display.
+    let weiInt: bigint;
+    try {
+        weiInt = BigInt(wei);
+    } catch {
+        // Not a valid integer (e.g. already an ETH float) — display as-is
+        return `${Number(wei).toFixed(4)} ETH`;
+    }
 
-    if (eth === 0) return "0 ETH";
+    if (weiInt === 0n) return "0 ETH";
+
+    const eth = Number(weiInt) / 1e18;
     if (eth < 0.001) return "< 0.001 ETH";
     if (eth < 1) return `${eth.toFixed(4)} ETH`;
     if (eth < 1000) return `${eth.toFixed(2)} ETH`;

@@ -9,6 +9,7 @@ These tables store:
 """
 
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum as PyEnum
 from typing import Any
 
@@ -333,12 +334,12 @@ class EntityFeatures(Base):
     active_hour_distribution: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # ── Balance ──────────────────────────────────────────────────────────────
-    # Average wallet balance in wei
-    balance_avg_wei: Mapped[int | None] = mapped_column(
+    # Average wallet balance in wei. Numeric(78,0) returns Decimal, not int.
+    balance_avg_wei: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=78, scale=0), nullable=True
     )
     # Maximum observed wallet balance in wei
-    balance_max_wei: Mapped[int | None] = mapped_column(
+    balance_max_wei: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=78, scale=0), nullable=True
     )
 
@@ -363,10 +364,11 @@ class EntityFeatures(Base):
     same_amount_transfer_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # ── Volume ───────────────────────────────────────────────────────────────
-    volume_in_wei: Mapped[int | None] = mapped_column(
+    # Total value transferred in wei. Numeric(78,0) returns Decimal, not int.
+    volume_in_wei: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=78, scale=0), nullable=True
     )
-    volume_out_wei: Mapped[int | None] = mapped_column(
+    volume_out_wei: Mapped[Decimal | None] = mapped_column(
         Numeric(precision=78, scale=0), nullable=True
     )
 

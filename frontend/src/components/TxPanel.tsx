@@ -65,7 +65,7 @@ export function TxPanel({ tx, onClose, onNavigateToAddress, onExploreAddress }: 
                     <p className={sectionLabel}>Value</p>
                     <div className="text-[1.1rem] font-bold text-gray-900 leading-none">{formatWei(tx.value)}</div>
                     {tx.value && tx.value !== "0" && (
-                        <div className="text-[0.7rem] text-gray-400 mt-[3px]">{tx.value} ETH</div>
+                        <div className="text-[0.7rem] text-gray-400 mt-[3px]">{tx.value} wei</div>
                     )}
                 </div>
 
