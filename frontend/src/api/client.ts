@@ -262,18 +262,12 @@ export function formatAddress(address: string, length = 8): string {
 export function formatWei(wei: string | null | undefined): string {
     if (!wei) return "0";
 
-    // Convert wei to ETH (divide by 10^18)
-    const weiNum = BigInt(wei);
-    const eth = Number(weiNum) / 1e18;
+    const eth = Number(wei);
+    if (!isFinite(eth)) return wei;
 
-    if (eth < 0.001) {
-        return "< 0.001 ETH";
-    }
-    if (eth < 1) {
-        return `${eth.toFixed(4)} ETH`;
-    }
-    if (eth < 1000) {
-        return `${eth.toFixed(2)} ETH`;
-    }
+    if (eth === 0) return "0 ETH";
+    if (eth < 0.001) return "< 0.001 ETH";
+    if (eth < 1) return `${eth.toFixed(4)} ETH`;
+    if (eth < 1000) return `${eth.toFixed(2)} ETH`;
     return `${(eth / 1000).toFixed(2)}K ETH`;
 }

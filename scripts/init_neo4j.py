@@ -108,16 +108,34 @@ async def init_neo4j(
         """)
         print("  ✓ tx_value index")
 
+        # Index on from_address for direct sender lookups (e.g. "all txs sent by X")
+        await session.run("""
+            CREATE INDEX tx_from IF NOT EXISTS
+            FOR (t:Transaction) ON (t.from_address)
+        """)
+        print("  ✓ tx_from index")
+
+        # Index on to_address for direct receiver lookups (e.g. "all txs received by X")
+        await session.run("""
+            CREATE INDEX tx_to IF NOT EXISTS
+            FOR (t:Transaction) ON (t.to_address)
+        """)
+        print("  ✓ tx_to index")
+
         # =================================================================
-        # MEMBER_OF Relationship Index
+        # IN_GROUP Relationship Index
         # =================================================================
 
-        # Index on MEMBER_OF added_at for temporal queries
+        # Index on IN_GROUP added_at for temporal membership queries.
+        # NOTE: the old index was named member_of_added_at and targeted MEMBER_OF,
+        # which was the previous relationship type. The schema now uses IN_GROUP.
+        # If upgrading from an old instance, drop member_of_added_at manually:
+        #   DROP INDEX member_of_added_at IF EXISTS
         await session.run("""
-            CREATE INDEX member_of_added_at IF NOT EXISTS
-            FOR ()-[r:MEMBER_OF]-() ON (r.added_at)
+            CREATE INDEX in_group_added_at IF NOT EXISTS
+            FOR ()-[r:IN_GROUP]-() ON (r.added_at)
         """)
-        print("  ✓ member_of_added_at index")
+        print("  ✓ in_group_added_at index")
 
         # =================================================================
         # Full-text Search Index (optional, for entity name search)

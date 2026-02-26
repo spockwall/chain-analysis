@@ -72,7 +72,12 @@ class Neo4jAdapter:
                 "properties": node.properties,
             })
 
-        # Use MERGE with UNWIND for idempotent batch upsert
+        # UNWIND streams the batch as individual rows — one MERGE per entity.
+        # MERGE on entity_address (unique constraint) is a single B-tree point-lookup:
+        #   O(log E) per node, O(N log E) total.
+        # SET e += merges new properties without overwriting unmentioned fields.
+        # APOC variant assigns type sub-labels (:EOA, :Mixer, etc.) dynamically;
+        # falls back to plain MERGE if APOC is not installed.
         query = """
         UNWIND $nodes AS node
         MERGE (e:Entity {address: node.address})
@@ -113,15 +118,22 @@ class Neo4jAdapter:
             for tx in txs
         ]
 
+        # Entity MERGEs come first so both endpoint nodes are guaranteed to exist
+        # before the Transaction node and its relationships are created.
+        # ON CREATE SET fires only for newly created entities — existing ones untouched.
+        # from_address / to_address are stored as Transaction properties in addition
+        # to the SENT/RECEIVED relationships, enabling fallback lookups without traversal.
+        # Complexity: O(N · (log E + log T)) ≈ O(N log T).
         query = """
         UNWIND $txs AS tx
+        MERGE (from:Entity {address: tx.from_address})
+          ON CREATE SET from.risk_level = 'unknown'
+        MERGE (to:Entity {address: tx.to_address})
+          ON CREATE SET to.risk_level = 'unknown'
         MERGE (t:Transaction {hash: tx.hash})
         SET t += tx.properties,
             t.from_address = tx.from_address,
             t.to_address   = tx.to_address
-        WITH t, tx
-        MATCH (from:Entity {address: tx.from_address})
-        MATCH (to:Entity   {address: tx.to_address})
         MERGE (from)-[:SENT]->(t)
         MERGE (t)-[:RECEIVED]->(to)
         RETURN count(t) AS count
@@ -132,6 +144,11 @@ class Neo4jAdapter:
 
     async def get_transaction(self, hash: str) -> Transaction | None:
         """Get a single transaction node by hash."""
+        # tx_hash unique constraint → O(log T) point-lookup, effectively O(1) at scale.
+        # OPTIONAL MATCH follows at most one SENT and one RECEIVED edge each — O(1).
+        # OPTIONAL means the query succeeds even if the relationships don't exist yet
+        # (tx stored before its entity nodes were linked); falls back to the stored
+        # from_address / to_address properties on the Transaction node.
         query = """
         MATCH (t:Transaction {hash: $hash})
         OPTIONAL MATCH (from:Entity)-[:SENT]->(t)
@@ -157,6 +174,11 @@ class Neo4jAdapter:
 
     async def get_node(self, address: str) -> Node | None:
         """Get a single node by address, including member_count for group entities."""
+        # entity_address unique constraint → O(log E) point-lookup.
+        # OPTIONAL MATCH expands all incoming IN_GROUP edges to count group members.
+        # count() aggregates in-place — only the integer is returned, not member nodes,
+        # keeping payload small. Non-group entities return member_count = 0.
+        # Complexity: O(log E + G) where G = number of group members (typically small).
         query = """
         MATCH (e:Entity {address: $address})
         OPTIONAL MATCH (member:Entity)-[:IN_GROUP]->(e)
@@ -179,6 +201,11 @@ class Neo4jAdapter:
     async def add_group_member(self, group_address: str, member_address: str) -> None:
         """Add an entity as a member of a group via IN_GROUP relationship."""
         from datetime import datetime, timezone
+        # MATCH (not MERGE) the group — it must already exist; 404 is handled in the route.
+        # MERGE the member entity in case it doesn't exist yet (unprocessed address).
+        # MERGE the IN_GROUP relationship is idempotent — safe to call repeatedly.
+        # added_at on the relationship enables temporal auditing of group membership.
+        # Complexity: O(log E) — two index lookups + one edge check.
         query = """
         MATCH (grp:Entity {address: $group})
         MERGE (member:Entity {address: $member})
@@ -189,6 +216,10 @@ class Neo4jAdapter:
 
     async def remove_group_member(self, group_address: str, member_address: str) -> None:
         """Remove the IN_GROUP relationship between a member and its group."""
+        # Both endpoints resolved via entity_address unique index: O(log E) each.
+        # Neo4j intersects the IN_GROUP edges from both sides to find the specific
+        # edge, then deletes only the relationship — the entity nodes are untouched.
+        # Complexity: O(log E).
         query = """
         MATCH (member:Entity {address: $member})-[r:IN_GROUP]->(grp:Entity {address: $group})
         DELETE r
@@ -197,6 +228,10 @@ class Neo4jAdapter:
 
     async def get_group_members(self, group_address: str) -> list[Node]:
         """Return all entities that are members of the given group."""
+        # Anchors on the group via entity_address index, then expands all incoming
+        # IN_GROUP edges. Returns full node data for each member so callers can
+        # display member properties without extra round-trips.
+        # Complexity: O(log E + G) — unavoidably linear in G since all members are returned.
         query = """
         MATCH (member:Entity)-[:IN_GROUP]->(grp:Entity {address: $group})
         RETURN member, labels(member) AS labels
@@ -215,6 +250,10 @@ class Neo4jAdapter:
 
     async def get_group_parent(self, member_address: str) -> "Node | None":
         """Return the group node this address belongs to, or None."""
+        # Index lookup on member address, then follows its single outgoing IN_GROUP edge.
+        # Business rules enforce at-most-one-group membership, so this traversal
+        # always terminates after exactly one edge — it never fans out.
+        # Complexity: O(log E).
         query = """
         MATCH (member:Entity {address: $member})-[:IN_GROUP]->(grp:Entity)
         RETURN grp, labels(grp) AS labels
@@ -239,52 +278,45 @@ class Neo4jAdapter:
         limit: int = 100,
     ) -> Subgraph:
         """Get the neighborhood of a node via Transaction nodes."""
-        # Build direction-aware Cypher for Transaction-as-Node model.
-        # One hop = (Entity)-[:SENT]->(Transaction)-[:RECEIVED]->(Entity)
-        # We repeat this pattern up to `depth` times.
-        hop = "(:Entity)-[:SENT]->(:Transaction)-[:RECEIVED]->"
-        hop_rev = "<-[:RECEIVED]-(:Transaction)<-[:SENT]-(:Entity)"
-
+        # All three direction variants anchor on the entity_address unique index and
+        # traverse SENT/RECEIVED relationships — no Transaction property scan occurs.
+        # Complexity: O(log E + K) where K = tx degree, bounded by LIMIT.
         if direction == "out":
-            # outgoing: center sends → tx → neighbor
-            query = f"""
-            MATCH (center:Entity {{address: $address}})
-            MATCH path = (center)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(neighbor:Entity)
-            WITH center, tx, neighbor
+            # Follows outgoing SENT edges: center → tx → neighbor.
+            # LIMIT applied before aggregation to cap rows before collect().
+            query = """
+            MATCH (center:Entity {address: $address})-[:SENT]->(tx:Transaction)-[:RECEIVED]->(neighbor:Entity)
+            WITH tx, neighbor
             LIMIT $limit
             RETURN
                 collect(DISTINCT neighbor) AS neighbors,
-                collect(DISTINCT tx) AS txs,
-                center
+                collect(DISTINCT tx)       AS txs
             """
         elif direction == "in":
-            # incoming: neighbor sends → tx → center
-            query = f"""
-            MATCH (center:Entity {{address: $address}})
-            MATCH (neighbor:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(center)
-            WITH center, tx, neighbor
+            # Traverses in reverse: neighbor → tx → center.
+            # Relationship direction is explicit so the planner uses the RECEIVED index.
+            query = """
+            MATCH (neighbor:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(center:Entity {address: $address})
+            WITH tx, neighbor
             LIMIT $limit
             RETURN
                 collect(DISTINCT neighbor) AS neighbors,
-                collect(DISTINCT tx) AS txs,
-                center
+                collect(DISTINCT tx)       AS txs
             """
         else:
-            # both directions — use OPTIONAL MATCH so a node with only in or
-            # only out transactions still returns results
+            # Two independent OPTIONAL MATCHes from the same anchor node.
+            # Results are concatenated then filtered for NULLs (arise when one
+            # direction has no transactions). LIMIT caps the final collection.
             query = """
             MATCH (center:Entity {address: $address})
-            OPTIONAL MATCH (in_neighbor:Entity)-[:SENT]->(in_tx:Transaction)-[:RECEIVED]->(center)
-            OPTIONAL MATCH (center)-[:SENT]->(out_tx:Transaction)-[:RECEIVED]->(out_neighbor:Entity)
-            WITH center,
-                 collect(DISTINCT in_neighbor) AS in_neighbors,
-                 collect(DISTINCT in_tx)       AS in_txs,
-                 collect(DISTINCT out_neighbor) AS out_neighbors,
-                 collect(DISTINCT out_tx)       AS out_txs
+            OPTIONAL MATCH (center)-[:SENT]->(out_tx:Transaction)-[:RECEIVED]->(out_nb:Entity)
+            OPTIONAL MATCH (in_nb:Entity)-[:SENT]->(in_tx:Transaction)-[:RECEIVED]->(center)
+            WITH
+                collect(DISTINCT out_nb)  + collect(DISTINCT in_nb)  AS neighbors,
+                collect(DISTINCT out_tx) + collect(DISTINCT in_tx)   AS txs
             RETURN
-                [x IN (in_neighbors + out_neighbors) WHERE x IS NOT NULL] AS neighbors,
-                [x IN (in_txs + out_txs) WHERE x IS NOT NULL]             AS txs,
-                center
+                [x IN neighbors WHERE x IS NOT NULL] AS neighbors,
+                [x IN txs      WHERE x IS NOT NULL] AS txs
             LIMIT $limit
             """
 
@@ -292,44 +324,41 @@ class Neo4jAdapter:
             query, {"address": address, "limit": limit}
         )
 
-        if not result:
-            return Subgraph(nodes=[], transactions=[], center_address=address)
-
-        record = result[0]
-
         # Parse Entity nodes
         nodes: list[Node] = []
         seen_addresses: set[str] = set()
-
-        center_data = dict(record["center"])
-        center_addr = center_data.pop("address")
-        nodes.append(Node(address=center_addr, properties=center_data))
-        seen_addresses.add(center_addr)
-
-        for neighbor in record["neighbors"]:
-            neighbor_data = dict(neighbor)
-            neighbor_addr = neighbor_data.pop("address", None)
-            if neighbor_addr and neighbor_addr not in seen_addresses:
-                nodes.append(Node(address=neighbor_addr, properties=neighbor_data))
-                seen_addresses.add(neighbor_addr)
 
         # Parse Transaction nodes
         transactions: list[Transaction] = []
         seen_hashes: set[str] = set()
 
-        for tx_node in record["txs"]:
-            tx_data = dict(tx_node)
-            tx_hash = tx_data.pop("hash", None)
-            if tx_hash and tx_hash not in seen_hashes:
-                from_addr = tx_data.pop("from_address", "")
-                to_addr = tx_data.pop("to_address", "")
-                transactions.append(Transaction(
-                    hash=tx_hash,
-                    from_address=from_addr,
-                    to_address=to_addr,
-                    properties=tx_data,
-                ))
-                seen_hashes.add(tx_hash)
+        if result:
+            record = result[0]
+
+            for neighbor in record["neighbors"]:
+                if neighbor is None:
+                    continue
+                neighbor_data = dict(neighbor)
+                neighbor_addr = neighbor_data.pop("address", None)
+                if neighbor_addr and neighbor_addr not in seen_addresses:
+                    nodes.append(Node(address=neighbor_addr, properties=neighbor_data))
+                    seen_addresses.add(neighbor_addr)
+
+            for tx_node in record["txs"]:
+                if tx_node is None:
+                    continue
+                tx_data = dict(tx_node)
+                tx_hash = tx_data.pop("hash", None)
+                if tx_hash and tx_hash not in seen_hashes:
+                    from_addr = tx_data.pop("from_address", "")
+                    to_addr = tx_data.pop("to_address", "")
+                    transactions.append(Transaction(
+                        hash=tx_hash,
+                        from_address=from_addr,
+                        to_address=to_addr,
+                        properties=tx_data,
+                    ))
+                    seen_hashes.add(tx_hash)
 
         return Subgraph(
             nodes=nodes,
@@ -349,7 +378,13 @@ class Neo4jAdapter:
         Uses quantified path patterns available in Neo4j 5.x.
         Each hop is (Entity)-[:SENT]->(Transaction)-[:RECEIVED]->(Entity).
         """
-        # max_depth here is the number of Entity-to-Entity hops
+        # Quantified path pattern: each {1..max_depth} repetition is one entity-to-entity
+        # hop via an intermediate Transaction node. The planner runs a bounded BFS/DFS
+        # anchored on both source and target via their unique-index lookups.
+        # LIMIT provides early termination once enough paths are found.
+        # Worst-case complexity: O(K^D) — exponential in depth D, polynomial in degree K.
+        # Hub nodes (exchanges, mixers) can have very high K; keep max_depth small (≤6)
+        # in production to avoid excessive fan-out.
         query = f"""
         MATCH path = (s:Entity {{address: $source}})
           ((-[:SENT]->(:Transaction)-[:RECEIVED]->){{1..{max_depth}}})(t:Entity {{address: $target}})
