@@ -32,6 +32,7 @@ python scripts/seed_neo4j.py
 ```
 
 This creates **31 nodes** and **22 edges** across two AML patterns:
+
 - A **peel chain**: suspect → Tornado Cash → 3 hops → Binance
 - A **structuring / fan-out**: whale → 5 smurfs → Coinbase
 
@@ -130,29 +131,38 @@ RETURN path
 ## AML Detection Queries
 
 ### Detect peel chains
+
 Single-input, single-output chains longer than 3 hops:
 
 ```cypher
 MATCH path = (start:Entity)-[:TRANSFER*3..10]->(end:Entity)
-WHERE ALL(n IN nodes(path)[1..-1]
-          WHERE size((n)-[:TRANSFER]->()) = 1
-          AND   size((n)<-[:TRANSFER]-()) = 1)
+WHERE ALL(n IN nodes(path)[1..-1] WHERE
+  COUNT { (n)-[:TRANSFER]->() } = 1 AND
+  COUNT { ()-[:TRANSFER]->(n) } = 1
+)
 RETURN path
 LIMIT 10
 ```
 
 ### Detect structuring (fan-out)
+
 One sender → 5+ receivers in close block range:
 
 ```cypher
 MATCH (src:Entity)-[r:TRANSFER]->(dst:Entity)
-WITH src, collect(dst) AS receivers, collect(r.block_number) AS blocks
-WHERE size(receivers) >= 5
-  AND (max(blocks) - min(blocks)) < 100
-RETURN src.address AS source, src.name AS name,
-       size(receivers) AS fan_out,
-       min(blocks) AS first_block,
-       max(blocks) AS last_block
+WITH
+  src,
+  count(dst)          AS fan_out,
+  min(r.block_number) AS first_block,
+  max(r.block_number) AS last_block
+WHERE fan_out >= 5
+  AND (last_block - first_block) < 100
+RETURN
+  src.address AS source,
+  src.name    AS name,
+  fan_out,
+  first_block,
+  last_block
 ORDER BY fan_out DESC
 ```
 
@@ -193,7 +203,7 @@ LIMIT 20
 ## Useful Browser Tips
 
 | Action | How |
-|--------|-----|
+| -------- | ----- |
 | Run query | `Ctrl+Enter` |
 | Switch to table view | Click the table icon (bottom-left of result) |
 | Expand a node's neighbors | Double-click a node in the graph view |
@@ -206,7 +216,7 @@ LIMIT 20
 In the browser result panel, click the node you want to style, then use the style sidebar to color by `risk_level`. Recommended palette:
 
 | Risk Level | Color |
-|------------|-------|
+| ------------ | ------- |
 | critical | `#ef4444` (red) |
 | high | `#f97316` (orange) |
 | medium | `#eab308` (yellow) |
