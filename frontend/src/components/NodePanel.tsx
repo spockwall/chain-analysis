@@ -37,7 +37,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
             .then((res) => {
                 if (!cancelled) setMembers(res.members);
             })
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
                 if (!cancelled) setMembersLoading(false);
             });
@@ -78,7 +78,9 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
             {/* Header */}
             <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
                 <div className="flex-1 min-w-0">
-                    <p className={`${sectionLabel} mb-1`}>Selected Entity</p>
+                    <p className={`${sectionLabel} mb-1`}>
+                        {(node.member_count ?? 0) > 0 ? "Selected Group" : "Selected Entity"}
+                    </p>
                     <h2 className="text-[1.25rem] font-semibold tracking-[-0.01em] text-gray-900 mb-1">
                         {node.name || "Unknown Entity"}
                     </h2>
@@ -115,6 +117,17 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                         <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase text-violet-500 border border-violet-500">
                             {ENTITY_LABEL[entityType]}
                         </span>
+                        {(node.member_count ?? 0) > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase bg-violet-600 text-white border border-violet-600">
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <circle cx="9" cy="7" r="4" />
+                                    <path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2" />
+                                    <path d="M16 3.13a4 4 0 010 7.75" />
+                                    <path d="M21 21v-2a4 4 0 00-3-3.87" />
+                                </svg>
+                                Group · {node.member_count} member{node.member_count === 1 ? "" : "s"}
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -217,13 +230,13 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                     </div>
                 </div>
 
-                {/* Group members */}
+                {/* Group Members */}
                 <hr className={divider} />
                 <div>
                     <p className={sectionLabel}>
-                        Contracts
+                        Group Members
                         {members.length > 0 && (
-                            <span className="inline-flex items-center justify-center bg-indigo-500 text-white rounded-full text-[0.6rem] font-semibold min-w-[16px] h-4 px-1 leading-none ml-1.5 align-middle">
+                            <span className="inline-flex items-center justify-center bg-violet-600 text-white rounded-full text-[0.6rem] font-semibold min-w-[16px] h-4 px-1 leading-none ml-1.5 align-middle">
                                 {members.length}
                             </span>
                         )}
@@ -232,22 +245,35 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                         <p className="text-[0.7rem] text-gray-400">Loading…</p>
                     ) : (
                         <>
+                            {members.length === 0 && (node.member_count ?? 0) === 0 && (
+                                <p className="text-[0.7rem] text-gray-400 italic">
+                                    No members — this is not a group node.
+                                </p>
+                            )}
                             {members.length > 0 && (
-                                <div className="flex flex-col gap-0.5 max-h-40 overflow-y-auto mb-1.5">
+                                <div className="flex flex-col gap-0.5 max-h-52 overflow-y-auto mb-1.5">
                                     {members.map((m) => (
                                         <div
                                             key={m.address}
-                                            className="flex items-center gap-1.5 px-1 py-[3px] rounded bg-gray-50 border border-gray-100"
+                                            className="flex items-center gap-1.5 px-1 py-[4px] rounded bg-violet-50 border border-violet-100 hover:bg-violet-100 transition-colors"
                                         >
+                                            {/* Clickable name + address */}
                                             <button
-                                                className="flex-1 text-left bg-none border-none cursor-pointer font-mono text-[0.68rem] text-gray-900 p-0 truncate hover:underline"
+                                                className="flex-1 text-left bg-none border-none cursor-pointer p-0 truncate"
                                                 title={m.address}
                                                 onClick={() => onNavigateToAddress?.(m.address)}
                                             >
-                                                {formatAddress(m.address, 5)}
+                                                {m.name && (
+                                                    <span className="block text-[0.72rem] font-semibold text-violet-800 truncate leading-snug">
+                                                        {m.name}
+                                                    </span>
+                                                )}
+                                                <span className={`block font-mono text-[0.66rem] truncate leading-snug ${m.name ? "text-violet-500" : "text-gray-900 hover:underline"}`}>
+                                                    {formatAddress(m.address, 5)}
+                                                </span>
                                             </button>
                                             {m.entity_type && (
-                                                <span className="inline-flex items-center px-[5px] py-[1px] rounded text-[0.6rem] font-semibold uppercase bg-violet-50 text-violet-700">
+                                                <span className="shrink-0 inline-flex items-center px-[5px] py-[1px] rounded text-[0.6rem] font-semibold uppercase bg-violet-100 text-violet-700">
                                                     {m.entity_type}
                                                 </span>
                                             )}
@@ -264,9 +290,9 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             )}
                             <div className="flex gap-1.5 items-center mt-1">
                                 <input
-                                    className="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded px-2 py-1 font-mono text-[0.68rem] text-gray-900 outline-none focus:border-indigo-400"
+                                    className="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded px-2 py-1 font-mono text-[0.68rem] text-gray-900 outline-none focus:border-violet-400"
                                     type="text"
-                                    placeholder="0x… contract address"
+                                    placeholder="0x… member address"
                                     value={memberInput}
                                     onChange={(e) => setMemberInput(e.target.value)}
                                     onKeyDown={(e) => {
@@ -274,7 +300,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                     }}
                                 />
                                 <button
-                                    className="shrink-0 px-2.5 py-1 bg-gray-900 text-white text-[0.7rem] font-semibold rounded border-none cursor-pointer transition-colors hover:bg-[#1e293b]"
+                                    className="shrink-0 px-2.5 py-1 bg-violet-600 text-white text-[0.7rem] font-semibold rounded border-none cursor-pointer transition-colors hover:bg-violet-700"
                                     onClick={handleAddMember}
                                 >
                                     Add

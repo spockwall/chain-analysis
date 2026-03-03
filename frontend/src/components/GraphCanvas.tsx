@@ -63,17 +63,23 @@ export function GraphCanvas({
 
         for (const node of data.nodes) {
             const entityType = node.entity_type || "Unknown";
-            const label = node.name ? node.name : `${node.address.slice(0, 6)}…${node.address.slice(-4)}`;
+            const baseName = node.name ? node.name : `${node.address.slice(0, 6)}…${node.address.slice(-4)}`;
             const memberCount = node.member_count ?? 0;
+            const isGroup = memberCount > 0;
+            // For group nodes, append a second line so the member count is
+            // visible directly on the canvas. Cytoscape text-wrap splits on \n.
+            const label = isGroup
+                ? `${baseName}\n● ${memberCount} member${memberCount === 1 ? "" : "s"}`
+                : baseName;
             els.push({
                 data: {
                     id: node.address,
                     label,
                     entityType,
                     riskLevel: node.risk_level,
-                    bgColor: ENTITY_COLORS[entityType],
+                    bgColor: ENTITY_COLORS[entityType as keyof typeof ENTITY_COLORS] ?? ENTITY_COLORS["Unknown"],
                     borderColor: RISK_COLOR[node.risk_level],
-                    nodeKind: memberCount > 0 ? "group" : "entity",
+                    nodeKind: isGroup ? "group" : "entity",
                     memberCount,
                 },
             });
