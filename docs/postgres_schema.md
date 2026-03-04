@@ -17,6 +17,7 @@ This document describes all PostgreSQL tables in the chain analysis system, thei
 | `known_labels` | 001 | Reference data for known entities (exchanges, mixers, etc.) |
 | `ingestion_runs` | 001 | ETL pipeline run records |
 | `entity_features` | 003 | Computed on-chain behavioural features per entity address |
+| `raw_transactions` | TBD | Hash-partitioned table for storing raw ingested blockchain transactions |
 
 ---
 
@@ -163,10 +164,44 @@ Computed on-chain behavioural features for each entity address. Populated by the
 | `same_amount_transfer_count` | `INTEGER` | Risk Indicators | Transfers with identical outgoing amount (structuring pattern) |
 | `volume_in_wei` | `NUMERIC(78,0)` | Volume | Total incoming value in wei |
 | `volume_out_wei` | `NUMERIC(78,0)` | Volume | Total outgoing value in wei |
+| `total_gas_spent_wei` | `NUMERIC(78,0)` | Gas / Fees | Total gas spent on transactions in wei |
+| `same_gas_fee_tx_count` | `INTEGER` | Risk Indicators | Number of transactions with exact same gas fee |
+| `mixer_interaction_count` | `INTEGER` | Entity Interaction | Number of interactions with known Mixers |
+| `bridge_interaction_count` | `INTEGER` | Entity Interaction | Number of interactions with known Bridges |
+| `labeled_contract_interaction_count` | `INTEGER` | Entity Interaction | Number of interactions with any labeled contracts |
+| `is_peel_chain_suspect` | `BOOLEAN` | AML Warning | Flag mapped from Neo4j (peel chain detected) |
+| `is_fan_out_suspect` | `BOOLEAN` | AML Warning | Flag mapped from Neo4j (fan out detected) |
+| `is_hopping_suspect` | `BOOLEAN` | AML Warning | Flag mapped from Neo4j (hopping behaviour detected) |
 | `computed_at` | `TIMESTAMPTZ` | System | Timestamp of the last ETL computation |
 | `updated_at` | `TIMESTAMPTZ` | System | Last row update time |
 
 **Indexes:** `(chain_id, last_seen_at)`, `(same_amount_transfer_count, out_degree)`
+
+---
+
+## `raw_transactions`
+
+Hash-partitioned table for dumping bulk raw transactions during the ETL process before resolving them or feeding them to Neo4j. It is partitioned by the transaction `hash` into 16 partitions.
+> *See **[Data Ingestion Scripts](data_ingestion.md)** for details on how to populate this data via our Python Etherscan scripts.*
+
+| Column | Type | Description |
+|---|---|---|
+| `hash` | `VARCHAR(66) PK` | The transaction hash (used as partition key) |
+| `chain_id` | `INTEGER PK` | Chain ID (default: 1) |
+| `block_number` | `BIGINT` | The block number |
+| `block_timestamp` | `TIMESTAMPTZ` | Timestamp of the block |
+| `from_address` | `VARCHAR(42)` | Sender address |
+| `to_address` | `VARCHAR(42)` | Recipient address (nullable for contract creation) |
+| `from_category` | `VARCHAR(100)` | Sender's label category (e.g. Mixer, Exchange) |
+| `to_category` | `VARCHAR(100)` | Recipient's label category |
+| `value_wei` | `NUMERIC(78,0)` | Value transferred in wei |
+| `gas_used` | `BIGINT` | Gas consumed |
+| `gas_price` | `NUMERIC(78,0)` | Gas price |
+| `method_id` | `VARCHAR(10)` | First 4 bytes of call data (e.g. 0xa9059cbb) |
+| `function_name` | `VARCHAR(255)` | Human-readable function name if decoded |
+
+**Partitioning:** `HASH (hash)`
+**Indexes:** `(block_number)`, `(block_timestamp)`, `(from_address)`, `(to_address)`
 
 ---
 
