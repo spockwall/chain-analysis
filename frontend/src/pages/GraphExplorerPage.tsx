@@ -34,6 +34,10 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     const [selectedEdge, setSelectedEdge] = useState<TransactionResponse | null>(null);
     const [loading, setLoading] = useState(false);
 
+    // Tracing mode: recursive expansion & group red nodes
+    const [tracingModeEnabled, setTracingModeEnabled] = useState(false);
+    const [preTracingSnapshot, setPreTracingSnapshot] = useState<NeighborsResponse | null>(null);
+
     const [activeLayout, setActiveLayout] = useState<LayoutName>("fcose");
     const [filters, setFilters] = useState<GraphFilters>(DEFAULT_FILTERS);
     const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -210,6 +214,96 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         } catch (err) {
             toast.dismiss(loadId);
             toast.error(err instanceof Error ? err.message : "Failed to expand node");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleToggleTracingMode = async () => {
+        if (tracingModeEnabled) {
+            // Revert to snapshot
+            if (preTracingSnapshot) {
+                setGraphData(preTracingSnapshot);
+            }
+            setTracingModeEnabled(false);
+            setPreTracingSnapshot(null);
+            return;
+        }
+
+        if (!graphData || graphData.nodes.length === 0) return;
+
+        setLoading(true);
+        const loadId = toast.loading("Tracing high-risk network…");
+        try {
+            // Save snapshot before expanding
+            setPreTracingSnapshot(graphData);
+
+            let currentNodes = [...graphData.nodes];
+            let currentTxs = [...graphData.transactions];
+            const seenAddresses = new Set(currentNodes.map((n) => n.address));
+            const seenTxHashes = new Set(currentTxs.map((t) => t.hash));
+
+            // Recursively fetch 2 hops out from CURRENT visible nodes
+            const maxDepth = 2;
+            for (let depth = 0; depth < maxDepth; depth++) {
+                // Determine nodes we haven't expanded from yet in this pass
+                const addressesToExpand = currentNodes.map((n) => n.address);
+                if (addressesToExpand.length === 0) break;
+
+                // We fetch in chunks to avoid slamming the backend
+                const batchSize = 10;
+                const newNodes: EntityResponse[] = [];
+                const newTxs: TransactionResponse[] = [];
+
+                for (let i = 0; i < addressesToExpand.length; i += batchSize) {
+                    const batch = addressesToExpand.slice(i, i + batchSize);
+                    const results = await Promise.allSettled(
+                        batch.map((addr) => fetchNeighbors(addr, { depth: 1, limit: 50 }))
+                    );
+
+                    for (const res of results) {
+                        if (res.status === "fulfilled") {
+                            res.value.nodes.forEach((n) => {
+                                if (!seenAddresses.has(n.address)) {
+                                    seenAddresses.add(n.address);
+                                    newNodes.push(n);
+                                }
+                            });
+                            res.value.transactions.forEach((tx) => {
+                                if (!seenTxHashes.has(tx.hash)) {
+                                    seenTxHashes.add(tx.hash);
+                                    newTxs.push(tx);
+                                }
+                            });
+                        }
+                    }
+                }
+
+                currentNodes = [...currentNodes, ...newNodes];
+                currentTxs = [...currentTxs, ...newTxs];
+
+                // If no new nodes discovered, stop recursion early
+                if (newNodes.length === 0) break;
+            }
+
+            setGraphData({
+                ...graphData,
+                nodes: currentNodes,
+                transactions: currentTxs,
+                total_nodes: currentNodes.length,
+                total_transactions: currentTxs.length,
+            });
+
+            setTracingModeEnabled(true);
+            toast.dismiss(loadId);
+            toast.success("High-risk trace complete");
+
+            // Force DAGre layout for better flow visualization when tracing
+            setActiveLayout("dagre");
+        } catch (err) {
+            toast.dismiss(loadId);
+            toast.error("Failed to trace network");
+            setPreTracingSnapshot(null);
         } finally {
             setLoading(false);
         }
@@ -403,6 +497,8 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 filters={filters}
                                 highlightedNodeIds={highlightedNodeIds}
                                 highlightedEdgeIds={highlightedEdgeIds}
+                                tracingModeEnabled={tracingModeEnabled}
+                                onToggleTracingMode={handleToggleTracingMode}
                             />
 
                             {/* Filter toggle */}
