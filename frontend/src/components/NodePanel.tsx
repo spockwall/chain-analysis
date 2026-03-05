@@ -14,13 +14,14 @@ interface NodePanelProps {
     onClose: () => void;
     transactions?: TransactionResponse[];
     onNavigateToAddress?: (address: string) => void;
+    overrideMembers?: EntityResponse[];
 }
 
 const divider = "border-none border-t border-gray-100 m-0";
 const btnIcon =
     "w-[26px] h-[26px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900";
 
-export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress }: NodePanelProps) {
+export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress, overrideMembers }: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
     const toast = useToastContext();
 
@@ -30,6 +31,13 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
 
     useEffect(() => {
         let cancelled = false;
+
+        if (overrideMembers) {
+            setMembers(overrideMembers);
+            setMembersLoading(false);
+            return;
+        }
+
         setMembers([]);
         setMemberInput("");
         setMembersLoading(true);
@@ -44,7 +52,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
         return () => {
             cancelled = true;
         };
-    }, [node.address]);
+    }, [node.address, overrideMembers]);
 
     const handleAddMember = async () => {
         const addr = memberInput.trim();

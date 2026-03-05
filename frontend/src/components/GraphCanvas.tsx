@@ -139,9 +139,7 @@ export function GraphCanvas({
             if (tracingModeEnabled) {
                 if (redNodeIds.has(fromAddr)) fromAddr = SYNTHETIC_GROUP_ID;
                 if (redNodeIds.has(toAddr)) toAddr = SYNTHETIC_GROUP_ID;
-
-                // Don't draw internal edges within the synthetic group
-                if (fromAddr === SYNTHETIC_GROUP_ID && toAddr === SYNTHETIC_GROUP_ID) continue;
+                // We purposefully allow internal edges to render as self-loops on the group per user request
             }
 
             const key = `${fromAddr}::${toAddr}`;

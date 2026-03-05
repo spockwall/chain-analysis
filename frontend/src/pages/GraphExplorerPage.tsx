@@ -162,6 +162,27 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
 
     const handleNodeSelect = async (address: string) => {
         setSelectedEdge(null);
+
+        // Handle clicking the synthetic group node by building a fake EntityResponse 
+        // with all the grouped red node addresses as members
+        if (tracingModeEnabled && address === "synthetic_high_risk_group" && graphData) {
+            const memberCount = graphData.nodes.filter((n) => n.risk_level === "critical").length;
+
+            setSelectedNode({
+                address: "synthetic_high_risk_group",
+                entity_type: "Mixer", // Give it it a standard group type to map properties cleanly
+                name: "High-Risk Network",
+                risk_level: "critical",
+                labels: ["Trace Group"],
+                properties: {
+                    Description: "Auto-grouped critical risk entities identified during trace completion.",
+                    "Entities Grouped": String(memberCount)
+                },
+                member_count: memberCount,
+            });
+            return;
+        }
+
         try {
             setSelectedNode(await fetchEntity(address));
         } catch {
@@ -719,6 +740,11 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 onClose={() => setSelectedNode(null)}
                                 transactions={graphData?.transactions}
                                 onNavigateToAddress={handleNodeSelect}
+                                overrideMembers={
+                                    selectedNode.address === "synthetic_high_risk_group" && graphData
+                                        ? graphData.nodes.filter(n => n.risk_level === "critical")
+                                        : undefined
+                                }
                             />
                         )}
                         {selectedEdge && (
