@@ -193,6 +193,9 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                 const newNodes = neighbors.nodes.filter((n) => !existingAddresses.has(n.address));
                 const existingTxHashes = new Set(graphData.transactions.map((t) => t.hash));
                 const newTxs = neighbors.transactions.filter((t) => !existingTxHashes.has(t.hash));
+
+                // If tracing mode is on, we want the new nodes to appear and automatically group if they are red.
+                // We add them to graphData, but we DO NOT update preTracingSnapshot so reversion still works.
                 setGraphData({
                     ...graphData,
                     center_address: address,
@@ -201,6 +204,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                     total_nodes: graphData.nodes.length + newNodes.length,
                     total_transactions: graphData.transactions.length + newTxs.length,
                 });
+
                 toast.dismiss(loadId);
                 if (newNodes.length > 0 || newTxs.length > 0) {
                     toast.success(`Added ${newNodes.length} entities, ${newTxs.length} transactions`);
@@ -242,12 +246,16 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
             let currentTxs = [...graphData.transactions];
             const seenAddresses = new Set(currentNodes.map((n) => n.address));
             const seenTxHashes = new Set(currentTxs.map((t) => t.hash));
+            const nodesAlreadyExpanded = new Set<string>();
 
             // Recursively fetch 2 hops out from CURRENT visible nodes
             const maxDepth = 2;
             for (let depth = 0; depth < maxDepth; depth++) {
                 // Determine nodes we haven't expanded from yet in this pass
-                const addressesToExpand = currentNodes.map((n) => n.address);
+                const addressesToExpand = currentNodes
+                    .map((n) => n.address)
+                    .filter((addr) => !nodesAlreadyExpanded.has(addr));
+
                 if (addressesToExpand.length === 0) break;
 
                 // We fetch in chunks to avoid slamming the backend
@@ -257,6 +265,10 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
 
                 for (let i = 0; i < addressesToExpand.length; i += batchSize) {
                     const batch = addressesToExpand.slice(i, i + batchSize);
+
+                    // Mark as expanded before fetching to ensure we don't request again
+                    batch.forEach(addr => nodesAlreadyExpanded.add(addr));
+
                     const results = await Promise.allSettled(
                         batch.map((addr) => fetchNeighbors(addr, { depth: 1, limit: 50 }))
                     );

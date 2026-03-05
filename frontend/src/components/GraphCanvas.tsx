@@ -105,7 +105,7 @@ export function GraphCanvas({
                     entityType,
                     riskLevel: node.risk_level,
                     bgColor: ENTITY_COLORS[entityType as keyof typeof ENTITY_COLORS] ?? ENTITY_COLORS["Unknown"],
-                    borderColor: RISK_COLOR[node.risk_level],
+                    borderColor: RISK_COLOR[node.risk_level] ?? RISK_COLOR["unknown"],
                     nodeKind: isGroup ? "group" : "entity",
                     memberCount,
                 },
@@ -120,8 +120,8 @@ export function GraphCanvas({
                     label: `High-Risk Network\n● ${redNodesMemberCount} grouped entities`,
                     entityType: "Group",
                     riskLevel: "critical",
-                    bgColor: "#fee2e2", // light red background
-                    borderColor: RISK_COLOR["critical"],
+                    bgColor: RISK_COLOR["critical"], // bold red styling instead of light pink
+                    borderColor: "#7f1d1d", // darker red border
                     nodeKind: "group",
                     memberCount: redNodesMemberCount,
                 },
@@ -190,8 +190,20 @@ export function GraphCanvas({
             minZoom: 0.1,
             maxZoom: 4,
         });
-        cy.on("tap", "node", (evt) => onNodeSelect(evt.target.id()));
-        cy.on("dbltap", "node", (evt) => onNodeExpand(evt.target.id()));
+
+        cy.on("tap", "node", (evt) => {
+            if (evt.target.id() !== "synthetic_high_risk_group") {
+                onNodeSelect(evt.target.id());
+            }
+        });
+
+        cy.on("dbltap", "node", (evt) => {
+            // Prevent attempting to double-click expand the synthetic group, as it is front-end only
+            if (evt.target.id() !== "synthetic_high_risk_group") {
+                onNodeExpand(evt.target.id());
+            }
+        });
+
         cy.on("tap", "edge", (evt) => {
             const txHash = evt.target.data("txHash") as string | undefined;
             if (txHash) onEdgeSelect?.(txHash);
