@@ -190,9 +190,7 @@ export function GraphCanvas({
         });
 
         cy.on("tap", "node", (evt) => {
-            if (evt.target.id() !== "synthetic_high_risk_group") {
-                onNodeSelect(evt.target.id());
-            }
+            onNodeSelect(evt.target.id());
         });
 
         cy.on("dbltap", "node", (evt) => {

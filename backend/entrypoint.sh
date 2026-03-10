@@ -8,6 +8,31 @@ set -e
 
 _DB_URL="postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-chain_analysis}"
 
+_PGHOST="${POSTGRES_HOST:-postgres}"
+_PGPORT="${POSTGRES_PORT:-5432}"
+
+echo "[entrypoint] Waiting for PostgreSQL at ${_PGHOST}:${_PGPORT}..."
+_max_wait=60
+_waited=0
+until python -c "
+import socket, sys
+try:
+    s = socket.create_connection(('${_PGHOST}', ${_PGPORT}), timeout=2)
+    s.close()
+    sys.exit(0)
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null; do
+    if [ "${_waited}" -ge "${_max_wait}" ]; then
+        echo "[entrypoint] ERROR: PostgreSQL did not become ready within ${_max_wait}s. Aborting."
+        exit 1
+    fi
+    echo "[entrypoint]  ... waiting (${_waited}s elapsed)"
+    sleep 2
+    _waited=$((_waited + 2))
+done
+echo "[entrypoint] PostgreSQL is ready."
+
 # ── 1. PostgreSQL schema migrations ──────────────────────────────────────────
 echo "[entrypoint] Running Alembic migrations..."
 alembic upgrade head
