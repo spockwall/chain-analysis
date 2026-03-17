@@ -3,6 +3,9 @@
  */
 
 import type {
+    AdminUserCreateRequest,
+    AdminUserListResponse,
+    AdminUserUpdateRequest,
     AuthResponse,
     EntityResponse,
     GroupCreateRequest,
@@ -87,6 +90,28 @@ export async function register(body: RegisterRequest): Promise<AuthResponse> {
 
 export async function fetchMe(): Promise<UserResponse> {
     return request<UserResponse>("/auth/me");
+}
+
+export async function fetchAdminUsers(): Promise<AdminUserListResponse> {
+    return request<AdminUserListResponse>("/admin/users");
+}
+
+export async function createAdminUser(body: AdminUserCreateRequest): Promise<UserResponse> {
+    return request<UserResponse>("/admin/users", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function updateAdminUser(userId: number, body: AdminUserUpdateRequest): Promise<UserResponse> {
+    return request<UserResponse>(`/admin/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function deleteAdminUser(userId: number): Promise<void> {
+    return request<void>(`/admin/users/${userId}`, { method: "DELETE" }, true);
 }
 
 // Entity endpoints

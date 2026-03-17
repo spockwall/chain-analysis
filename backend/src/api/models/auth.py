@@ -1,6 +1,10 @@
 """Pydantic models for auth-related API endpoints."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr
+
+from db.models import UserRole
 
 
 class RegisterRequest(BaseModel):
@@ -24,8 +28,10 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: str
-    role: str  # 'admin' | 'operator' | 'user'
+    role: UserRole
     is_active: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -36,3 +42,30 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class ManagedUserCreateRequest(BaseModel):
+    """Request body for POST /api/admin/users."""
+
+    username: str
+    email: EmailStr
+    password: str
+    role: UserRole = UserRole.USER
+    is_active: bool = True
+
+
+class ManagedUserUpdateRequest(BaseModel):
+    """Request body for PATCH /api/admin/users/{user_id}."""
+
+    username: str | None = None
+    email: EmailStr | None = None
+    password: str | None = None
+    role: UserRole | None = None
+    is_active: bool | None = None
+
+
+class UserListResponse(BaseModel):
+    """Collection response for admin user management."""
+
+    users: list[UserResponse]
+    total: int

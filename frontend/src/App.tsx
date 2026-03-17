@@ -2,7 +2,16 @@ import { Navigate, Route, Routes, useNavigate, useSearchParams } from "react-rou
 import { Nav } from "./components/Nav";
 import { Footer } from "./components/Footer";
 import { Toaster } from "./components/Toaster";
-import { GraphExplorerPage, DashboardPage, ETLPage, GroupsPage, HomePage, LoginPage, SignupPage } from "./pages";
+import {
+    AdminUsersPage,
+    GraphExplorerPage,
+    DashboardPage,
+    ETLPage,
+    GroupsPage,
+    HomePage,
+    LoginPage,
+    SignupPage,
+} from "./pages";
 import { ToastContext } from "./context/ToastContext";
 import { useToast } from "./hooks/useToast";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -24,8 +33,8 @@ function ExplorerRoute() {
 }
 
 /** Redirects to /login if not authenticated (waits for auth to load). */
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-    const { isAuthenticated, loading } = useAuth();
+function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
+    const { isAuthenticated, loading, user } = useAuth();
     if (loading) {
         // Brief loading state while the JWT is being verified
         return (
@@ -38,6 +47,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         );
     }
     if (!isAuthenticated) return <Navigate to="/login" replace />;
+    if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+        return <Navigate to="/dashboard" replace />;
+    }
     return <>{children}</>;
 }
 
@@ -94,6 +106,14 @@ function App() {
                                         element={
                                             <ProtectedRoute>
                                                 <DashboardPage />
+                                            </ProtectedRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/admin/users"
+                                        element={
+                                            <ProtectedRoute allowedRoles={["admin"]}>
+                                                <AdminUsersPage />
                                             </ProtectedRoute>
                                         }
                                     />
