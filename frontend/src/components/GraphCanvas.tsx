@@ -59,6 +59,21 @@ export function GraphCanvas({
 }: GraphCanvasProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const cyRef = useRef<Core | null>(null);
+    const onNodeSelectRef = useRef(onNodeSelect);
+    const onNodeExpandRef = useRef(onNodeExpand);
+    const onEdgeSelectRef = useRef(onEdgeSelect);
+
+    useEffect(() => {
+        onNodeSelectRef.current = onNodeSelect;
+    }, [onNodeSelect]);
+
+    useEffect(() => {
+        onNodeExpandRef.current = onNodeExpand;
+    }, [onNodeExpand]);
+
+    useEffect(() => {
+        onEdgeSelectRef.current = onEdgeSelect;
+    }, [onEdgeSelect]);
 
     const toElements = useCallback((): ElementDefinition[] => {
         const els: ElementDefinition[] = [];
@@ -190,19 +205,19 @@ export function GraphCanvas({
         });
 
         cy.on("tap", "node", (evt) => {
-            onNodeSelect(evt.target.id());
+            onNodeSelectRef.current(evt.target.id());
         });
 
         cy.on("dbltap", "node", (evt) => {
             // Prevent attempting to double-click expand the synthetic group, as it is front-end only
             if (evt.target.id() !== "synthetic_high_risk_group") {
-                onNodeExpand(evt.target.id());
+                onNodeExpandRef.current(evt.target.id());
             }
         });
 
         cy.on("tap", "edge", (evt) => {
             const txHash = evt.target.data("txHash") as string | undefined;
-            if (txHash) onEdgeSelect?.(txHash);
+            if (txHash) onEdgeSelectRef.current?.(txHash);
         });
         if (data.center_address) cy.getElementById(data.center_address).addClass("center");
         cyRef.current = cy;

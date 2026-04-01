@@ -240,3 +240,4 @@ neo4j/
 minio/
 frontend/certs/selfsigned.crt
 frontend/certs/selfsigned.key
+AGENTS.md
