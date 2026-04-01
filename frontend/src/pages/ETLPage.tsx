@@ -1,7 +1,7 @@
 /**
  * ETL Page — test and manage the backend ETL pipeline.
  */
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useHealth } from "../hooks/useHealth";
 import { useGraphStats } from "../hooks/useGraphStats";
 import { useToastContext } from "../context/ToastContext";
@@ -18,6 +18,7 @@ import {
     formatWei,
     type TransactionUpsertRequest,
 } from "../api/client";
+import { parseTxImportFile, type ParsedTxRow } from "../utils/txImportParser";
 import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 import {
     ENTITY_TYPES,
@@ -85,6 +86,18 @@ export function ETLPage() {
 
     const [deleteTxHash, setDeleteTxHash] = useState("");
     const [deleteTxLoading, setDeleteTxLoading] = useState(false);
+
+    // ── Bulk import state ────────────────────────────────────────────────────
+    const [importRows, setImportRows] = useState<ParsedTxRow[]>([]);
+    const [importFileName, setImportFileName] = useState("");
+    const [importDragOver, setImportDragOver] = useState(false);
+    const [importRunning, setImportRunning] = useState(false);
+    const [importDone, setImportDone] = useState(false);
+    const [importProgress, setImportProgress] = useState(0);
+    // Per-row import status: undefined=pending, "ok"=success, string=error message
+    const [importStatuses, setImportStatuses] = useState<("ok" | string | undefined)[]>([]);
+    const importCancelledRef = useRef(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const overallHealthy = health?.status === "healthy";
 
@@ -256,6 +269,87 @@ export function ETLPage() {
         }
     };
 
+    // ── Bulk import handlers ─────────────────────────────────────────────────
+
+    const handleFilePick = useCallback(async (file: File) => {
+        setImportDone(false);
+        setImportProgress(0);
+        setImportStatuses([]);
+        setImportFileName(file.name);
+        try {
+            const rows = await parseTxImportFile(file);
+            if (rows.length === 0) {
+                toast.error("File contains no rows.");
+                return;
+            }
+            setImportRows(rows);
+            setImportStatuses(new Array(rows.length).fill(undefined));
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to parse file");
+        }
+    }, [toast]);
+
+    const handleImport = async () => {
+        const validRows = importRows.filter((r) => r.valid);
+        if (validRows.length === 0) {
+            toast.error("No valid rows to import.");
+            return;
+        }
+        importCancelledRef.current = false;
+        setImportRunning(true);
+        setImportDone(false);
+        setImportProgress(0);
+        // Reset all statuses
+        setImportStatuses(new Array(importRows.length).fill(undefined));
+
+        let done = 0;
+        for (const row of validRows) {
+            if (importCancelledRef.current) break;
+            const body: TransactionUpsertRequest = {
+                from_address: row.from_address,
+                to_address: row.to_address,
+                ...(row.value !== undefined && { value: row.value }),
+                ...(row.block_number !== undefined && { block_number: row.block_number }),
+                ...(row.timestamp && { timestamp: row.timestamp }),
+                ...(row.gas_used !== undefined && { gas_used: row.gas_used }),
+                ...(row.gas_price && { gas_price: row.gas_price }),
+            };
+            try {
+                await upsertTransaction(row.hash, body);
+                setImportStatuses((prev) => {
+                    const next = [...prev];
+                    next[row.index] = "ok";
+                    return next;
+                });
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : "Request failed";
+                setImportStatuses((prev) => {
+                    const next = [...prev];
+                    next[row.index] = msg;
+                    return next;
+                });
+            }
+            done++;
+            setImportProgress(done);
+        }
+        setImportRunning(false);
+        setImportDone(true);
+        refreshStats();
+    };
+
+    const handleCancelImport = () => {
+        importCancelledRef.current = true;
+    };
+
+    const handleResetImport = () => {
+        setImportRows([]);
+        setImportFileName("");
+        setImportStatuses([]);
+        setImportProgress(0);
+        setImportDone(false);
+        importCancelledRef.current = false;
+    };
+
     return (
         <div className="flex-1 min-h-0 overflow-auto bg-gray-50">
             <div className="max-w-[860px] mx-auto px-6 py-8">
@@ -357,15 +451,14 @@ export function ETLPage() {
                         <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
                             <div className="flex items-center gap-2 mb-2">
                                 <span
-                                    className={`inline-flex items-center px-2 py-[3px] rounded text-[0.65rem] font-semibold uppercase ${
-                                        {
+                                    className={`inline-flex items-center px-2 py-[3px] rounded text-[0.65rem] font-semibold uppercase ${{
                                             unknown: "bg-slate-100 text-slate-500",
                                             low: "bg-green-100 text-green-700",
                                             medium: "bg-yellow-100 text-yellow-700",
                                             high: "bg-orange-100 text-orange-700",
                                             critical: "bg-red-100 text-red-700",
                                         }[entityResult.risk_level]
-                                    }`}
+                                        }`}
                                 >
                                     {entityResult.risk_level}
                                 </span>
@@ -584,6 +677,240 @@ export function ETLPage() {
                             <div className={propsBlock}>
                                 <pre className="m-0 font-mono">{JSON.stringify(upsertResult, null, 2)}</pre>
                             </div>
+                        </div>
+                    )}
+                </Section>
+
+                {/* Import Transactions */}
+                <Section title="Import Transactions (JSON / CSV)">
+                    {/* hidden file input */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json,.csv,application/json,text/csv"
+                        className="hidden"
+                        onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleFilePick(f);
+                            // reset so same file can be re-picked
+                            e.target.value = "";
+                        }}
+                    />
+
+                    {importRows.length === 0 ? (
+                        /* ── Stage 1: Drop zone ─────────────────────────── */
+                        <div
+                            className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl px-6 py-10 transition-colors cursor-pointer select-none ${importDragOver
+                                    ? "border-blue-400 bg-blue-50"
+                                    : "border-gray-200 bg-gray-50 hover:border-gray-300 hover:bg-gray-100"
+                                }`}
+                            onDragOver={(e) => { e.preventDefault(); setImportDragOver(true); }}
+                            onDragLeave={() => setImportDragOver(false)}
+                            onDrop={(e) => {
+                                e.preventDefault();
+                                setImportDragOver(false);
+                                const f = e.dataTransfer.files?.[0];
+                                if (f) handleFilePick(f);
+                            }}
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                            <div className="text-center">
+                                <p className="text-[0.85rem] font-semibold text-gray-700">
+                                    Drop a <code className="font-mono">.json</code> or <code className="font-mono">.csv</code> file here
+                                </p>
+                                <p className="text-[0.72rem] text-gray-400 mt-0.5">
+                                    or click to browse
+                                </p>
+                            </div>
+                            <button
+                                className={btnSecondary}
+                                onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                            >
+                                Choose File
+                            </button>
+                            <p className="text-[0.68rem] text-gray-400 text-center max-w-xs">
+                                Required fields: <code className="font-mono">hash</code>,{" "}
+                                <code className="font-mono">from_address</code>,{" "}
+                                <code className="font-mono">to_address</code>.
+                                Optional: <code className="font-mono">value</code> (ETH or wei),{" "}
+                                <code className="font-mono">block_number</code>,{" "}
+                                <code className="font-mono">timestamp</code>,{" "}
+                                <code className="font-mono">gas_used</code>,{" "}
+                                <code className="font-mono">gas_price</code>.
+                            </p>
+                        </div>
+                    ) : (
+                        /* ── Stage 2 / 3 / 4: Preview + progress ──────────── */
+                        <div className="flex flex-col gap-3">
+                            {/* File name + summary bar */}
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
+                                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                    </svg>
+                                    <span className="text-[0.78rem] font-semibold text-gray-700 truncate max-w-[200px]">
+                                        {importFileName}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="text-[0.72rem] text-green-600 font-semibold">
+                                        {importRows.filter((r) => r.valid).length} valid
+                                    </span>
+                                    {importRows.some((r) => !r.valid) && (
+                                        <span className="text-[0.72rem] text-red-500 font-semibold">
+                                            · {importRows.filter((r) => !r.valid).length} invalid
+                                        </span>
+                                    )}
+                                    {!importRunning && (
+                                        <button className={btnSecondary} onClick={handleResetImport}>
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Progress bar (shown while running) */}
+                            {importRunning && (
+                                <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[0.72rem] text-gray-500">
+                                            Importing… {importProgress} / {importRows.filter((r) => r.valid).length}
+                                        </span>
+                                        <button
+                                            className="text-[0.7rem] text-red-500 font-semibold hover:underline"
+                                            onClick={handleCancelImport}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-blue-500 rounded-full transition-all duration-200"
+                                            style={{
+                                                width: `${Math.round(
+                                                    (importProgress / Math.max(1, importRows.filter((r) => r.valid).length)) * 100
+                                                )}%`,
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Done summary */}
+                            {importDone && !importRunning && (
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5">
+                                        <polyline points="20 6 9 17 4 12" />
+                                    </svg>
+                                    <span className="text-[0.78rem] text-green-700 font-semibold">
+                                        Done —{" "}
+                                        {importStatuses.filter((s) => s === "ok").length} succeeded,{" "}
+                                        {importStatuses.filter((s) => s !== undefined && s !== "ok").length} failed
+                                    </span>
+                                    <button
+                                        className="ml-auto text-[0.7rem] text-green-600 font-semibold hover:underline"
+                                        onClick={handleResetImport}
+                                    >
+                                        Import another file
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Preview table */}
+                            <div className="overflow-x-auto rounded-lg border border-gray-200">
+                                <table className="w-full text-[0.7rem] border-collapse">
+                                    <thead>
+                                        <tr className="bg-gray-50 border-b border-gray-200">
+                                            <th className="px-2 py-1.5 text-left font-semibold text-gray-500 w-8">#</th>
+                                            <th className="px-2 py-1.5 text-left font-semibold text-gray-500">Hash</th>
+                                            <th className="px-2 py-1.5 text-left font-semibold text-gray-500">From</th>
+                                            <th className="px-2 py-1.5 text-left font-semibold text-gray-500">To</th>
+                                            <th className="px-2 py-1.5 text-left font-semibold text-gray-500">Value</th>
+                                            <th className="px-2 py-1.5 text-left font-semibold text-gray-500">Block</th>
+                                            <th className="px-2 py-1.5 text-left font-semibold text-gray-500 w-20">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {importRows.map((row) => {
+                                            const status = importStatuses[row.index];
+                                            const rowBg = !row.valid
+                                                ? "bg-red-50"
+                                                : status === "ok"
+                                                    ? "bg-green-50"
+                                                    : status !== undefined
+                                                        ? "bg-red-50"
+                                                        : "bg-white";
+                                            return (
+                                                <tr
+                                                    key={row.index}
+                                                    className={`border-b border-gray-100 last:border-0 ${rowBg}`}
+                                                >
+                                                    <td className="px-2 py-1.5 text-gray-400">{row.index + 1}</td>
+                                                    <td className="px-2 py-1.5 font-mono text-gray-700 whitespace-nowrap">
+                                                        {row.hash ? `${row.hash.slice(0, 8)}…${row.hash.slice(-4)}` : <span className="text-red-400">—</span>}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 font-mono text-gray-600 whitespace-nowrap">
+                                                        {row.from_address ? formatAddress(row.from_address, 4) : <span className="text-red-400">—</span>}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 font-mono text-gray-600 whitespace-nowrap">
+                                                        {row.to_address ? formatAddress(row.to_address, 4) : <span className="text-red-400">—</span>}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">
+                                                        {row.value ? formatWei(row.value) : "—"}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 text-gray-500">
+                                                        {row.block_number?.toLocaleString() ?? "—"}
+                                                    </td>
+                                                    <td className="px-2 py-1.5">
+                                                        {!row.valid ? (
+                                                            <span
+                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-red-100 text-red-600"
+                                                                title={row.errors.join(" · ")}
+                                                            >
+                                                                ✗ Invalid
+                                                            </span>
+                                                        ) : status === "ok" ? (
+                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-green-100 text-green-700">
+                                                                ✓ OK
+                                                            </span>
+                                                        ) : status !== undefined ? (
+                                                            <span
+                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-red-100 text-red-600"
+                                                                title={status}
+                                                            >
+                                                                ✗ Error
+                                                            </span>
+                                                        ) : importRunning ? (
+                                                            <span className="text-gray-300 text-[0.6rem]">…</span>
+                                                        ) : (
+                                                            <span className="text-gray-300 text-[0.6rem]">—</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Action buttons */}
+                            {!importRunning && !importDone && (
+                                <div className="flex gap-2">
+                                    <button
+                                        className={btnPrimary}
+                                        disabled={importRows.filter((r) => r.valid).length === 0}
+                                        onClick={handleImport}
+                                    >
+                                        Import {importRows.filter((r) => r.valid).length} valid row{importRows.filter((r) => r.valid).length !== 1 ? "s" : ""}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
                 </Section>

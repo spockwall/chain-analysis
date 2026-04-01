@@ -34,6 +34,10 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     const [selectedEdge, setSelectedEdge] = useState<TransactionResponse | null>(null);
     const [loading, setLoading] = useState(false);
 
+    // Tracing mode: recursive expansion & group red nodes
+    const [tracingModeEnabled, setTracingModeEnabled] = useState(false);
+    const [preTracingSnapshot, setPreTracingSnapshot] = useState<NeighborsResponse | null>(null);
+
     const [activeLayout, setActiveLayout] = useState<LayoutName>("fcose");
     const [filters, setFilters] = useState<GraphFilters>(DEFAULT_FILTERS);
     const [filterPanelOpen, setFilterPanelOpen] = useState(false);
@@ -158,6 +162,27 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
 
     const handleNodeSelect = async (address: string) => {
         setSelectedEdge(null);
+
+        // Handle clicking the synthetic group node by building a fake EntityResponse 
+        // with all the grouped red node addresses as members
+        if (tracingModeEnabled && address === "synthetic_high_risk_group" && graphData) {
+            const memberCount = graphData.nodes.filter((n) => n.risk_level === "critical").length;
+
+            setSelectedNode({
+                address: "synthetic_high_risk_group",
+                entity_type: "Mixer", // Give it it a standard group type to map properties cleanly
+                name: "High-Risk Network",
+                risk_level: "critical",
+                labels: ["Trace Group"],
+                properties: {
+                    Description: "Auto-grouped critical risk entities identified during trace completion.",
+                    "Entities Grouped": String(memberCount)
+                },
+                member_count: memberCount,
+            });
+            return;
+        }
+
         try {
             setSelectedNode(await fetchEntity(address));
         } catch {
@@ -189,6 +214,9 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                 const newNodes = neighbors.nodes.filter((n) => !existingAddresses.has(n.address));
                 const existingTxHashes = new Set(graphData.transactions.map((t) => t.hash));
                 const newTxs = neighbors.transactions.filter((t) => !existingTxHashes.has(t.hash));
+
+                // If tracing mode is on, we want the new nodes to appear and automatically group if they are red.
+                // We add them to graphData, but we DO NOT update preTracingSnapshot so reversion still works.
                 setGraphData({
                     ...graphData,
                     center_address: address,
@@ -197,6 +225,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                     total_nodes: graphData.nodes.length + newNodes.length,
                     total_transactions: graphData.transactions.length + newTxs.length,
                 });
+
                 toast.dismiss(loadId);
                 if (newNodes.length > 0 || newTxs.length > 0) {
                     toast.success(`Added ${newNodes.length} entities, ${newTxs.length} transactions`);
@@ -210,6 +239,104 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         } catch (err) {
             toast.dismiss(loadId);
             toast.error(err instanceof Error ? err.message : "Failed to expand node");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleToggleTracingMode = async () => {
+        if (tracingModeEnabled) {
+            // Revert to snapshot
+            if (preTracingSnapshot) {
+                setGraphData(preTracingSnapshot);
+            }
+            setTracingModeEnabled(false);
+            setPreTracingSnapshot(null);
+            return;
+        }
+
+        if (!graphData || graphData.nodes.length === 0) return;
+
+        setLoading(true);
+        const loadId = toast.loading("Tracing high-risk network…");
+        try {
+            // Save snapshot before expanding
+            setPreTracingSnapshot(graphData);
+
+            let currentNodes = [...graphData.nodes];
+            let currentTxs = [...graphData.transactions];
+            const seenAddresses = new Set(currentNodes.map((n) => n.address));
+            const seenTxHashes = new Set(currentTxs.map((t) => t.hash));
+            const nodesAlreadyExpanded = new Set<string>();
+
+            // Recursively fetch 2 hops out from CURRENT visible nodes
+            const maxDepth = 2;
+            for (let depth = 0; depth < maxDepth; depth++) {
+                // Determine nodes we haven't expanded from yet in this pass
+                const addressesToExpand = currentNodes
+                    .map((n) => n.address)
+                    .filter((addr) => !nodesAlreadyExpanded.has(addr));
+
+                if (addressesToExpand.length === 0) break;
+
+                // We fetch in chunks to avoid slamming the backend
+                const batchSize = 10;
+                const newNodes: EntityResponse[] = [];
+                const newTxs: TransactionResponse[] = [];
+
+                for (let i = 0; i < addressesToExpand.length; i += batchSize) {
+                    const batch = addressesToExpand.slice(i, i + batchSize);
+
+                    // Mark as expanded before fetching to ensure we don't request again
+                    batch.forEach(addr => nodesAlreadyExpanded.add(addr));
+
+                    const results = await Promise.allSettled(
+                        batch.map((addr) => fetchNeighbors(addr, { depth: 1, limit: 50 }))
+                    );
+
+                    for (const res of results) {
+                        if (res.status === "fulfilled") {
+                            res.value.nodes.forEach((n) => {
+                                if (!seenAddresses.has(n.address)) {
+                                    seenAddresses.add(n.address);
+                                    newNodes.push(n);
+                                }
+                            });
+                            res.value.transactions.forEach((tx) => {
+                                if (!seenTxHashes.has(tx.hash)) {
+                                    seenTxHashes.add(tx.hash);
+                                    newTxs.push(tx);
+                                }
+                            });
+                        }
+                    }
+                }
+
+                currentNodes = [...currentNodes, ...newNodes];
+                currentTxs = [...currentTxs, ...newTxs];
+
+                // If no new nodes discovered, stop recursion early
+                if (newNodes.length === 0) break;
+            }
+
+            setGraphData({
+                ...graphData,
+                nodes: currentNodes,
+                transactions: currentTxs,
+                total_nodes: currentNodes.length,
+                total_transactions: currentTxs.length,
+            });
+
+            setTracingModeEnabled(true);
+            toast.dismiss(loadId);
+            toast.success("High-risk trace complete");
+
+            // Force DAGre layout for better flow visualization when tracing
+            setActiveLayout("dagre");
+        } catch (err) {
+            toast.dismiss(loadId);
+            toast.error("Failed to trace network");
+            setPreTracingSnapshot(null);
         } finally {
             setLoading(false);
         }
@@ -403,6 +530,8 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 filters={filters}
                                 highlightedNodeIds={highlightedNodeIds}
                                 highlightedEdgeIds={highlightedEdgeIds}
+                                tracingModeEnabled={tracingModeEnabled}
+                                onToggleTracingMode={handleToggleTracingMode}
                             />
 
                             {/* Filter toggle */}
@@ -611,6 +740,11 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 onClose={() => setSelectedNode(null)}
                                 transactions={graphData?.transactions}
                                 onNavigateToAddress={handleNodeSelect}
+                                overrideMembers={
+                                    selectedNode.address === "synthetic_high_risk_group" && graphData
+                                        ? graphData.nodes.filter(n => n.risk_level === "critical")
+                                        : undefined
+                                }
                             />
                         )}
                         {selectedEdge && (

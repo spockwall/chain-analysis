@@ -1,8 +1,9 @@
 """
-Auth API routes: register, login, and current-user.
+Auth API routes plus shared authentication dependencies.
 """
 
 from datetime import timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -37,6 +38,61 @@ def _make_token(user: User, settings) -> str:
         algorithm=settings.jwt_algorithm,
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
+
+
+async def get_current_user(
+    db: RelationalDBDep,
+    settings: SettingsDep,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> User:
+    """Return the authenticated active user from the bearer token."""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = decode_access_token(
+            credentials.credentials,
+            settings.jwt_secret_key,
+            settings.jwt_algorithm,
+        )
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise ValueError("missing sub")
+    except (JWTError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    async with db.session() as session:
+        user = await session.get(User, int(user_id))
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+
+    return user
+
+
+async def require_admin_user(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Require that the authenticated user has the admin role."""
+    if current_user.role != UserRole.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return current_user
+
+
+CurrentUserDep = Annotated[User, Depends(get_current_user)]
+AdminUserDep = Annotated[User, Depends(require_admin_user)]
 
 
 # ---------------------------------------------------------------------------
@@ -112,41 +168,7 @@ async def login(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
-    db: RelationalDBDep,
-    settings: SettingsDep,
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    current_user: CurrentUserDep,
 ) -> UserResponse:
     """Return the profile of the currently authenticated user."""
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    try:
-        payload = decode_access_token(
-            credentials.credentials,
-            settings.jwt_secret_key,
-            settings.jwt_algorithm,
-        )
-        user_id: str | None = payload.get("sub")
-        if user_id is None:
-            raise ValueError("missing sub")
-    except (JWTError, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    async with db.session() as session:
-        user = await session.get(User, int(user_id))
-
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
-        )
-
-    return UserResponse.model_validate(user)
+    return UserResponse.model_validate(current_user)

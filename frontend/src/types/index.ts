@@ -4,12 +4,16 @@
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
+export type UserRole = "admin" | "operator" | "user";
+
 export interface UserResponse {
     id: number;
     username: string;
     email: string;
-    role: string;
+    role: UserRole;
     is_active: boolean;
+    created_at?: string | null;
+    updated_at?: string | null;
 }
 
 export interface AuthResponse {
@@ -27,6 +31,27 @@ export interface RegisterRequest {
     username: string;
     email: string;
     password: string;
+}
+
+export interface AdminUserListResponse {
+    users: UserResponse[];
+    total: number;
+}
+
+export interface AdminUserCreateRequest {
+    username: string;
+    email: string;
+    password: string;
+    role: UserRole;
+    is_active: boolean;
+}
+
+export interface AdminUserUpdateRequest {
+    username?: string;
+    email?: string;
+    password?: string;
+    role?: UserRole;
+    is_active?: boolean;
 }
 
 // ── Entity ────────────────────────────────────────────────────────────────────

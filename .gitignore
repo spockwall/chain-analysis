@@ -238,3 +238,6 @@ neo4j/
 
 # Minio data
 minio/
+frontend/certs/selfsigned.crt
+frontend/certs/selfsigned.key
+AGENTS.md

@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Route, Routes, useNavigate, useLocation } from "react-router-dom";
 import { SearchBar } from "./SearchBar";
-import { LogoIcon, ExplorerIcon, GroupsIcon, EtlIcon, DashboardIcon } from "./NavIcons";
+import { LogoIcon, ExplorerIcon, GroupsIcon, EtlIcon, DashboardIcon, AdminIcon } from "./NavIcons";
 import { useAuth } from "../context/AuthContext";
 
-const NAV_TABS = [
+const NAV_TABS: Array<{
+    to: string;
+    label: string;
+    icon: React.ReactNode;
+    roles?: string[];
+}> = [
     { to: "/explorer", label: "Explorer", icon: <ExplorerIcon /> },
     { to: "/groups", label: "Groups", icon: <GroupsIcon /> },
     { to: "/etl", label: "ETL", icon: <EtlIcon /> },
     { to: "/dashboard", label: "Dashboard", icon: <DashboardIcon /> },
-] as const;
+    { to: "/admin/users", label: "Admin", icon: <AdminIcon />, roles: ["admin"] },
+];
 
 // Role accent — a small coloured dot only
 const ROLE_DOT: Record<string, string> = {
@@ -40,6 +46,7 @@ export function Nav() {
     const initials = user ? user.username.slice(0, 2).toUpperCase() : "";
     const roleDot = ROLE_DOT[user?.role ?? "user"] ?? ROLE_DOT.user;
     const roleLabel = ROLE_LABEL[user?.role ?? "user"] ?? "User";
+    const visibleTabs = NAV_TABS.filter((tab) => !tab.roles || tab.roles.includes(user?.role ?? ""));
 
     useEffect(() => {
         function onOutside(e: MouseEvent) {
@@ -89,7 +96,7 @@ export function Nav() {
                 {/* Nav tabs */}
                 {isAuthenticated && (
                     <div className="flex items-center gap-0.5">
-                        {NAV_TABS.map((tab) => (
+                        {visibleTabs.map((tab) => (
                             <NavLink
                                 key={tab.to}
                                 to={tab.to}

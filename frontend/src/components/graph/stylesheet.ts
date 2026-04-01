@@ -7,6 +7,9 @@
 // All entity nodes are this size — color alone distinguishes type.
 const NODE_SIZE = 18;
 
+// Group nodes are scaled up so they stand out from regular entity nodes.
+const GROUP_NODE_SIZE = 34;
+
 const EDGE_COLOR_INCOMING = "#64748b88"; // slate-500 with alpha
 const EDGE_COLOR_OUTGOING = "#6080b088"; // slate-400 with alpha
 const EDGE_COLOR_PATH = "#3b82f6"; // blue-500
@@ -32,9 +35,11 @@ export const GRAPH_STYLESHEET: any[] = [
             "text-background-opacity": 0,
             "text-background-padding": "2px",
             "text-background-shape": "roundrectangle",
+            "text-wrap": "wrap",
+            "text-max-width": "80px",
             width: NODE_SIZE,
             height: NODE_SIZE,
-            "transition-property": "border-width, border-color",
+            "transition-property": "border-width, border-color, width, height",
             "transition-duration": 200,
         },
     },
@@ -154,13 +159,23 @@ export const GRAPH_STYLESHEET: any[] = [
         } as any,
     },
     {
-        // Group node — entity that has contract members
+        // Group node — entity that aggregates multiple contract members.
+        // Rendered larger than regular nodes with a vivid violet border so it
+        // stands out at a glance in the canvas.
         selector: 'node[nodeKind="group"]',
         style: {
-            "border-width": 2,
-            "border-color": "#8c8edfff",
-            "border-style": "dashed",
-            "background-opacity": 0.85,
+            width: GROUP_NODE_SIZE,
+            height: GROUP_NODE_SIZE,
+            "border-width": 3,
+            "border-color": "#7c3aed",   // violet-700 — vivid group accent
+            "border-style": "solid",
+            "background-opacity": 1,
+            // Slightly larger, bolder label for the multi-line text
+            "font-size": 10,
+            "font-weight": 600,
+            color: "#4c1d95",            // violet-900 — readable on light bg
+            "text-margin-y": 8,
+            "text-max-width": "90px",
         } as any,
     },
 ];

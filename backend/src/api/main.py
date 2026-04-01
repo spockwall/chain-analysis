@@ -65,6 +65,7 @@ def create_app() -> FastAPI:
     # matches PUT/PATCH/DELETE before the GET-only /{address} route.
     app.include_router(health_router)
     app.include_router(auth_router, prefix="/api")
+    app.include_router(admin_router, prefix="/api")
     app.include_router(entities_write_router, prefix="/api")
     app.include_router(entities_router, prefix="/api")
     app.include_router(features_router, prefix="/api")

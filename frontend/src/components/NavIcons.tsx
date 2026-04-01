@@ -52,3 +52,12 @@ export function DashboardIcon() {
         </svg>
     );
 }
+
+export function AdminIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4z" />
+            <path d="M9.5 12.5l1.5 1.5 3.5-4" />
+        </svg>
+    );
+}
