@@ -17,6 +17,7 @@ Chain Analysis models blockchain activity as a property graph. Analysts can expl
 - Dagster orchestration (backfills, reprocess schedules, Redis-queue sensor)
 - Observability — Prometheus metrics, Grafana dashboards, Alertmanager routing
 - Dashboard with system health and quick links to every operator tool
+- MCP server for agent access to graph, group, feature, and labeling tools
 
 ## Tech Stack
 
@@ -62,6 +63,7 @@ On first start the backend automatically:
 |---------|-----|
 | Frontend (Vite dev) | http://localhost:5173 |
 | Backend API | http://localhost:8000 |
+| MCP Endpoint | http://localhost:8000/mcp |
 | API Docs (Swagger) | http://localhost:8000/docs |
 | Neo4j Browser | http://localhost:7474 |
 | Dagster UI | http://localhost:3000 |
@@ -108,6 +110,36 @@ cargo build --release
 ```
 
 See `etl-rs/README.md` for subcommands, env vars, orchestration, and observability details.
+
+### MCP usage
+
+The backend now exposes an MCP server in two forms:
+
+- Streamable HTTP: `http://localhost:8000/mcp`
+- Stdio: `cd backend && pip install -e . && chain-analysis-mcp`
+
+Typical agent/client configuration examples:
+
+```json
+{
+  "mcpServers": {
+    "chain-analysis": {
+      "command": "chain-analysis-mcp"
+    }
+  }
+}
+```
+
+```json
+{
+  "mcpServers": {
+    "chain-analysis": {
+      "transport": "http",
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
 
 ## Project Structure
 

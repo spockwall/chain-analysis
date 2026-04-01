@@ -2,10 +2,11 @@
 FastAPI dependency injection for service adapters.
 """
 
-from fastapi import Depends
 from typing import Annotated
 
-from core.adapters import *
+from fastapi import Depends
+
+from core.adapters import Neo4jAdapter, PostgresAdapter, RedisStreamsAdapter
 from core.config import Settings, get_settings
 from core.ports import GraphDatabase, MessageQueue, RelationalDatabase
 
@@ -19,7 +20,6 @@ async def init_adapters(settings: Settings) -> None:
     """Initialize all adapter instances at application startup."""
     global _neo4j_adapter, _postgres_adapter, _redis_adapter
 
-    # Neo4j
     _neo4j_adapter = Neo4jAdapter(
         uri=settings.neo4j_uri,
         user=settings.neo4j_user,
@@ -27,13 +27,11 @@ async def init_adapters(settings: Settings) -> None:
     )
     await _neo4j_adapter.connect()
 
-    # PostgreSQL
     _postgres_adapter = PostgresAdapter(
         database_url=settings.database_url,
     )
     await _postgres_adapter.connect()
 
-    # Redis
     _redis_adapter = RedisStreamsAdapter(
         redis_url=settings.redis_url,
     )
@@ -42,12 +40,27 @@ async def init_adapters(settings: Settings) -> None:
 
 async def close_adapters() -> None:
     """Close all adapter instances at application shutdown."""
+    global _neo4j_adapter, _postgres_adapter, _redis_adapter
+
     if _neo4j_adapter:
         await _neo4j_adapter.close()
     if _postgres_adapter:
         await _postgres_adapter.close()
     if _redis_adapter:
         await _redis_adapter.close()
+
+    _neo4j_adapter = None
+    _postgres_adapter = None
+    _redis_adapter = None
+
+
+def adapters_are_initialized() -> bool:
+    """Whether all runtime adapters have been initialized."""
+    return (
+        _neo4j_adapter is not None
+        and _postgres_adapter is not None
+        and _redis_adapter is not None
+    )
 
 
 def get_graph_db() -> GraphDatabase:

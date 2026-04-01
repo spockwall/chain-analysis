@@ -7,6 +7,7 @@ Run with: uvicorn src.api.main:app --reload
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from agent_mcp.server import chain_analysis_mcp, chain_analysis_mcp_http_app
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -45,12 +46,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("adapter_initialization_failed", error=str(e))
         raise
 
-    yield
-
-    # Shutdown
-    logger.info("shutting_down_application")
-    await close_adapters()
-    logger.info("adapters_closed")
+    try:
+        async with chain_analysis_mcp.session_manager.run():
+            logger.info("mcp_session_manager_started")
+            yield
+    finally:
+        # Shutdown
+        logger.info("shutting_down_application")
+        await close_adapters()
+        logger.info("adapters_closed")
 
 
 def create_app() -> FastAPI:
@@ -88,9 +92,9 @@ def create_app() -> FastAPI:
     app.include_router(pipeline_router, prefix="/api")
     app.include_router(stats_router, prefix="/api")
     app.include_router(groups_router, prefix="/api")
-    app.include_router(pipeline_router, prefix="/api")
     app.include_router(ingestion_router, prefix="/api")
     app.include_router(detections_router, prefix="/api")
+    app.mount("/mcp", chain_analysis_mcp_http_app)
 
     return app
 

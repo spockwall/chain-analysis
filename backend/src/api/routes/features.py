@@ -194,9 +194,8 @@ async def upsert_entity_features(
     """
     )
 
-    # Use db.transaction() so the INSERT is committed before RETURNING rows are read.
-    # db.execute() returns rows but skips commit for queries that return rows
-    # (e.g. INSERT ... RETURNING), which causes the request to hang.
+    # Keep the UPSERT and RETURNING read in one explicit transaction so the
+    # returned row reflects the committed write atomically.
     async with db.transaction() as session:
         result = await session.execute(sql, params)
         row = result.mappings().one()
