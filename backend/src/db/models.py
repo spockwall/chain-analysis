@@ -372,6 +372,22 @@ class EntityFeatures(Base):
         Numeric(precision=78, scale=0), nullable=True
     )
 
+    # ── Gas & Pattern Features (AML extensions) ──────────────────────────────
+    total_gas_spent_wei: Mapped[Decimal | None] = mapped_column(
+        Numeric(precision=78, scale=0), nullable=True
+    )
+    same_gas_fee_tx_count: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # ── Label Interactions (Cross-chain/Mixer) ───────────────────────────────
+    mixer_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
+    bridge_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
+    labeled_contract_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # ── AML Topology Flags (Populated from Neo4j) ────────────────────────────
+    is_peel_chain_suspect: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_fan_out_suspect: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_hopping_suspect: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # ── System Fields ────────────────────────────────────────────────────────
     # Timestamp of the ETL run that last computed these features
     computed_at: Mapped[datetime | None] = mapped_column(
@@ -389,3 +405,36 @@ class EntityFeatures(Base):
             "out_degree",
         ),
     )
+
+
+class RawTransaction(Base):
+    """
+    Raw transactions ingested from the blockchain.
+    Partitioned by the transaction hash to distribute the massive data load evenly.
+    """
+
+    __tablename__ = "raw_transactions"
+    __table_args__ = {
+        "postgresql_partition_by": "HASH (hash)"
+    }
+
+    hash: Mapped[str] = mapped_column(String(66), primary_key=True)
+    chain_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    
+    block_number: Mapped[int] = mapped_column(BigInteger, index=True)
+    block_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    
+    from_address: Mapped[str] = mapped_column(String(42), index=True)
+    to_address: Mapped[str | None] = mapped_column(String(42), nullable=True, index=True)
+    
+    # Label contexts 
+    from_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    to_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    value_wei: Mapped[Decimal] = mapped_column(Numeric(78, 0))
+    gas_used: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    gas_price: Mapped[Decimal | None] = mapped_column(Numeric(78, 0), nullable=True)
+    
+    # Function calls
+    method_id: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
+    function_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
