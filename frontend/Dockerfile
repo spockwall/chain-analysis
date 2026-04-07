@@ -24,7 +24,14 @@ RUN npm run build
 # =============================================================================
 FROM nginx:alpine AS production
 
+<<<<<<< feature/ingest-pipeline
 COPY nginx.production.conf /etc/nginx/conf.d/default.conf
+=======
+# Copy custom nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built assets from builder
+>>>>>>> develop
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80 443
