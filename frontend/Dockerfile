@@ -24,23 +24,18 @@ RUN npm run build
 # =============================================================================
 FROM nginx:alpine AS production
 
-# Copy custom nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy built assets from builder
+COPY nginx.production.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Expose port
-EXPOSE 80
+EXPOSE 80 443
 
-# Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1/ || exit 1
+    CMD wget --no-verbose --no-check-certificate --tries=1 --spider https://127.0.0.1/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]
 
 # =============================================================================
-# Stage 3: Development (alternative target)
+# Stage 3: Development
 # =============================================================================
 FROM node:20-alpine AS development
 
