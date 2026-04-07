@@ -3,7 +3,7 @@
  */
 import { useState, useEffect } from "react";
 import type { EntityResponse, TransactionResponse } from "../types";
-import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember } from "../api/client";
+import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember, ingestAddress } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
 import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
 import { CopyButton } from "./CopyButton";
@@ -15,19 +15,21 @@ interface NodePanelProps {
     transactions?: TransactionResponse[];
     onNavigateToAddress?: (address: string) => void;
     overrideMembers?: EntityResponse[];
+    onIngestComplete?: (address: string) => void;
 }
 
 const divider = "border-none border-t border-gray-100 m-0";
 const btnIcon =
     "w-[26px] h-[26px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900";
 
-export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress, overrideMembers }: NodePanelProps) {
+export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress, overrideMembers, onIngestComplete }: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
     const toast = useToastContext();
 
     const [members, setMembers] = useState<EntityResponse[]>([]);
     const [memberInput, setMemberInput] = useState("");
     const [membersLoading, setMembersLoading] = useState(false);
+    const [ingesting, setIngesting] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -74,6 +76,24 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
             toast.success(`Removed ${formatAddress(childAddress, 4)}`);
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : "Failed to remove member");
+        }
+    };
+
+    const handleIngest = async () => {
+        setIngesting(true);
+        const loadId = toast.loading("Fetching transactions from Etherscan…");
+        try {
+            const result = await ingestAddress({ address: node.address });
+            toast.dismiss(loadId);
+            toast.success(
+                `Ingested ${result.transactions_fetched} txs, ${result.entities_created} entities (${result.duration_seconds.toFixed(1)}s)`,
+            );
+            onIngestComplete?.(node.address);
+        } catch (err: unknown) {
+            toast.dismiss(loadId);
+            toast.error(err instanceof Error ? err.message : "Ingestion failed");
+        } finally {
+            setIngesting(false);
         }
     };
 
@@ -213,6 +233,25 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             >
                                 <line x1="5" y1="12" x2="19" y2="12" />
                                 <polyline points="12 5 19 12 12 19" />
+                            </svg>
+                        </button>
+                        <button
+                            className="w-full px-3.5 py-[9px] rounded-lg text-[0.78rem] font-semibold font-[inherit] cursor-pointer flex items-center justify-between transition-colors bg-blue-600 text-white border-none hover:bg-blue-700 disabled:opacity-45 disabled:cursor-not-allowed"
+                            onClick={handleIngest}
+                            disabled={ingesting}
+                        >
+                            {ingesting ? "Fetching…" : "Fetch Transactions"}
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                            >
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
                             </svg>
                         </button>
                         <a

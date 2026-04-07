@@ -13,6 +13,8 @@ import type {
     GroupListResponse,
     GroupMemberResponse,
     GroupUpdateRequest,
+    IngestAddressRequest,
+    IngestAddressResponse,
     LoginRequest,
     NeighborsResponse,
     NodeUpsertRequest,
@@ -273,6 +275,15 @@ export async function deleteGroup(address: string): Promise<void> {
 
 export async function fetchGraphStats(): Promise<GraphStatsResponse> {
     return request<GraphStatsResponse>("/stats");
+}
+
+// Pipeline endpoints
+
+export async function ingestAddress(body: IngestAddressRequest): Promise<IngestAddressResponse> {
+    return request<IngestAddressResponse>("/pipeline/ingest-address", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
 }
 
 // Utility functions

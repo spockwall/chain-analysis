@@ -30,17 +30,15 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Expose ports
 EXPOSE 80 443
 
-# Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
     CMD wget --no-verbose --no-check-certificate --tries=1 --spider https://127.0.0.1/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]
 
 # =============================================================================
-# Stage 3: Development (alternative target)
+# Stage 3: Development
 # =============================================================================
 FROM node:20-alpine AS development
 

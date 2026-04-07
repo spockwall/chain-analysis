@@ -7,7 +7,7 @@ import { NodePanel } from "../components/NodePanel";
 import { TxPanel } from "../components/TxPanel";
 import { useToastContext } from "../context/ToastContext";
 import type { EntityResponse, NeighborsResponse, PathResponse, TransactionResponse } from "../types";
-import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction } from "../api/client";
+import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
 import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
 import { Background } from "../components/Background";
 
@@ -240,6 +240,24 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
             toast.dismiss(loadId);
             toast.error(err instanceof Error ? err.message : "Failed to expand node");
         } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleIngestAndLoad = async (address: string) => {
+        setLoading(true);
+        const loadId = toast.loading("Fetching transactions from Etherscan…");
+        try {
+            const result = await ingestAddress({ address });
+            toast.dismiss(loadId);
+            toast.success(
+                `Ingested ${result.transactions_fetched} txs, ${result.entities_created} entities`,
+            );
+            // Re-search to load the newly ingested data
+            await handleSearch(address);
+        } catch (err) {
+            toast.dismiss(loadId);
+            toast.error(err instanceof Error ? err.message : "Ingestion failed");
             setLoading(false);
         }
     };
@@ -676,6 +694,20 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                     <span className="w-[5px] h-[5px] rounded-full bg-emerald-500" />
                                     {graphData.total_transactions} transactions
                                 </span>
+                                {graphData.total_transactions === 0 && graphData.center_address && (
+                                    <button
+                                        className="inline-flex items-center gap-[5px] px-3 py-[5px] bg-blue-600 text-white backdrop-blur-sm rounded-full text-[0.7rem] font-semibold border-none cursor-pointer transition-colors hover:bg-blue-700 disabled:opacity-45"
+                                        onClick={() => handleIngestAndLoad(graphData.center_address)}
+                                        disabled={loading}
+                                    >
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                            <polyline points="7 10 12 15 17 10" />
+                                            <line x1="12" y1="15" x2="12" y2="3" />
+                                        </svg>
+                                        Fetch from Etherscan
+                                    </button>
+                                )}
                             </div>
                         </>
                     ) : (
@@ -740,6 +772,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 onClose={() => setSelectedNode(null)}
                                 transactions={graphData?.transactions}
                                 onNavigateToAddress={handleNodeSelect}
+                                onIngestComplete={(addr) => handleSearch(addr)}
                                 overrideMembers={
                                     selectedNode.address === "synthetic_high_risk_group" && graphData
                                         ? graphData.nodes.filter(n => n.risk_level === "critical")
