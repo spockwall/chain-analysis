@@ -95,8 +95,8 @@ jobs:
 
             echo "=== sync repo ==="
             git fetch origin
-            git checkout main
-            git reset --hard origin/main
+            git checkout develop
+            git reset --hard origin/develop
 
             echo "=== validate compose ==="
             docker compose -f docker-compose.production.yml config > /dev/null
