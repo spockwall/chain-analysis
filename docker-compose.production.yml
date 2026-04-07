@@ -137,6 +137,9 @@ services:
     restart: always
     ports:
       - "442:443"
+    volumes:
+      - /home/mars/chain-analysis/certs/selfsigned.crt:/etc/nginx/certs/selfsigned.crt:ro
+      - /home/mars/chain-analysis/certs/selfsigned.key:/etc/nginx/certs/selfsigned.key:ro
     depends_on:
       backend: { condition: service_healthy }
     healthcheck:
