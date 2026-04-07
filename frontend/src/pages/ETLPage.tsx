@@ -14,12 +14,13 @@ import {
     deleteEntity,
     upsertTransaction,
     deleteTransaction,
+    ingestAddress,
     formatAddress,
     formatWei,
     type TransactionUpsertRequest,
 } from "../api/client";
 import { parseTxImportFile, type ParsedTxRow } from "../utils/txImportParser";
-import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
+import type { EntityResponse, EntityType, IngestAddressResponse, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 import {
     ENTITY_TYPES,
     RISK_LEVELS,
@@ -99,7 +100,37 @@ export function ETLPage() {
     const importCancelledRef = useRef(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // ── Ingest address state ─────────────────────────────────────────────────
+    const [ingestAddr, setIngestAddr] = useState("");
+    const [ingestLoading, setIngestLoading] = useState(false);
+    const [ingestResult, setIngestResult] = useState<IngestAddressResponse | null>(null);
+
     const overallHealthy = health?.status === "healthy";
+
+    const handleIngestAddress = async () => {
+        const addr = ingestAddr.trim().toLowerCase();
+        if (!isValidAddress(addr)) {
+            toast.error("Must be 0x followed by 40 hex characters.");
+            return;
+        }
+        setIngestLoading(true);
+        setIngestResult(null);
+        const id = toast.loading("Fetching from Etherscan…");
+        try {
+            const result = await ingestAddress({ address: addr });
+            setIngestResult(result);
+            toast.dismiss(id);
+            toast.success(
+                `Ingested ${result.transactions_fetched} txs, ${result.entities_created} entities`,
+            );
+            refreshStats();
+        } catch (err) {
+            toast.dismiss(id);
+            toast.error(err instanceof Error ? err.message : "Ingestion failed");
+        } finally {
+            setIngestLoading(false);
+        }
+    };
 
     const handleSearch = async () => {
         const addr = searchAddress.trim().toLowerCase();
@@ -427,6 +458,52 @@ export function ETLPage() {
                         )
                     )}
                 </div>
+
+                {/* Ingest Address from Etherscan */}
+                <Section title="Ingest Address from Etherscan">
+                    <p className="text-[0.75rem] text-gray-500 mb-3">
+                        Fetch all transactions for an address from Etherscan and import entities + transactions into Neo4j and PostgreSQL.
+                    </p>
+                    <div className="flex gap-2">
+                        <input
+                            value={ingestAddr}
+                            onChange={(e) => setIngestAddr(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleIngestAddress()}
+                            placeholder="0x… address to ingest"
+                            className={monoCls}
+                        />
+                        <button
+                            onClick={handleIngestAddress}
+                            disabled={ingestLoading || !ingestAddr.trim()}
+                            className={btnPrimary}
+                        >
+                            {ingestLoading ? "Ingesting…" : "Ingest"}
+                        </button>
+                    </div>
+                    {ingestResult && (
+                        <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-green-50">
+                            <p className="text-[0.78rem] font-semibold text-green-700 mb-2">Ingestion Complete</p>
+                            <div className="grid grid-cols-3 gap-3">
+                                {[
+                                    { v: ingestResult.transactions_fetched, l: "Txs Fetched" },
+                                    { v: ingestResult.internal_transactions_fetched, l: "Internal Txs" },
+                                    { v: ingestResult.entities_created, l: "Entities Created" },
+                                    { v: ingestResult.transactions_created, l: "Txs Created" },
+                                    { v: ingestResult.features_computed ? "Yes" : "No", l: "Features" },
+                                    { v: `${ingestResult.duration_seconds.toFixed(1)}s`, l: "Duration" },
+                                ].map(({ v, l }) => (
+                                    <div key={l}>
+                                        <div className="text-[1rem] font-bold text-gray-900 leading-none">{v}</div>
+                                        <div className="text-[0.7rem] text-gray-400 mt-[3px]">{l}</div>
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="font-mono text-[0.68rem] text-gray-500 mt-2">
+                                Run ID: {ingestResult.run_id}
+                            </p>
+                        </div>
+                    )}
+                </Section>
 
                 {/* Lookup */}
                 <Section title="Lookup Entity">

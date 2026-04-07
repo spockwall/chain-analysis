@@ -212,3 +212,20 @@ export interface GraphStatsResponse {
     entity_types: Record<string, number>;
     risk_levels: Record<string, number>;
 }
+
+// Ingestion (pipeline)
+export interface IngestAddressRequest {
+    address: string;
+    chain_id?: number;
+}
+
+export interface IngestAddressResponse {
+    address: string;
+    run_id: string;
+    transactions_fetched: number;
+    internal_transactions_fetched: number;
+    entities_created: number;
+    transactions_created: number;
+    features_computed: boolean;
+    duration_seconds: number;
+}
