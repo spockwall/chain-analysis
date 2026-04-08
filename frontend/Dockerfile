@@ -38,7 +38,7 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
 CMD ["nginx", "-g", "daemon off;"]
 
 # =============================================================================
-# Stage 3: Development
+# Stage 3: Development (alternative target)
 # =============================================================================
 FROM node:20-alpine AS development
 
