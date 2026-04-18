@@ -52,9 +52,15 @@ jobs:
         run: .venv/bin/ruff check . --select E9,F63,F7,F82
 
       - name: Backend type check advisory
-        continue-on-error: true
         working-directory: backend
-        run: .venv/bin/mypy src
+        run: |
+          set +e
+          MYPYPATH=src .venv/bin/mypy --explicit-package-bases src
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::mypy reported advisory issues; predeploy verification continues because strict typing is not yet enforced."
+          fi
+          exit 0
 
       - name: Start backend test infrastructure
         run: docker compose up -d --wait --wait-timeout 180 neo4j postgres redis minio
@@ -81,7 +87,7 @@ jobs:
         working-directory: etl-rs
         run: |
           cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets -- -D warnings -A clippy::too_many_arguments -A dead_code
+          cargo clippy --workspace --all-targets -- -D warnings -A clippy::too_many_arguments
           cargo test --workspace
           cargo build --workspace --release
 
