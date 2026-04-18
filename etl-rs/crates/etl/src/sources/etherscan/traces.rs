@@ -42,16 +42,26 @@ pub async fn fetch_block_traces(
 
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if attempt > MAX_RETRIES {
-                bail!("Rate limit exceeded fetching traces for block {}", block_number);
+                bail!(
+                    "Rate limit exceeded fetching traces for block {}",
+                    block_number
+                );
             }
-            warn!(block = block_number, attempt, "HTTP 429 fetching traces, backing off");
+            warn!(
+                block = block_number,
+                attempt, "HTTP 429 fetching traces, backing off"
+            );
             tokio::time::sleep(backoff).await;
             backoff = (backoff * 2).min(MAX_BACKOFF);
             continue;
         }
 
         if !response.status().is_success() {
-            bail!("HTTP {} fetching traces for block {}", response.status(), block_number);
+            bail!(
+                "HTTP {} fetching traces for block {}",
+                response.status(),
+                block_number
+            );
         }
 
         let body: Value = response.json().await?;
@@ -76,7 +86,11 @@ pub async fn fetch_block_traces(
             .cloned()
             .unwrap_or_default();
 
-        debug!(block = block_number, count = results.len(), "Fetched internal transactions");
+        debug!(
+            block = block_number,
+            count = results.len(),
+            "Fetched internal transactions"
+        );
 
         let mut traces = Vec::with_capacity(results.len());
         for raw in &results {
@@ -148,11 +162,7 @@ fn parse_trace(raw: &Value, block_number: u64) -> Result<Trace> {
         trace_address: raw
             .get("traceId")
             .and_then(|t| t.as_str())
-            .map(|t| {
-                t.split('_')
-                    .filter_map(|s| s.parse().ok())
-                    .collect()
-            })
+            .map(|t| t.split('_').filter_map(|s| s.parse().ok()).collect())
             .unwrap_or_default(),
     })
 }

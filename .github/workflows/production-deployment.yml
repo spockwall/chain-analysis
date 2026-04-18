@@ -80,6 +80,7 @@ jobs:
       - name: Validate Rust ETL
         working-directory: etl-rs
         run: |
+          cargo fmt --all -- --check
           cargo clippy --workspace --all-targets -- -D warnings -A clippy::too_many_arguments -A dead_code
           cargo test --workspace
           cargo build --workspace --release
