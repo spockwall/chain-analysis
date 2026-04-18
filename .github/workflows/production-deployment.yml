@@ -65,13 +65,17 @@ jobs:
       - name: Start backend test infrastructure
         run: docker compose up -d --wait --wait-timeout 180 neo4j postgres redis minio
 
+      - name: Apply test database migrations
+        working-directory: backend
+        run: .venv/bin/alembic upgrade head
+
       - name: Test backend
         working-directory: backend
         run: .venv/bin/pytest -m "not integration"
 
       - name: Stop backend test infrastructure
         if: always()
-        run: docker compose down
+        run: docker compose down -v
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
