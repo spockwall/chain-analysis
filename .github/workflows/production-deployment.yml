@@ -196,7 +196,7 @@ jobs:
           git checkout "$release_branch"
           git reset --hard "origin/$release_branch"
           bash scripts/deploy_production_release.sh "$release_branch"
-REMOTE
+          REMOTE
 
       - name: Remove SSH key
         if: always()
