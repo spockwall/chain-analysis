@@ -4,14 +4,26 @@ FastAPI application factory.
 Run with: uvicorn src.api.main:app --reload
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.deps import close_adapters, init_adapters
-from api.routes import *
+from api.routes import (
+    admin_router,
+    auth_router,
+    entities_router,
+    entities_write_router,
+    features_router,
+    groups_router,
+    health_router,
+    labels_router,
+    pipeline_router,
+    stats_router,
+    transactions_router,
+)
 from core.config import get_settings
 from libs import logger
 
@@ -71,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(features_router, prefix="/api")
     app.include_router(transactions_router, prefix="/api")
     app.include_router(labels_router, prefix="/api")
+    app.include_router(pipeline_router, prefix="/api")
     app.include_router(stats_router, prefix="/api")
     app.include_router(groups_router, prefix="/api")
     app.include_router(pipeline_router, prefix="/api")

@@ -1,6 +1,5 @@
 """Tests for API endpoints."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 
@@ -65,6 +64,15 @@ class TestLabelEndpoints:
         response = client.get("/api/labels/tasks?limit=10&offset=0")
         # Should succeed even if no tasks exist
         assert response.status_code in [200, 500]  # 500 if DB not connected
+
+
+class TestPipelineEndpoints:
+    """Tests for pipeline endpoint registration."""
+
+    def test_ingest_address_route_is_registered(self, client: TestClient):
+        """Test Etherscan ingestion route exists for explorer fetch action."""
+        response = client.post("/api/pipeline/ingest-address", json={})
+        assert response.status_code == 422
 
 
 class TestValidation:
