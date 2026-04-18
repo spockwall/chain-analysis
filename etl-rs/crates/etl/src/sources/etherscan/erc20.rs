@@ -55,7 +55,11 @@ pub async fn fetch_block_transfers(
         }
 
         if !response.status().is_success() {
-            bail!("HTTP {} fetching ERC-20 logs for block {}", response.status(), block_number);
+            bail!(
+                "HTTP {} fetching ERC-20 logs for block {}",
+                response.status(),
+                block_number
+            );
         }
 
         let body: Value = response.json().await?;
@@ -64,7 +68,10 @@ pub async fn fetch_block_transfers(
             let msg = body.get("message").and_then(|m| m.as_str()).unwrap_or("");
             if msg.to_lowercase().contains("rate limit") {
                 if attempt > MAX_RETRIES {
-                    bail!("Rate limit in ERC-20 logs response for block {}", block_number);
+                    bail!(
+                        "Rate limit in ERC-20 logs response for block {}",
+                        block_number
+                    );
                 }
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -79,13 +86,19 @@ pub async fn fetch_block_transfers(
             .cloned()
             .unwrap_or_default();
 
-        debug!(block = block_number, count = results.len(), "Fetched ERC-20 Transfer logs");
+        debug!(
+            block = block_number,
+            count = results.len(),
+            "Fetched ERC-20 Transfer logs"
+        );
 
         let mut transfers = Vec::with_capacity(results.len());
         for raw in &results {
             match decode_transfer_log(raw) {
                 Ok(t) => transfers.push(t),
-                Err(e) => debug!(block = block_number, error = %e, "Skipping non-standard Transfer log"),
+                Err(e) => {
+                    debug!(block = block_number, error = %e, "Skipping non-standard Transfer log")
+                }
             }
         }
 
@@ -106,10 +119,7 @@ fn decode_transfer_log(log: &Value) -> Result<Transfer> {
     let from_address = decode_address_topic(topics[1].as_str().unwrap_or(""));
     let to_address = decode_address_topic(topics[2].as_str().unwrap_or(""));
 
-    let value_hex = log
-        .get("data")
-        .and_then(|d| d.as_str())
-        .unwrap_or("0x0");
+    let value_hex = log.get("data").and_then(|d| d.as_str()).unwrap_or("0x0");
     let value = hex::hex_to_u128(value_hex)
         .map(|v| v.to_string())
         .unwrap_or_else(|_| "0".into());

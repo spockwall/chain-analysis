@@ -18,7 +18,7 @@ The workflow validates:
 
 - Frontend: dependency install, lint, Vitest command validation, Vite build, production Docker image build.
 - Backend: dependency install with dev extras, critical Ruff checks, advisory mypy output, pytest against local Compose infrastructure, production Docker image build.
-- Rust ETL: advisory rustfmt output in CI, clippy with narrow allowances for existing argument-count/dead-code debt, tests, release build, Docker builds for `ingest` and `process`.
+- Rust ETL: rustfmt, clippy with narrow allowances for existing argument-count/dead-code debt, tests, release build, Docker builds for `ingest` and `process`.
 - Compose: local Compose config and production Compose config using placeholder CI values.
 
 Production Compose validation uses placeholder values and `docker compose config --quiet` so rendered secrets are not printed.

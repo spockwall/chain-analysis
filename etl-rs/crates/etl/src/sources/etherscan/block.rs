@@ -90,7 +90,11 @@ pub async fn fetch_block_transactions(
 
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             if attempt > MAX_RETRIES {
-                bail!("Rate limit exceeded after {} retries for block {}", MAX_RETRIES, block_number);
+                bail!(
+                    "Rate limit exceeded after {} retries for block {}",
+                    MAX_RETRIES,
+                    block_number
+                );
             }
             warn!(block = block_number, attempt, "HTTP 429, backing off");
             tokio::time::sleep(backoff).await;
@@ -107,7 +111,11 @@ pub async fn fetch_block_transactions(
         if let Some(s) = body.as_str() {
             if s.contains("Max rate limit reached") {
                 if attempt > MAX_RETRIES {
-                    bail!("Rate limit in body after {} retries for block {}", MAX_RETRIES, block_number);
+                    bail!(
+                        "Rate limit in body after {} retries for block {}",
+                        MAX_RETRIES,
+                        block_number
+                    );
                 }
                 warn!(block = block_number, attempt, "Rate limit in body string");
                 tokio::time::sleep(backoff).await;
@@ -120,7 +128,11 @@ pub async fn fetch_block_transactions(
             let msg = body.get("message").and_then(|m| m.as_str()).unwrap_or("");
             if msg.to_lowercase().contains("rate limit") {
                 if attempt > MAX_RETRIES {
-                    bail!("Rate limit in status after {} retries for block {}", MAX_RETRIES, block_number);
+                    bail!(
+                        "Rate limit in status after {} retries for block {}",
+                        MAX_RETRIES,
+                        block_number
+                    );
                 }
                 warn!(block = block_number, attempt, "Rate limit in status field");
                 tokio::time::sleep(backoff).await;
@@ -133,7 +145,11 @@ pub async fn fetch_block_transactions(
             Some(Value::Object(obj)) => Value::Object(obj.clone()),
             Some(Value::String(s)) if s.to_lowercase().contains("rate limit") => {
                 if attempt > MAX_RETRIES {
-                    bail!("Rate limit in result after {} retries for block {}", MAX_RETRIES, block_number);
+                    bail!(
+                        "Rate limit in result after {} retries for block {}",
+                        MAX_RETRIES,
+                        block_number
+                    );
                 }
                 warn!(block = block_number, attempt, "Rate limit in result string");
                 tokio::time::sleep(backoff).await;
@@ -161,7 +177,11 @@ pub async fn fetch_block_transactions(
             .cloned()
             .unwrap_or_default();
 
-        debug!(block = block_number, tx_count = transactions.len(), "Parsed block");
+        debug!(
+            block = block_number,
+            tx_count = transactions.len(),
+            "Parsed block"
+        );
 
         let mut txs = Vec::with_capacity(transactions.len());
         for raw_tx in &transactions {

@@ -106,8 +106,7 @@ jobs:
         with:
           workspaces: etl-rs -> target
 
-      - name: Format check advisory
-        continue-on-error: true
+      - name: Format check
         working-directory: etl-rs
         run: cargo fmt --all -- --check
 

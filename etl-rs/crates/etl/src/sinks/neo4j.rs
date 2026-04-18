@@ -240,10 +240,7 @@ impl Neo4jWriter {
                 m.put(key("to_address"), transfer.to_address.as_str().into());
                 m.put(key("token_address"), transfer.token_address.as_str().into());
                 m.put(key("value"), transfer.value.as_str().into());
-                m.put(
-                    key("block_number"),
-                    (transfer.block_number as i64).into(),
-                );
+                m.put(key("block_number"), (transfer.block_number as i64).into());
                 m.put(key("timestamp"), (transfer.timestamp as i64).into());
                 m.put(key("log_index"), (transfer.log_index as i64).into());
                 xfer_list.push(BoltType::Map(m));

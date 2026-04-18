@@ -56,7 +56,11 @@ mod tests {
         assert!(json.contains(r#""type":"Progress""#));
         let parsed: IngestionMessage = serde_json::from_str(&json).unwrap();
         match parsed {
-            IngestionMessage::Progress { run_id, current_block, .. } => {
+            IngestionMessage::Progress {
+                run_id,
+                current_block,
+                ..
+            } => {
                 assert_eq!(run_id, "test-123");
                 assert_eq!(current_block, 100);
             }
