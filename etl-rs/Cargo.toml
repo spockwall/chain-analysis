@@ -1,7 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "chain-analysis-common",
-    "chain-analysis-ingest",
-    "chain-analysis-process",
+    "crates/types",
+    "crates/config",
+    "crates/sources",
+    "crates/sinks",
+    "crates/pipeline",
+    "crates/ingest",
+    "crates/process",
 ]

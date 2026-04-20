@@ -226,53 +226,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
-name = "chain-analysis-common"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "chain-analysis-ingest"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chain-analysis-common",
- "clap",
- "color-eyre",
- "eyre",
- "futures",
- "redis",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "chain-analysis-process"
-version = "0.1.0"
-dependencies = [
- "chain-analysis-common",
- "clap",
- "color-eyre",
- "eyre",
- "neo4rs",
- "redis",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -399,6 +352,10 @@ checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "config"
+version = "0.1.0"
 
 [[package]]
 name = "const-oid"
@@ -1150,6 +1107,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "ingest"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "color-eyre",
+ "config",
+ "eyre",
+ "futures",
+ "pipeline",
+ "redis",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sinks",
+ "sources",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "types",
+ "uuid",
+]
+
+[[package]]
 name = "instant"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1649,6 +1630,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
+name = "pipeline"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "redis",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "types",
+]
+
+[[package]]
 name = "pkcs1"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1716,6 +1709,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "process"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "config",
+ "eyre",
+ "neo4rs",
+ "pipeline",
+ "redis",
+ "serde",
+ "serde_json",
+ "sinks",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "types",
+ "uuid",
 ]
 
 [[package]]
@@ -2177,6 +2192,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sinks"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "eyre",
+ "neo4rs",
+ "redis",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "types",
+]
+
+[[package]]
 name = "siphasher"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2215,6 +2246,19 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sources"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "types",
 ]
 
 [[package]]
@@ -2805,6 +2849,14 @@ name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
+
+[[package]]
+name = "types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "unicode-bidi"
