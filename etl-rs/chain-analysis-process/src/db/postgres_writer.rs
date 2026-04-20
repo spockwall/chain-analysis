@@ -121,7 +121,6 @@ impl PostgresWriter {
         Ok(total)
     }
 
-    /// Insert a new ingestion run record with status "running".
     pub async fn insert_ingestion_run(
         &self,
         run_id: &str,
@@ -147,7 +146,6 @@ impl PostgresWriter {
         Ok(())
     }
 
-    /// Update an existing ingestion run's status and counters.
     pub async fn update_ingestion_run(
         &self,
         run_id: &str,

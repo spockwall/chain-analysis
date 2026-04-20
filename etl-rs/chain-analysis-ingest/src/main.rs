@@ -1,20 +1,13 @@
+use chain_analysis_ingest::output::redis::{RedisStreamWriter, StdoutWriter, TransactionWriter};
+use chain_analysis_ingest::progress::ProgressReporter;
+use chain_analysis_ingest::retry::RetryPolicy;
+use chain_analysis_ingest::{
+    get_latest_block, ingest_address, ingest_block_range_pipelined,
+};
 use clap::Parser;
 use color_eyre::eyre::Result;
 use std::time::Duration;
-use tracing::{error, info, warn};
-
-mod address_fetcher;
-mod erc20_decoder;
-mod etherscan;
-mod hex;
-mod mock;
-mod progress;
-mod redis_writer;
-mod retry;
-mod trace_fetcher;
-
-use redis_writer::{RedisStreamWriter, StdoutWriter, TransactionWriter};
-use retry::{with_retry, RetryPolicy};
+use tracing::info;
 
 #[derive(Parser)]
 #[command(
@@ -52,6 +45,10 @@ struct Cli {
     /// Seconds between block polls in follow mode.
     #[arg(long, default_value_t = 12)]
     poll_interval: u64,
+
+    /// How many block fetches to keep in flight concurrently (block mode).
+    #[arg(long, default_value_t = 5)]
+    fetch_concurrency: usize,
 
     // ── Address mode ─────────────────────────────────────────────────────────
 
@@ -100,207 +97,6 @@ struct Cli {
     run_id: String,
 }
 
-async fn fetch_block(
-    config: &chain_analysis_common::Config,
-    block_num: u64,
-    use_mock: bool,
-) -> Result<Vec<chain_analysis_common::Transaction>> {
-    if use_mock {
-        Ok(mock::generate_mock_block(block_num))
-    } else {
-        etherscan::fetch_block_transactions(
-            &config.etherscan_base_url,
-            config.etherscan_api_key.as_deref().unwrap(),
-            config.etherscan_chain_id,
-            block_num,
-        )
-        .await
-    }
-}
-
-async fn get_latest_block(
-    config: &chain_analysis_common::Config,
-    use_mock: bool,
-    hint: u64,
-) -> Result<u64> {
-    if use_mock {
-        Ok(mock::mock_latest_block(hint))
-    } else {
-        etherscan::fetch_latest_block_number(
-            &config.etherscan_base_url,
-            config.etherscan_api_key.as_deref().unwrap(),
-            config.etherscan_chain_id,
-        )
-        .await
-    }
-}
-
-async fn ingest_block(
-    config: &chain_analysis_common::Config,
-    block_num: u64,
-    use_mock: bool,
-    writer: &mut Box<dyn TransactionWriter>,
-    progress_reporter: &mut progress::ProgressReporter,
-    total_txs: &mut u64,
-    total_blocks: u64,
-    retry_policy: &RetryPolicy,
-    with_traces: bool,
-    with_transfers: bool,
-) -> Result<bool> {
-    // Fetch transactions with retry
-    let transactions = match with_retry(retry_policy, &format!("fetch_block_{}", block_num), || {
-        fetch_block(config, block_num, use_mock)
-    })
-    .await
-    {
-        Ok(txs) => txs,
-        Err(e) => {
-            error!(block = block_num, error = %e, "Failed to fetch block after retries");
-            progress_reporter
-                .report_error(&format!("Failed to fetch block {}: {}", block_num, e))
-                .await?;
-            // Record failed block for later retry
-            writer.record_failed_block(block_num).await?;
-            return Ok(false);
-        }
-    };
-
-    for tx in &transactions {
-        writer.write_transaction(tx).await?;
-    }
-
-    // Fetch traces if enabled
-    if with_traces && !use_mock {
-        match trace_fetcher::fetch_block_traces(
-            &config.etherscan_base_url,
-            config.etherscan_api_key.as_deref().unwrap(),
-            config.etherscan_chain_id,
-            block_num,
-        )
-        .await
-        {
-            Ok(traces) => {
-                for trace in &traces {
-                    writer.write_trace(trace).await?;
-                }
-            }
-            Err(e) => {
-                warn!(block = block_num, error = %e, "Failed to fetch traces, skipping");
-            }
-        }
-    }
-
-    // Fetch ERC-20 transfers if enabled
-    if with_transfers && !use_mock {
-        match erc20_decoder::fetch_block_transfers(
-            &config.etherscan_base_url,
-            config.etherscan_api_key.as_deref().unwrap(),
-            config.etherscan_chain_id,
-            block_num,
-        )
-        .await
-        {
-            Ok(transfers) => {
-                for transfer in &transfers {
-                    writer.write_transfer(transfer).await?;
-                }
-            }
-            Err(e) => {
-                warn!(block = block_num, error = %e, "Failed to fetch transfers, skipping");
-            }
-        }
-    }
-
-    writer.save_cursor(block_num).await?;
-
-    *total_txs += transactions.len() as u64;
-
-    progress_reporter
-        .report_progress(block_num, total_blocks, *total_txs)
-        .await?;
-
-    info!(
-        block = block_num,
-        tx_count = transactions.len(),
-        total_txs = *total_txs,
-        "Processed block"
-    );
-
-    Ok(true)
-}
-
-async fn ingest_address(
-    config: &chain_analysis_common::Config,
-    address: &str,
-    start_block: u64,
-    end_block: u64,
-    writer: &mut Box<dyn TransactionWriter>,
-    progress_reporter: &mut progress::ProgressReporter,
-    with_traces: bool,
-    with_transfers: bool,
-) -> Result<u64> {
-    let base_url = &config.etherscan_base_url;
-    let api_key = config
-        .etherscan_api_key
-        .as_deref()
-        .ok_or_else(|| eyre::eyre!("ETHERSCAN_API_KEY required for address mode"))?;
-    let chain_id = config.etherscan_chain_id;
-    let addr = address.to_lowercase();
-
-    // 1. Fetch all normal transactions
-    info!(address = %addr, "Fetching normal transactions");
-    let txs = address_fetcher::fetch_all_pages(|page, offset| {
-        address_fetcher::fetch_address_transactions(
-            base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
-        )
-    })
-    .await?;
-
-    info!(address = %addr, count = txs.len(), "Fetched normal transactions");
-    for tx in &txs {
-        writer.write_transaction(tx).await?;
-    }
-    let total_txs = txs.len() as u64;
-
-    // 2. Fetch internal transactions (traces)
-    if with_traces {
-        info!(address = %addr, "Fetching internal transactions");
-        let traces = address_fetcher::fetch_all_pages(|page, offset| {
-            address_fetcher::fetch_address_internal_txs(
-                base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
-            )
-        })
-        .await?;
-
-        info!(address = %addr, count = traces.len(), "Fetched internal transactions");
-        for trace in &traces {
-            writer.write_trace(trace).await?;
-        }
-    }
-
-    // 3. Fetch ERC-20 token transfers
-    if with_transfers {
-        info!(address = %addr, "Fetching token transfers");
-        let transfers = address_fetcher::fetch_all_pages(|page, offset| {
-            address_fetcher::fetch_address_token_transfers(
-                base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
-            )
-        })
-        .await?;
-
-        info!(address = %addr, count = transfers.len(), "Fetched token transfers");
-        for transfer in &transfers {
-            writer.write_transfer(transfer).await?;
-        }
-    }
-
-    progress_reporter
-        .report_complete(0, total_txs)
-        .await?;
-
-    Ok(total_txs)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
@@ -345,9 +141,9 @@ async fn main() -> Result<()> {
         );
 
         let mut progress_reporter = if cli.dry_run {
-            progress::ProgressReporter::new_dry_run(&cli.run_id)
+            ProgressReporter::new_dry_run(&cli.run_id)
         } else {
-            progress::ProgressReporter::new_redis(&config.redis_url, &cli.run_id).await?
+            ProgressReporter::new_redis(&config.redis_url, &cli.run_id).await?
         };
 
         let total = ingest_address(
@@ -366,7 +162,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // ─── Block-range mode (original) ────────────────────────────────────
+    // ─── Block-range mode ────────────────────────────────────────────────
     let start_block = match cli.start_block {
         Some(sb) => sb,
         None => {
@@ -398,8 +194,9 @@ async fn main() -> Result<()> {
         dry_run = cli.dry_run,
         with_traces = cli.with_traces,
         with_transfers = cli.with_transfers,
+        fetch_concurrency = cli.fetch_concurrency,
         source = %cli.source,
-        "Starting ingestion"
+        "Starting ingestion (pipelined)"
     );
 
     if start_block > end_block {
@@ -409,10 +206,10 @@ async fn main() -> Result<()> {
         }
     }
 
-    let mut progress_reporter = if cli.dry_run {
-        progress::ProgressReporter::new_dry_run(&cli.run_id)
+    let progress_reporter = if cli.dry_run {
+        ProgressReporter::new_dry_run(&cli.run_id)
     } else {
-        progress::ProgressReporter::new_redis(&config.redis_url, &cli.run_id).await?
+        ProgressReporter::new_redis(&config.redis_url, &cli.run_id).await?
     };
 
     let total_blocks = if start_block <= end_block {
@@ -420,26 +217,23 @@ async fn main() -> Result<()> {
     } else {
         0
     };
-    let mut total_txs: u64 = 0;
 
-    // Phase 1: process the initial block range
-    if start_block <= end_block {
-        for block_num in start_block..=end_block {
-            ingest_block(
-                &config,
-                block_num,
-                use_mock,
-                &mut writer,
-                &mut progress_reporter,
-                &mut total_txs,
-                total_blocks,
-                &retry_policy,
-                cli.with_traces,
-                cli.with_transfers,
-            )
-            .await?;
-        }
-    }
+    // Initial range — pipelined fetch + batched writer task.
+    let (mut writer, mut progress_reporter, mut total_txs) = ingest_block_range_pipelined(
+        &config,
+        start_block,
+        end_block,
+        use_mock,
+        writer,
+        progress_reporter,
+        &retry_policy,
+        cli.with_traces,
+        cli.with_transfers,
+        cli.fetch_concurrency,
+        total_blocks,
+        0,
+    )
+    .await?;
 
     if !cli.follow {
         progress_reporter
@@ -454,7 +248,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Phase 2: follow mode
+    // ─── Follow mode ────────────────────────────────────────────────────
     let poll = Duration::from_secs(cli.poll_interval);
     let mut cursor = end_block + 1;
 
@@ -470,7 +264,7 @@ async fn main() -> Result<()> {
         let latest = match get_latest_block(&config, use_mock, start_block).await {
             Ok(n) => n,
             Err(e) => {
-                warn!(error = %e, "Failed to fetch latest block number, retrying next cycle");
+                tracing::warn!(error = %e, "Failed to fetch latest block number, retrying next cycle");
                 continue;
             }
         };
@@ -479,24 +273,33 @@ async fn main() -> Result<()> {
             continue;
         }
 
-        info!(from = cursor, to = latest, new_blocks = latest - cursor + 1, "New blocks detected");
+        info!(
+            from = cursor,
+            to = latest,
+            new_blocks = latest - cursor + 1,
+            "New blocks detected"
+        );
 
-        for block_num in cursor..=latest {
-            ingest_block(
-                &config,
-                block_num,
-                use_mock,
-                &mut writer,
-                &mut progress_reporter,
-                &mut total_txs,
-                0,
-                &retry_policy,
-                cli.with_traces,
-                cli.with_transfers,
-            )
-            .await?;
-        }
+        // Reuse writer + reporter across cycles by passing/receiving ownership.
+        let (w, r, txs_after) = ingest_block_range_pipelined(
+            &config,
+            cursor,
+            latest,
+            use_mock,
+            writer,
+            progress_reporter,
+            &retry_policy,
+            cli.with_traces,
+            cli.with_transfers,
+            cli.fetch_concurrency,
+            0,
+            total_txs,
+        )
+        .await?;
 
+        writer = w;
+        progress_reporter = r;
+        total_txs = txs_after;
         cursor = latest + 1;
     }
 }

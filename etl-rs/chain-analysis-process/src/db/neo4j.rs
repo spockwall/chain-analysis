@@ -151,7 +151,6 @@ impl Neo4jWriter {
             let mut trace_list = BoltList::new();
 
             for trace in chunk {
-                // Build a unique ID: tx_hash + trace_address joined by underscore
                 let trace_addr_str = trace
                     .trace_address
                     .iter()

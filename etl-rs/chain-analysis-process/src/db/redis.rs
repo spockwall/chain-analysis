@@ -1,11 +1,19 @@
 use chain_analysis_common::{Trace, Transaction, Transfer};
 use eyre::Result;
 use serde::de::DeserializeOwned;
+use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
 const STREAM_TXS: &str = "ingested_txs";
 const STREAM_TRACES: &str = "ingested_traces";
 const STREAM_TRANSFERS: &str = "ingested_transfers";
+
+#[derive(Default)]
+pub struct CombinedBatch {
+    pub txs: Vec<(String, Transaction)>,
+    pub traces: Vec<(String, Trace)>,
+    pub transfers: Vec<(String, Transfer)>,
+}
 
 pub struct StreamConsumer {
     conn: redis::aio::MultiplexedConnection,
@@ -57,22 +65,9 @@ impl StreamConsumer {
         Ok(())
     }
 
-    pub async fn read_batch(&mut self) -> Result<Vec<(String, Transaction)>> {
-        self.read_stream_batch(STREAM_TXS).await
-    }
-
-    pub async fn read_trace_batch(&mut self) -> Result<Vec<(String, Trace)>> {
-        self.read_stream_batch(STREAM_TRACES).await
-    }
-
-    pub async fn read_transfer_batch(&mut self) -> Result<Vec<(String, Transfer)>> {
-        self.read_stream_batch(STREAM_TRANSFERS).await
-    }
-
-    async fn read_stream_batch<T: DeserializeOwned>(
-        &mut self,
-        stream: &str,
-    ) -> Result<Vec<(String, T)>> {
+    /// Read all three streams in a single XREADGROUP call. Saves 2x BLOCK timeouts
+    /// when streams are partially or fully empty.
+    pub async fn read_all_batches(&mut self) -> Result<CombinedBatch> {
         let result: redis::Value = redis::cmd("XREADGROUP")
             .arg("GROUP")
             .arg(&self.group)
@@ -82,12 +77,28 @@ impl StreamConsumer {
             .arg("BLOCK")
             .arg(self.block_ms)
             .arg("STREAMS")
-            .arg(stream)
+            .arg(STREAM_TXS)
+            .arg(STREAM_TRACES)
+            .arg(STREAM_TRANSFERS)
+            .arg(">")
+            .arg(">")
             .arg(">")
             .query_async(&mut self.conn)
             .await?;
 
-        parse_xreadgroup_result(result)
+        let by_stream = parse_xreadgroup_multi(result);
+        let mut batch = CombinedBatch::default();
+
+        for (stream, msgs) in by_stream {
+            match stream.as_str() {
+                STREAM_TXS => batch.txs = decode_messages(msgs),
+                STREAM_TRACES => batch.traces = decode_messages(msgs),
+                STREAM_TRANSFERS => batch.transfers = decode_messages(msgs),
+                other => warn!(stream = other, "Unexpected stream in XREADGROUP response"),
+            }
+        }
+
+        Ok(batch)
     }
 
     pub async fn ack(&mut self, stream: &str, message_ids: &[String]) -> Result<u64> {
@@ -117,19 +128,14 @@ impl StreamConsumer {
     }
 }
 
-fn parse_xreadgroup_result<T: DeserializeOwned>(
-    value: redis::Value,
-) -> Result<Vec<(String, T)>> {
-    let mut results = Vec::new();
+/// Parse XREADGROUP response into raw (stream_name → messages) pairs without
+/// decoding the inner JSON.
+fn parse_xreadgroup_multi(value: redis::Value) -> HashMap<String, Vec<(String, String)>> {
+    let mut by_stream: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
-    // XREADGROUP returns: [[stream_name, [[msg_id, [field, value, ...]], ...]]]
     let streams = match value {
         redis::Value::Array(s) => s,
-        redis::Value::Nil => return Ok(results),
-        other => {
-            warn!(?other, "Unexpected XREADGROUP response type");
-            return Ok(results);
-        }
+        _ => return by_stream,
     };
 
     for stream in streams {
@@ -137,12 +143,17 @@ fn parse_xreadgroup_result<T: DeserializeOwned>(
             redis::Value::Array(a) => a,
             _ => continue,
         };
-        // stream_arr[0] = stream name, stream_arr[1] = messages array
-        let messages = match stream_arr.into_iter().nth(1) {
+        let mut iter = stream_arr.into_iter();
+        let stream_name = match iter.next() {
+            Some(redis::Value::BulkString(b)) => String::from_utf8_lossy(&b).to_string(),
+            _ => continue,
+        };
+        let messages = match iter.next() {
             Some(redis::Value::Array(msgs)) => msgs,
             _ => continue,
         };
 
+        let mut decoded = Vec::with_capacity(messages.len());
         for msg in messages {
             let msg_arr = match msg {
                 redis::Value::Array(a) => a,
@@ -162,8 +173,6 @@ fn parse_xreadgroup_result<T: DeserializeOwned>(
                 _ => continue,
             };
 
-            // fields = [key, value, key, value, ...]
-            // We want the "data" field
             let mut data_json: Option<String> = None;
             let mut i = 0;
             while i + 1 < fields.len() {
@@ -178,15 +187,25 @@ fn parse_xreadgroup_result<T: DeserializeOwned>(
             }
 
             if let Some(json) = data_json {
-                match serde_json::from_str::<T>(&json) {
-                    Ok(item) => results.push((msg_id, item)),
-                    Err(e) => {
-                        warn!(msg_id, error = %e, "Failed to parse JSON from stream");
-                    }
-                }
+                decoded.push((msg_id, json));
             }
         }
+
+        by_stream.insert(stream_name, decoded);
     }
 
-    Ok(results)
+    by_stream
+}
+
+fn decode_messages<T: DeserializeOwned>(items: Vec<(String, String)>) -> Vec<(String, T)> {
+    items
+        .into_iter()
+        .filter_map(|(id, json)| match serde_json::from_str::<T>(&json) {
+            Ok(item) => Some((id, item)),
+            Err(e) => {
+                warn!(msg_id = id, error = %e, "Failed to parse JSON from stream");
+                None
+            }
+        })
+        .collect()
 }
