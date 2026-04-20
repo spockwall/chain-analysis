@@ -63,6 +63,7 @@ export function ETLPage() {
     const [neighborsResult, setNeighborsResult] = useState<NeighborsResponse | null>(null);
 
     const [txLookupHash, setTxLookupHash] = useState("");
+    const [txLookupSourceAddr, setTxLookupSourceAddr] = useState("");
     const [txLookupLoading, setTxLookupLoading] = useState(false);
     const [txLookupResult, setTxLookupResult] = useState<TransactionResponse | null>(null);
 
@@ -167,15 +168,37 @@ export function ETLPage() {
         }
         setTxLookupLoading(true);
         setTxLookupResult(null);
-        const id = toast.loading("Looking up transaction…");
+        let id = toast.loading("Looking up transaction…");
         try {
             const result = await fetchTransaction(hash);
             setTxLookupResult(result);
             toast.dismiss(id);
             toast.success(`Found: ${hash.slice(0, 10)}…`);
-        } catch (err) {
+        } catch (err: any) {
             toast.dismiss(id);
-            toast.error(err instanceof Error ? err.message : "Request failed");
+            if (err?.status === 404) {
+                const addrToIngest =
+                    (isValidAddress(txLookupSourceAddr.trim().toLowerCase()) ? txLookupSourceAddr.trim().toLowerCase() : null) ||
+                    entityResult?.address ||
+                    (isValidAddress(searchAddress.trim().toLowerCase()) ? searchAddress.trim().toLowerCase() : null);
+                if (addrToIngest) {
+                    id = toast.loading(`Not in DB. Ingesting ${addrToIngest.slice(0, 10)}… from chain…`);
+                    try {
+                        await ingestAddress({ address: addrToIngest });
+                        const result = await fetchTransaction(hash);
+                        setTxLookupResult(result);
+                        toast.dismiss(id);
+                        toast.success(`Found after ingestion: ${hash.slice(0, 10)}…`);
+                    } catch (ingestErr: any) {
+                        toast.dismiss(id);
+                        toast.error(ingestErr?.message || "Ingestion failed or transaction still not found");
+                    }
+                } else {
+                    toast.error("Transaction not found. Enter a source address below to auto-ingest.");
+                }
+            } else {
+                toast.error(err instanceof Error ? err.message : "Request failed");
+            }
         } finally {
             setTxLookupLoading(false);
         }
@@ -637,6 +660,15 @@ export function ETLPage() {
                         >
                             {txLookupLoading ? "…" : "Search"}
                         </button>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                        <input
+                            value={txLookupSourceAddr}
+                            onChange={(e) => setTxLookupSourceAddr(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleTxLookup()}
+                            placeholder="Source address to auto-ingest if tx not found (optional)"
+                            className={monoCls}
+                        />
                     </div>
                     {txLookupResult && (
                         <div className="mt-3 p-3 border border-gray-200 rounded-lg">
