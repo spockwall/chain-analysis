@@ -19,7 +19,6 @@ How to use the Neo4j Browser to explore and query the graph database for Chain A
 ## Seeding Sample Data
 
 Before querying, seed the graph with the AML sample dataset:
-
 ```bash
 # From the repo root
 cd /path/to/chain-analysis
