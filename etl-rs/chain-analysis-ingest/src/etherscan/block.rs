@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-use crate::hex;
+use super::hex;
 
 const MAX_RETRIES: u32 = 5;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);

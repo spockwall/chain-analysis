@@ -2,7 +2,7 @@ use chain_analysis_common::entity::{EntityType, RiskLevel};
 use chain_analysis_common::{Entity, Trace, Transaction, Transfer};
 use std::collections::HashMap;
 
-use crate::postgres_reader::{self, KnownLabel};
+use crate::db::postgres_reader::{self, KnownLabel};
 
 pub struct AddressInfo {
     pub is_contract: bool,
@@ -37,7 +37,6 @@ pub fn extract_addresses(txs: &[Transaction]) -> HashMap<String, AddressInfo> {
     addrs
 }
 
-/// Extract addresses from internal transaction traces.
 pub fn extract_addresses_from_traces(
     traces: &[Trace],
     addrs: &mut HashMap<String, AddressInfo>,
@@ -59,7 +58,6 @@ pub fn extract_addresses_from_traces(
     }
 }
 
-/// Extract addresses from ERC-20 token transfers.
 pub fn extract_addresses_from_transfers(
     transfers: &[Transfer],
     addrs: &mut HashMap<String, AddressInfo>,
@@ -76,7 +74,6 @@ pub fn extract_addresses_from_transfers(
             addrs.entry(to).or_insert(AddressInfo { is_contract: false });
         }
         if !token.is_empty() {
-            // Token contract is always a contract
             addrs.insert(token, AddressInfo { is_contract: true });
         }
     }

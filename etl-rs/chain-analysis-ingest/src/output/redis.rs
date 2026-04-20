@@ -24,6 +24,28 @@ pub trait TransactionWriter: Send {
     async fn save_cursor(&mut self, block_number: u64) -> Result<()>;
     async fn get_cursor(&mut self) -> Result<Option<u64>>;
     async fn record_failed_block(&mut self, block_number: u64) -> Result<()>;
+
+    /// Default: loop per-item. Implementations should override with a pipelined batch.
+    async fn write_transactions_batch(&mut self, txs: &[Transaction]) -> Result<()> {
+        for tx in txs {
+            self.write_transaction(tx).await?;
+        }
+        Ok(())
+    }
+
+    async fn write_traces_batch(&mut self, traces: &[Trace]) -> Result<()> {
+        for t in traces {
+            self.write_trace(t).await?;
+        }
+        Ok(())
+    }
+
+    async fn write_transfers_batch(&mut self, transfers: &[Transfer]) -> Result<()> {
+        for t in transfers {
+            self.write_transfer(t).await?;
+        }
+        Ok(())
+    }
 }
 
 pub struct RedisStreamWriter {
@@ -41,6 +63,23 @@ impl RedisStreamWriter {
             cursor_key: cursor_key(source),
             failed_key: failed_blocks_key(source),
         })
+    }
+
+    /// XADD a list of (topic, json) tuples in one Redis pipeline round-trip.
+    async fn xadd_pipeline(&mut self, items: &[(&str, String)]) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let mut pipe = redis::pipe();
+        for (topic, json) in items {
+            pipe.cmd("XADD")
+                .arg(*topic)
+                .arg("*")
+                .arg("data")
+                .arg(json);
+        }
+        let _: redis::Value = pipe.query_async(&mut self.conn).await?;
+        Ok(())
     }
 }
 
@@ -82,6 +121,45 @@ impl TransactionWriter for RedisStreamWriter {
             .query_async(&mut self.conn)
             .await?;
         debug!(tx_hash = %transfer.transaction_hash, "Wrote transfer to Redis");
+        Ok(())
+    }
+
+    async fn write_transactions_batch(&mut self, txs: &[Transaction]) -> Result<()> {
+        if txs.is_empty() {
+            return Ok(());
+        }
+        let items: Vec<(&str, String)> = txs
+            .iter()
+            .map(|tx| serde_json::to_string(tx).map(|j| (TOPIC_INGESTED_TXS, j)))
+            .collect::<Result<_, _>>()?;
+        self.xadd_pipeline(&items).await?;
+        debug!(count = items.len(), "Pipelined transaction batch to Redis");
+        Ok(())
+    }
+
+    async fn write_traces_batch(&mut self, traces: &[Trace]) -> Result<()> {
+        if traces.is_empty() {
+            return Ok(());
+        }
+        let items: Vec<(&str, String)> = traces
+            .iter()
+            .map(|t| serde_json::to_string(t).map(|j| (TOPIC_INGESTED_TRACES, j)))
+            .collect::<Result<_, _>>()?;
+        self.xadd_pipeline(&items).await?;
+        debug!(count = items.len(), "Pipelined trace batch to Redis");
+        Ok(())
+    }
+
+    async fn write_transfers_batch(&mut self, transfers: &[Transfer]) -> Result<()> {
+        if transfers.is_empty() {
+            return Ok(());
+        }
+        let items: Vec<(&str, String)> = transfers
+            .iter()
+            .map(|t| serde_json::to_string(t).map(|j| (TOPIC_INGESTED_TRANSFERS, j)))
+            .collect::<Result<_, _>>()?;
+        self.xadd_pipeline(&items).await?;
+        debug!(count = items.len(), "Pipelined transfer batch to Redis");
         Ok(())
     }
 

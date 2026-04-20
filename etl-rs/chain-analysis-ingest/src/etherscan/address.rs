@@ -6,7 +6,7 @@ use std::future::Future;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
-use crate::hex;
+use super::hex;
 
 const MAX_RETRIES: u32 = 5;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
@@ -335,7 +335,6 @@ pub async fn fetch_address_token_transfers(
 // Parsers — Etherscan account API returns DECIMAL strings (not hex)
 // ---------------------------------------------------------------------------
 
-/// Parse a transaction from the `txlist` account API (decimal fields).
 fn parse_account_tx(raw: &Value) -> Result<Transaction> {
     let hash = raw
         .get("hash")
@@ -413,7 +412,6 @@ fn parse_account_tx(raw: &Value) -> Result<Transaction> {
     })
 }
 
-/// Parse an internal transaction from the `txlistinternal` account API.
 fn parse_account_trace(raw: &Value) -> Result<Trace> {
     Ok(Trace {
         transaction_hash: raw
@@ -485,7 +483,6 @@ fn parse_account_trace(raw: &Value) -> Result<Trace> {
     })
 }
 
-/// Parse a token transfer from the `tokentx` account API.
 fn parse_account_transfer(raw: &Value) -> Result<Transfer> {
     Ok(Transfer {
         transaction_hash: raw
@@ -497,7 +494,6 @@ fn parse_account_transfer(raw: &Value) -> Result<Transfer> {
             .get("logIndex")
             .and_then(|l| l.as_str())
             .and_then(|l| l.parse().ok())
-            // Some Etherscan responses use decimal logIndex
             .or_else(|| {
                 raw.get("logIndex")
                     .and_then(|l| l.as_u64())

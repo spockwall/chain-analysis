@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-use crate::hex;
+use super::hex;
 
 const ERC20_TRANSFER_TOPIC: &str =
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -171,7 +171,6 @@ mod tests {
 
     #[test]
     fn test_decode_address_topic() {
-        // Standard 32-byte padded address
         let topic = "0x000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7";
         assert_eq!(
             decode_address_topic(topic),
