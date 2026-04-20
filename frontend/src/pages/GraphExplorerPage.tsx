@@ -98,9 +98,36 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
 
     const handleTxSearch = async (hash: string) => {
         setLoading(true);
-        const loadId = toast.loading("Fetching transaction…");
+        let loadId = toast.loading("Fetching transaction…");
         try {
-            const tx = await fetchTransaction(hash);
+            let tx: TransactionResponse | null = null;
+            try {
+                tx = await fetchTransaction(hash);
+            } catch (err: any) {
+                if (err?.status === 404) {
+                    const addrToIngest = selectedNode?.address;
+                    if (!addrToIngest) {
+                        toast.dismiss(loadId);
+                        toast.error("Transaction not found. Search for a related address first to load its transactions.");
+                        setLoading(false);
+                        return;
+                    }
+                    toast.dismiss(loadId);
+                    loadId = toast.loading(`Transaction not found. Ingesting ${addrToIngest.slice(0, 10)}… from chain…`);
+                    try {
+                        await ingestAddress({ address: addrToIngest });
+                        toast.success("Ingestion complete. Retrying transaction lookup…");
+                        tx = await fetchTransaction(hash);
+                    } catch (ingestErr: any) {
+                        toast.error(ingestErr?.message || "Ingestion failed");
+                        setLoading(false);
+                        return;
+                    }
+                } else {
+                    throw err;
+                }
+            }
+            if (!tx) throw new Error("Transaction not found after ingestion");
 
             // Load neighbors for both endpoints in parallel, tolerating 404s
             const [fromNeighbors, toNeighbors] = await Promise.allSettled([
@@ -191,6 +218,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     };
 
     const handleEdgeSelect = async (txHash: string) => {
+        const currentAddress = selectedNode?.address;
         setSelectedNode(null);
         const cached = graphData?.transactions.find((t) => t.hash === txHash) ?? null;
         if (cached) {
@@ -199,8 +227,17 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         }
         try {
             setSelectedEdge(await fetchTransaction(txHash));
-        } catch {
-            setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
+        } catch (err: any) {
+            if (err?.status === 404 && currentAddress) {
+                try {
+                    await ingestAddress({ address: currentAddress });
+                    setSelectedEdge(await fetchTransaction(txHash));
+                } catch {
+                    setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
+                }
+            } else {
+                setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
+            }
         }
     };
 
