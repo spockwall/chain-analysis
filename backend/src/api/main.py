@@ -73,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(labels_router, prefix="/api")
     app.include_router(stats_router, prefix="/api")
     app.include_router(groups_router, prefix="/api")
+    app.include_router(pipeline_router, prefix="/api")
 
     return app
 
