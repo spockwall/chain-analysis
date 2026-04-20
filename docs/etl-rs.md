@@ -1,4 +1,4 @@
-# Chain-Analysis — Demo Guide
+# Chain-Analysis — Operations Guide
 
 Complete reference for running and demonstrating the platform.
 
@@ -30,8 +30,7 @@ Complete reference for running and demonstrating the platform.
 
 ```bash
 cp .env.example .env
-# Edit .env and set:
-#   ETHERSCAN_API_KEY=your_key_here
+# Edit .env and set ETHERSCAN_API_KEY=your_key_here
 ```
 
 ### 2. Start all services
@@ -49,6 +48,7 @@ On every start the backend automatically runs Alembic migrations, creates Neo4j 
 | URL | Service |
 |-----|---------|
 | http://localhost:3000 | Frontend (Docker) |
+| http://localhost:5173 | Frontend (dev server — `npm run dev`) |
 | http://localhost:8000/docs | Backend API (Swagger UI) |
 | http://localhost:7474 | Neo4j Browser (neo4j / password123) |
 
@@ -58,9 +58,13 @@ On every start the backend automatically runs Alembic migrations, creates Neo4j 
 
 There are two ways to get real blockchain data into the system.
 
+### Method A: Web UI / API
 
+The Python backend fetches from Etherscan directly — no Rust binaries needed.
 
-#### Via API
+**Via the UI:** Open the ETL page → enter an address → click Ingest.
+
+**Via curl:**
 
 ```bash
 curl -X POST http://localhost:8000/api/pipeline/ingest-address \
@@ -68,9 +72,9 @@ curl -X POST http://localhost:8000/api/pipeline/ingest-address \
   -d '{"address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"}'
 ```
 
-### Method: Rust Pipeline
+### Method B: Rust Pipeline
 
-**Best for bulk ingestion.** Fetches ALL transactions (paginated) and processes via Redis queue.
+For bulk ingestion (large block ranges, follow mode, or batching thousands of addresses). Fetches ALL transactions with configurable concurrency and processes via Redis queue.
 
 ```
 [Etherscan API]
@@ -82,16 +86,36 @@ curl -X POST http://localhost:8000/api/pipeline/ingest-address \
 [Neo4j + PostgreSQL]
 ```
 
-Flow: `ingest` → Redis Streams → `process` → Neo4j + PostgreSQL
-
 #### Build
 
 ```bash
-docker compose build ingest
-docker compose build process   # already built if using --profile etl
+cd etl-rs
+cargo build --release
+# Outputs: etl-rs/target/release/ingest  and  etl-rs/target/release/process
 ```
 
-#### `ingest --help`
+#### Run
+
+The binaries connect directly to the Docker-hosted data services on localhost.
+
+```bash
+# Set environment (or load from .env)
+export ETHERSCAN_API_KEY=...
+export REDIS_URL=redis://localhost:6379
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_PASSWORD=password123
+export DATABASE_URL=postgresql://postgres:postgres123@localhost:5432/chain_analysis
+
+# Step 1: ingest
+etl-rs/target/release/ingest --address 0x... --with-traces --with-transfers
+
+# Step 2: process
+etl-rs/target/release/process --one-shot
+```
+
+---
+
+#### `ingest` CLI reference
 
 ```
 Blockchain transaction ingestion worker
@@ -100,13 +124,13 @@ Fetches Ethereum transactions from Etherscan and writes them to Redis Streams.
 
 Two modes:
 
-ADDRESS MODE  (--address 0x...)
-  Fetches all transactions for a specific address via Etherscan account APIs.
-  Requires ETHERSCAN_API_KEY. No mock fallback.
+  ADDRESS MODE  (--address 0x...)
+    Fetches all transactions for a specific address via Etherscan account APIs.
+    Requires ETHERSCAN_API_KEY. No mock fallback.
 
-BLOCK MODE  (--start-block N --end-block M)
-  Fetches all transactions in a block range via Etherscan proxy APIs.
-  Falls back to deterministic mock data when ETHERSCAN_API_KEY is not set.
+  BLOCK MODE  (--start-block N --end-block M)
+    Fetches all transactions in a block range via Etherscan proxy APIs.
+    Falls back to deterministic mock data when ETHERSCAN_API_KEY is not set.
 
 After running ingest, run the `process` binary to consume Redis → Neo4j + PostgreSQL.
 
@@ -130,6 +154,8 @@ Options:
           Keep polling for new blocks after initial range is done.
       --poll-interval <SECS>
           Seconds between polls in follow mode [default: 12]
+      --fetch-concurrency <N>
+          Number of block fetches to keep in flight concurrently [default: 5]
 
   Data options (both modes):
       --with-traces
@@ -152,13 +178,14 @@ Options:
           Print help
 ```
 
-#### `process --help`
+#### `process` CLI reference
 
 ```
-Redis consumer → Neo4j graph writer
+Redis consumer → Neo4j + PostgreSQL writer
 
-Consumes IngestionMessages from Redis Streams and writes entities,
-transactions, traces, and transfers to Neo4j and PostgreSQL.
+Reads a combined batch from all three Redis streams (txs, traces, transfers)
+in a single XREADGROUP call, resolves entities, computes features, and writes
+to Neo4j and PostgreSQL in parallel.
 
 Run after `ingest` has written data to Redis:
 
@@ -174,70 +201,59 @@ Options:
       --batch-size <N>
           Max messages to read per XREADGROUP call (per stream) [default: 500]
       --block-ms <MS>
-          How long to block waiting for new Redis messages in milliseconds.
-          0 = non-blocking (returns immediately if no messages). [default: 5000]
+          How long to block waiting for new Redis messages (milliseconds).
+          0 = non-blocking (returns immediately if empty). [default: 5000]
       --run-id <UUID>
           Run identifier (auto-generated if not set)
   -h, --help
           Print help
 ```
 
-#### Docker Compose flags
-
-These flags appear in every `docker compose run` command — they are **Docker** flags, not `ingest`/`process` flags:
-
-| Flag | Description |
-|------|-------------|
-| `--profile ingest` | Activates the `ingest` service (defined with `profiles: [ingest]` in docker-compose.yml). Without this, `docker compose run ingest` will fail with "no such service". |
-| `--profile etl` | Activates the `process` service (defined with `profiles: [etl]`). |
-| `--rm` | Automatically removes the container after it exits. Without this, stopped containers accumulate and take up disk space. Always use `--rm` for one-off runs. |
-
-So the full pattern is:
-```
-docker compose --profile <profile> run --rm <service> [binary flags...]
-```
-
----
-
-#### Common usage
+#### Common recipes
 
 **Ingest a specific address (all transactions, traces, and token transfers):**
 
 ```bash
-docker compose --profile ingest run --rm ingest \
+etl-rs/target/release/ingest \
   --address 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 \
-  --with-traces \
-  --with-transfers
-```
-
-**Process ALL messages in Redis (continuous until done):**
-
-```bash
-docker compose --profile etl run --rm process
-# Press Ctrl+C when log shows 0 new messages
+  --with-traces --with-transfers
 ```
 
 **Process one batch of 500 then exit:**
 
 ```bash
-docker compose --profile etl run --rm process --one-shot
+etl-rs/target/release/process --one-shot
 ```
 
-**Ingest a block range (with mock data, no API key needed):**
+**Process all remaining messages (continuous, press Ctrl+C when idle):**
 
 ```bash
-docker compose --profile ingest run --rm ingest \
-  --start-block 18000000 --end-block 18000100
+etl-rs/target/release/process
 ```
 
-**Dry-run — print to stdout only, no Redis writes:**
+**Ingest a block range (mock data, no API key needed):**
 
 ```bash
-docker compose --profile ingest run --rm ingest \
-  --address 0x... --dry-run
+etl-rs/target/release/ingest --start-block 18000000 --end-block 18000100
 ```
 
-#### Environment variables for `ingest`
+**Dry-run (print to stdout, no Redis writes):**
+
+```bash
+etl-rs/target/release/ingest --address 0x... --dry-run
+```
+
+**Continuous follow mode (keeps up with the chain):**
+
+```bash
+etl-rs/target/release/ingest --follow --poll-interval 12 --with-traces --with-transfers
+```
+
+---
+
+#### Environment variables
+
+**`ingest`**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -245,9 +261,8 @@ docker compose --profile ingest run --rm ingest \
 | `ETHERSCAN_BASE_URL` | `https://api.etherscan.io/v2/api` | Etherscan V2 endpoint |
 | `ETHERSCAN_CHAIN_ID` | `1` | Chain ID (1 = Ethereum mainnet) |
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection |
-| `INGEST_BATCH_SIZE` | `1000` | Batch size hint |
 
-#### Environment variables for `process`
+**`process`**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -261,50 +276,51 @@ docker compose --profile ingest run --rm ingest \
 | `PROCESS_CONSUMER_GROUP` | `chain-analysis-process` | Redis consumer group name |
 | `PROCESS_CONSUMER_NAME` | `consumer-{pid}` | Redis consumer name |
 
+---
+
 #### Multi-chain support
 
 The `ingest` binary supports any EVM chain via Etherscan V2 API. Set `ETHERSCAN_CHAIN_ID`:
 
-| Chain | ID | Notes |
-|---|---|---|
-| Ethereum Mainnet | `1` | Default |
-| Sepolia Testnet | `11155111` | Recommended testnet |
-| BSC | `56` | Binance Smart Chain |
-| Polygon | `137` | — |
-| Arbitrum One | `42161` | L2 |
-| Optimism | `10` | L2 |
+| Chain | ID |
+|---|---|
+| Ethereum Mainnet | `1` (default) |
+| Sepolia Testnet | `11155111` |
+| BSC | `56` |
+| Polygon | `137` |
+| Arbitrum One | `42161` |
+| Optimism | `10` |
 
 ```bash
-docker compose --profile ingest run --rm \
-  -e ETHERSCAN_CHAIN_ID=11155111 \
-  ingest --start-block 5000000 --end-block 5000010
+ETHERSCAN_CHAIN_ID=11155111 etl-rs/target/release/ingest \
+  --start-block 5000000 --end-block 5000010
 ```
 
-#### Full pipeline (all-in-one)
+---
+
+#### Full pipeline (bulk ingestion)
 
 ```bash
-# 1. Start infrastructure
+# 1. Start infrastructure (Neo4j, Postgres, Redis, backend, frontend)
 docker compose up -d
 
-# 2. Build ETL images
-docker compose build ingest process
+# 2. Build the Rust binaries
+cd etl-rs && cargo build --release && cd ..
 
-# 3. Start the process worker (background, picks up messages automatically)
-docker compose --profile etl up -d process
+# 3. Export env (or load from .env)
+export ETHERSCAN_API_KEY=...
+export REDIS_URL=redis://localhost:6379
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_PASSWORD=password123
+export DATABASE_URL=postgresql://postgres:postgres123@localhost:5432/chain_analysis
 
-# 4. Ingest real blocks
-docker compose --profile ingest run --rm ingest \
+# 4. Ingest then process
+etl-rs/target/release/ingest \
   --start-block 21000000 --end-block 21000100 \
   --with-traces --with-transfers
+etl-rs/target/release/process
 
-# 5. Open http://localhost:3000
-```
-
-For continuous ingestion (keeps up with the chain):
-
-```bash
-docker compose --profile ingest run --rm ingest \
-  --follow --poll-interval 12 --with-traces --with-transfers
+# 5. Open http://localhost:5173
 ```
 
 ---
@@ -314,13 +330,15 @@ docker compose --profile ingest run --rm ingest \
 ### Check Redis streams
 
 ```bash
-# Total messages ingested
+# Message counts per stream
 docker exec chain-analysis-redis redis-cli XLEN ingested_txs
+docker exec chain-analysis-redis redis-cli XLEN ingested_traces
+docker exec chain-analysis-redis redis-cli XLEN ingested_transfers
 
 # Current ingest cursor
 docker exec chain-analysis-redis redis-cli GET ingest:last_block:etherscan
 
-# Pending messages (not yet processed)
+# Pending messages (delivered to consumer but not yet acked)
 docker exec chain-analysis-redis redis-cli XPENDING ingested_txs chain-analysis-process
 
 # Inspect a sample message
@@ -361,8 +379,7 @@ curl http://localhost:8000/api/entities/0x... | jq
 ### Reset the pipeline
 
 ```bash
-# Stop workers
-docker compose --profile etl down
+# Kill any running ingest/process processes (Ctrl+C, or kill <pid>)
 
 # Clear all Redis streams and cursors
 docker exec chain-analysis-redis redis-cli DEL \
@@ -370,12 +387,9 @@ docker exec chain-analysis-redis redis-cli DEL \
   ingestion_progress processing_progress \
   ingest:last_block:etherscan ingest:failed_blocks:etherscan
 
-# Clear Neo4j (optional — removes ALL nodes)
+# Clear Neo4j (removes ALL nodes — irreversible)
 docker exec chain-analysis-neo4j cypher-shell -u neo4j -p password123 \
   "MATCH (n) DETACH DELETE n"
-
-# Restart
-docker compose --profile etl up -d process
 ```
 
 ### Retry failed blocks
@@ -385,8 +399,7 @@ docker compose --profile etl up -d process
 docker exec chain-analysis-redis redis-cli SMEMBERS ingest:failed_blocks:etherscan
 
 # Re-ingest a specific block
-docker compose --profile ingest run --rm ingest \
-  --start-block <FAILED_BLOCK> --end-block <FAILED_BLOCK>
+etl-rs/target/release/ingest --start-block <FAILED_BLOCK> --end-block <FAILED_BLOCK>
 
 # Clear the failed set after success
 docker exec chain-analysis-redis redis-cli DEL ingest:failed_blocks:etherscan
@@ -394,20 +407,15 @@ docker exec chain-analysis-redis redis-cli DEL ingest:failed_blocks:etherscan
 
 ### Scale processing
 
-Run multiple process instances (same consumer group, different names):
+Run multiple `process` instances in separate terminals under the same consumer group — Redis distributes messages so each message goes to exactly one consumer:
 
 ```bash
-docker run --rm --network chain-analysis-net \
-  -e REDIS_URL=redis://redis:6379 \
-  -e NEO4J_URI=bolt://neo4j:7687 \
-  -e NEO4J_USER=neo4j \
-  -e NEO4J_PASSWORD=password123 \
-  -e DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/chain_analysis \
-  -e PROCESS_CONSUMER_NAME=consumer-2 \
-  chain-analysis-etl-rs-process:latest
-```
+# Terminal 1
+PROCESS_CONSUMER_NAME=consumer-1 etl-rs/target/release/process
 
-Redis consumer groups automatically distribute messages — each message goes to exactly one consumer.
+# Terminal 2
+PROCESS_CONSUMER_NAME=consumer-2 etl-rs/target/release/process
+```
 
 ### Monitor progress
 
@@ -415,7 +423,7 @@ Redis consumer groups automatically distribute messages — each message goes to
 # Watch stream length over time
 watch -n 5 'docker exec chain-analysis-redis redis-cli XLEN ingested_txs'
 
-# Watch processing progress stream
+# Stream live processing events
 docker exec chain-analysis-redis redis-cli XREAD BLOCK 0 STREAMS processing_progress $
 ```
 
@@ -423,11 +431,11 @@ docker exec chain-analysis-redis redis-cli XREAD BLOCK 0 STREAMS processing_prog
 
 | Stream | Producer | Consumer | Content |
 |---|---|---|---|
-| `ingested_txs` | `ingest` | `process` (consumer group) | JSON `Transaction` |
-| `ingested_traces` | `ingest` | `process` (consumer group) | JSON `Trace` |
-| `ingested_transfers` | `ingest` | `process` (consumer group) | JSON `Transfer` |
-| `ingestion_progress` | `ingest` | monitoring | Progress/Complete/Error |
-| `processing_progress` | `process` | monitoring | Progress/Complete/Error |
+| `ingested_txs` | `ingest` | `process` | JSON `Transaction` |
+| `ingested_traces` | `ingest` | `process` | JSON `Trace` |
+| `ingested_transfers` | `ingest` | `process` | JSON `Transfer` |
+| `ingestion_progress` | `ingest` | monitoring | Progress / Complete / Error events |
+| `processing_progress` | `process` | monitoring | Progress / Complete / Error events |
 
 | Redis Key | Type | Description |
 |---|---|---|
@@ -462,7 +470,6 @@ docker exec chain-analysis-redis redis-cli XREAD BLOCK 0 STREAMS processing_prog
 - **Ingest Address from Etherscan**: type an address → click Ingest → see results
 - **Ingestion Runs**: table of all pipeline runs (auto-refreshes every 10s), click a row to expand
 - **Entity Features**: look up computed features for any address
-- **Lookup Entity / Transaction**: quick lookup by address or hash
 
 ---
 
@@ -494,12 +501,13 @@ Request body: `{ "address": "0x...", "chain_id": 1 }`
 | PUT | `/api/entities/{address}` | Create / update entity |
 | PATCH | `/api/entities/{address}` | Partial update |
 | DELETE | `/api/entities/{address}` | Delete entity |
-| GET | `/api/entities/{address}/neighbors` | 1-hop neighborhood |
-| GET | `/api/entities/{src}/paths/{tgt}` | Paths between two entities |
-| GET | `/api/entities/{address}/features` | Computed features |
+| GET | `/api/entities/{address}/neighbors` | 1-hop neighborhood (`depth`, `direction`, `limit`) |
+| GET | `/api/entities/{src}/paths/{tgt}` | Paths between two entities (`max_depth`, `limit`) |
+| GET | `/api/entities/{address}/features` | Computed features from PostgreSQL |
 | PUT | `/api/entities/{address}/features` | Upsert features |
-
-Neighbors query params: `depth` (int), `direction` (in/out/both), `limit` (int)
+| GET | `/api/entities/{address}/members` | List group members |
+| POST | `/api/entities/{address}/members` | Add member to group |
+| DELETE | `/api/entities/{address}/members/{member}` | Remove member |
 
 ### Transactions
 
@@ -518,18 +526,13 @@ Neighbors query params: `depth` (int), `direction` (in/out/both), `limit` (int)
 | GET | `/api/groups/{address}` | Get group with members |
 | PATCH | `/api/groups/{address}` | Update group |
 | DELETE | `/api/groups/{address}` | Delete (must have 0 members) |
-| GET | `/api/entities/{address}/members` | List members |
-| POST | `/api/entities/{address}/members` | Add member |
-| DELETE | `/api/entities/{address}/members/{member}` | Remove member |
 
 ### Ingestion Runs
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/ingestion-runs` | List runs (paginated, newest first) |
+| GET | `/api/ingestion-runs` | List runs (`limit`, `offset`) |
 | GET | `/api/ingestion-runs/{run_id}` | Get single run |
-
-Query params: `limit` (1–100, default 20), `offset` (default 0)
 
 ### Stats & Health
 
@@ -560,9 +563,13 @@ Query params: `limit` (1–100, default 20), `offset` (default 0)
 
 **Entity node labels:** `:Entity` (base), `:EOA`, `:Contract`, `:Mixer`, `:LendingPool`, `:Bridge`, `:DEX`, `:CEXHotWallet`, `:Application`
 
-**Entity properties:** `address` (unique index), `risk_level`, `name`, `entity_type`, `description`
+**Entity properties:** `address` (unique), `risk_level`, `name`, `entity_type`, `description`, `is_group`
 
-**Transaction properties:** `hash` (unique index), `value` (wei string), `block_number`, `timestamp`, `gas_used`, `gas_price`, `from_address`, `to_address`
+**Transaction properties:** `hash` (unique), `value` (wei string), `block_number`, `timestamp`, `gas_used`, `gas_price`, `from_address`, `to_address`
+
+**Trace properties:** `uid` (unique), `transaction_hash`, `block_number`, `from_address`, `to_address`, `value`, `call_type`
+
+**TokenTransfer properties:** `uid` (unique), `transaction_hash`, `block_number`, `token_address`, `from_address`, `to_address`, `amount`
 
 **Group membership:** `(member:Entity)-[:IN_GROUP]->(group:Entity)`
 
@@ -619,24 +626,23 @@ docker compose build backend && docker compose up -d backend
 
 ### `process --one-shot` finishes with `entities=0 transactions=0`
 
-The Redis consumer group's read position may be stuck. Reset all three streams then re-run:
+The consumer group's read position is stuck past the unprocessed messages. Reset all three streams:
 
 ```bash
 docker exec chain-analysis-redis redis-cli XGROUP SETID ingested_txs chain-analysis-process 0
 docker exec chain-analysis-redis redis-cli XGROUP SETID ingested_traces chain-analysis-process 0
 docker exec chain-analysis-redis redis-cli XGROUP SETID ingested_transfers chain-analysis-process 0
-docker compose --profile etl run --rm process
 ```
 
-Also note: `--one-shot` processes only **one batch of 500 messages**. For 10 000+ messages, omit `--one-shot` and press Ctrl+C when the log shows 0 new messages.
+Then re-run process. Note: `--one-shot` processes one batch of 500. For large datasets omit `--one-shot` and press Ctrl+C when the log shows 0 new messages.
 
 ### Etherscan 429 rate limit
 
-Free Etherscan keys allow 5 req/s. The web ingestion endpoint makes 2 requests per call. Wait a moment between rapid requests.
+Free Etherscan keys allow 5 req/s. The web ingestion endpoint makes 2 requests per call. Reduce `--fetch-concurrency` (block mode) or wait between rapid address requests.
 
 ### Neo4j `APOC not available` warning
 
-The APOC-based sub-label assignment (`apoc.create.addLabels`) is optional. The adapter falls back to plain `MERGE` automatically. Entity type sub-labels (`:EOA`, `:Mixer`, etc.) won't be set but the data is still fully usable.
+The APOC-based sub-label assignment (`apoc.create.addLabels`) is optional. The adapter falls back to plain `MERGE` automatically — entity sub-labels (`:EOA`, `:Mixer`, etc.) won't be set but the data is fully usable.
 
 ### Check what's in Redis
 
