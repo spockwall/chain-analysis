@@ -16,11 +16,13 @@ config = { path = "../config" }
 sources = { path = "../sources" }
 sinks = { path = "../sinks" }
 pipeline = { path = "../pipeline" }
+observability = { path = "../observability" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
 eyre = "0.6"
 futures = "0.3"
+metrics = "0.24"
 redis = { version = "0.27", features = ["tokio-comp"] }
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }

@@ -9,10 +9,16 @@
 
 use clap::Parser;
 use color_eyre::eyre::Result;
+use metrics::{counter, histogram};
+use observability::{
+    CONSUMER_BATCHES_PROCESSED, CONSUMER_BATCH_DURATION, CONSUMER_MESSAGES_PROCESSED,
+    DLQ_MESSAGES_MOVED, DLQ_MOVES,
+};
 use pipeline::dlq::{self, BatchKey, DlqPolicy};
 use pipeline::install_shutdown;
 use sinks::clickhouse::ClickhouseWriter;
 use sinks::redis_consumer::{StreamConsumer, STREAM_TRACES, STREAM_TRANSFERS, STREAM_TXS};
+use std::time::Instant;
 use tracing::{error, info, warn};
 
 #[derive(Parser)]
@@ -46,6 +52,12 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    let metrics_port = std::env::var("METRICS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(observability::DEFAULT_METRICS_PORT);
+    observability::init_best_effort("clickhouse-process", metrics_port);
 
     let cli = Cli::parse();
     let config = config::ClickhouseConfig::from_env();
@@ -129,6 +141,8 @@ async fn main() -> Result<()> {
             let transfer_ids: Vec<String> =
                 batch.transfers.iter().map(|(id, _)| id.clone()).collect();
 
+            let started = Instant::now();
+            let group_label = consumer.group().to_string();
             let result = async {
                 writer.insert_transactions(&tx_items).await?;
                 writer.insert_traces(&trace_items).await?;
@@ -136,6 +150,8 @@ async fn main() -> Result<()> {
                 eyre::Ok(())
             }
             .await;
+            histogram!(CONSUMER_BATCH_DURATION, "group" => group_label.clone())
+                .record(started.elapsed().as_secs_f64());
 
             match result {
                 Ok(()) => {
@@ -145,6 +161,30 @@ async fn main() -> Result<()> {
                     total_txs += tx_ids.len() as u64;
                     total_traces += trace_ids.len() as u64;
                     total_transfers += transfer_ids.len() as u64;
+                    counter!(
+                        CONSUMER_BATCHES_PROCESSED,
+                        "group" => group_label.clone(),
+                        "outcome" => "ok",
+                    )
+                    .increment(1);
+                    counter!(
+                        CONSUMER_MESSAGES_PROCESSED,
+                        "group" => group_label.clone(),
+                        "stream" => STREAM_TXS,
+                    )
+                    .increment(tx_ids.len() as u64);
+                    counter!(
+                        CONSUMER_MESSAGES_PROCESSED,
+                        "group" => group_label.clone(),
+                        "stream" => STREAM_TRACES,
+                    )
+                    .increment(trace_ids.len() as u64);
+                    counter!(
+                        CONSUMER_MESSAGES_PROCESSED,
+                        "group" => group_label,
+                        "stream" => STREAM_TRANSFERS,
+                    )
+                    .increment(transfer_ids.len() as u64);
                     info!(
                         txs = tx_ids.len(),
                         traces = trace_ids.len(),
@@ -154,6 +194,12 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     error!(error = %e, "ClickHouse batch insert failed");
+                    counter!(
+                        CONSUMER_BATCHES_PROCESSED,
+                        "group" => group_label,
+                        "outcome" => "error",
+                    )
+                    .increment(1);
                     let group = consumer.group().to_string();
                     let conn = consumer.conn_mut();
                     for stream in [STREAM_TXS, STREAM_TRACES, STREAM_TRANSFERS] {
@@ -180,10 +226,16 @@ async fn main() -> Result<()> {
                             };
                         if attempts >= dlq_policy.max_attempts {
                             warn!(stream, attempts, count = msgs.len(), "Routing batch to DLQ");
-                            if let Err(e) =
-                                dlq::move_batch_to_dlq(conn, stream, &group, msgs, &dlq_policy).await
-                            {
-                                error!(stream, error = %e, "DLQ relocation failed");
+                            match dlq::move_batch_to_dlq(conn, stream, &group, msgs, &dlq_policy).await {
+                                Ok(()) => {
+                                    counter!(DLQ_MOVES, "stream" => stream.to_string())
+                                        .increment(1);
+                                    counter!(DLQ_MESSAGES_MOVED, "stream" => stream.to_string())
+                                        .increment(msgs.len() as u64);
+                                }
+                                Err(e) => {
+                                    error!(stream, error = %e, "DLQ relocation failed");
+                                }
                             }
                         } else {
                             info!(stream, attempts, "Will retry batch");

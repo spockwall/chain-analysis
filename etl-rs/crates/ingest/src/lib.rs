@@ -3,10 +3,13 @@ pub mod writer_pipeline;
 
 use eyre::Result;
 use futures::stream::{self, StreamExt};
+use metrics::{counter, histogram};
+use observability::{INGEST_BLOCKS_FAILED, INGEST_BLOCKS_FETCHED, INGEST_FETCH_DURATION};
 use pipeline::{with_retry, ProgressReporter, RetryPolicy};
 use sinks::redis_stream::TransactionWriter;
 use sources::{etherscan, BlockSource};
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{error, info, warn};
 use types::{Trace, Transaction, Transfer};
 use writer_pipeline::{spawn_writer, WriterCommand, WriterHandles};
@@ -30,10 +33,26 @@ async fn fetch_block_data(
     with_traces: bool,
     with_transfers: bool,
 ) -> Result<(Vec<Transaction>, Vec<Trace>, Vec<Transfer>)> {
-    let txs = with_retry(retry_policy, &format!("fetch_block_{}", block_num), || {
+    let source_name = source.name();
+    let started = Instant::now();
+    let txs = match with_retry(retry_policy, &format!("fetch_block_{}", block_num), || {
         fetch_block(source, block_num)
     })
-    .await?;
+    .await
+    {
+        Ok(txs) => {
+            histogram!(INGEST_FETCH_DURATION, "source" => source_name)
+                .record(started.elapsed().as_secs_f64());
+            counter!(INGEST_BLOCKS_FETCHED, "source" => source_name).increment(1);
+            txs
+        }
+        Err(e) => {
+            histogram!(INGEST_FETCH_DURATION, "source" => source_name)
+                .record(started.elapsed().as_secs_f64());
+            counter!(INGEST_BLOCKS_FAILED, "source" => source_name).increment(1);
+            return Err(e);
+        }
+    };
 
     let traces_fut = async {
         if with_traces {

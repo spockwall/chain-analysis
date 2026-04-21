@@ -2,13 +2,18 @@ pub mod features;
 pub mod resolver;
 
 use eyre::Result;
+use metrics::{counter, histogram};
+use observability::{
+    CONSUMER_BATCHES_PROCESSED, CONSUMER_BATCH_DURATION, CONSUMER_MESSAGES_PROCESSED,
+};
 use pipeline::ProcessProgressReporter;
 use sinks::{
     neo4j::Neo4jWriter,
     postgres_reader::PostgresReader,
     postgres_writer::PostgresWriter,
-    redis_consumer::{CombinedBatch, StreamConsumer},
+    redis_consumer::{CombinedBatch, StreamConsumer, STREAM_TRACES, STREAM_TRANSFERS, STREAM_TXS},
 };
+use std::time::Instant;
 use tracing::{info, warn};
 
 /// Read one combined batch from Redis without processing. The caller decides
@@ -31,6 +36,9 @@ pub async fn process_read_batch(
     if batch.txs.is_empty() && batch.traces.is_empty() && batch.transfers.is_empty() {
         return Ok((0, 0, 0));
     }
+
+    let started = Instant::now();
+    let group = consumer.group().to_string();
 
     let tx_msg_ids: Vec<String> = batch.txs.iter().map(|(id, _)| id.clone()).collect();
     let trace_msg_ids: Vec<String> = batch.traces.iter().map(|(id, _)| id.clone()).collect();
@@ -136,6 +144,21 @@ pub async fn process_read_batch(
     consumer.ack_txs(&tx_msg_ids).await?;
     consumer.ack_traces(&trace_msg_ids).await?;
     consumer.ack_transfers(&transfer_msg_ids).await?;
+
+    histogram!(CONSUMER_BATCH_DURATION, "group" => group.clone())
+        .record(started.elapsed().as_secs_f64());
+    counter!(
+        CONSUMER_BATCHES_PROCESSED,
+        "group" => group.clone(),
+        "outcome" => "ok",
+    )
+    .increment(1);
+    counter!(CONSUMER_MESSAGES_PROCESSED, "group" => group.clone(), "stream" => STREAM_TXS)
+        .increment(tx_count);
+    counter!(CONSUMER_MESSAGES_PROCESSED, "group" => group.clone(), "stream" => STREAM_TRACES)
+        .increment(trace_count);
+    counter!(CONSUMER_MESSAGES_PROCESSED, "group" => group, "stream" => STREAM_TRANSFERS)
+        .increment(transfer_count);
 
     info!(
         entities = entity_count,

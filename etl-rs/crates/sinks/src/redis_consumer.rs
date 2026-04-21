@@ -1,3 +1,5 @@
+use metrics::counter;
+use observability::CONSUMER_PARSE_FAILURES;
 use types::{Trace, Transaction, Transfer};
 use eyre::Result;
 use serde::de::DeserializeOwned;
@@ -109,9 +111,11 @@ impl StreamConsumer {
                 .collect();
 
             match stream.as_str() {
-                STREAM_TXS => batch.txs = decode_messages(data_json),
-                STREAM_TRACES => batch.traces = decode_messages(data_json),
-                STREAM_TRANSFERS => batch.transfers = decode_messages(data_json),
+                STREAM_TXS => batch.txs = decode_messages(data_json, STREAM_TXS, &self.group),
+                STREAM_TRACES => batch.traces = decode_messages(data_json, STREAM_TRACES, &self.group),
+                STREAM_TRANSFERS => {
+                    batch.transfers = decode_messages(data_json, STREAM_TRANSFERS, &self.group)
+                }
                 other => warn!(stream = other, "Unexpected stream in XREADGROUP response"),
             }
             batch.raw_by_stream.insert(stream, msgs);
@@ -230,12 +234,23 @@ fn parse_xreadgroup_multi(value: redis::Value) -> RawByStream {
     by_stream
 }
 
-fn decode_messages<T: DeserializeOwned>(items: Vec<(String, String)>) -> Vec<(String, T)> {
+fn decode_messages<T: DeserializeOwned>(
+    items: Vec<(String, String)>,
+    stream: &'static str,
+    group: &str,
+) -> Vec<(String, T)> {
+    let group = group.to_string();
     items
         .into_iter()
         .filter_map(|(id, json)| match serde_json::from_str::<T>(&json) {
             Ok(item) => Some((id, item)),
             Err(e) => {
+                counter!(
+                    CONSUMER_PARSE_FAILURES,
+                    "stream" => stream,
+                    "group" => group.clone(),
+                )
+                .increment(1);
                 warn!(msg_id = id, error = %e, "Failed to parse JSON from stream");
                 None
             }
