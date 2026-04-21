@@ -94,10 +94,35 @@ Poison batches are quarantined to `{stream}_dlq` after
 
 ## Test
 
+Tests are split into two tiers. Unit tests have no external dependencies;
+integration tests are gated on `E2E_REDIS_URL` and skip cleanly when it's unset.
+
 ```bash
-cargo test --workspace
-cargo test --test e2e        # requires Docker for testcontainers
+# Unit tests only (pure logic, no services)
+cargo test --workspace --lib --bins
+
+# All tests including Redis-gated integration tests
+E2E_REDIS_URL=redis://localhost:6379 cargo test --workspace
+
+# A single integration suite
+E2E_REDIS_URL=redis://localhost:6379 cargo test -p pipeline --test dlq
+E2E_REDIS_URL=redis://localhost:6379 cargo test -p sinks    --test maxlen
+E2E_REDIS_URL=redis://localhost:6379 cargo test -p ingest   --test reprocess
+E2E_REDIS_URL=redis://localhost:6379 cargo test -p ingest   --test e2e
 ```
+
+Integration coverage:
+
+| Suite | Exercises |
+|---|---|
+| `pipeline::dlq` | `incr_attempt` counter + TTL; full `move_batch_to_dlq` round-trip (XADD → XREADGROUP → DLQ move → XACK) |
+| `sinks::maxlen` | `MAXLEN ~ N` caps stream size; `None` leaves stream untrimmed |
+| `ingest::reprocess` | `reprocess_failed_blocks` drains `ingest:failed_blocks:{source}` |
+| `ingest::e2e` | Mock ingest populates `ingested_txs`; `from-label-tasks` drains `INGEST_TARGETED_QUEUE` |
+
+CI (`.github/workflows/rust.yml`) runs `fmt`, `clippy`, `test-unit`, and
+`test-integration` (with a Redis service container) on every push/PR that
+touches `etl-rs/`.
 
 ## Operational notes
 
