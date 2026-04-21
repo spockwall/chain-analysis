@@ -1,6 +1,7 @@
-# Rust ETL: builds the ingest binary and stages it into a shared volume.
-# One-shot service (exits after copying the binary); pulled in by the dagster
-# services via `depends_on: service_completed_successfully`.
+# Rust ETL: builds the ingest/process binaries and stages them.
+# `ingest-builder` is a one-shot service that copies the ingest binary into a
+# shared volume for the Dagster containers to exec. `process` is a long-running
+# consumer that drains Redis Streams into Neo4j + Postgres.
 services:
   # =============================================================================
   # Rust ingest binary image (builds once; other services copy the binary in)
@@ -20,6 +21,36 @@ services:
       ]
     volumes:
       - rust_bin:/shared
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # Rust process consumer — drains Redis Streams into Neo4j + Postgres.
+  # Without this, ingested transactions pile up in `ingested_txs` but never
+  # reach the graph, so the frontend stays empty.
+  # =============================================================================
+  process:
+    build:
+      context: ../etl-rs
+      dockerfile: Dockerfile
+      target: process
+    image: chain-analysis/process:local
+    container_name: chain-analysis-process
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password123
+      - NEO4J_DATABASE=neo4j
+      - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/chain_analysis
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - chain-analysis-net
 

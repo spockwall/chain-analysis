@@ -99,6 +99,15 @@ export function LabelsPage() {
         loadTasks();
     }, [loadTasks]);
 
+    // While any task is pending/in-progress, refresh every 5s so analysts see
+    // the Dagster sensor drain + Rust worker complete without a manual reload.
+    useEffect(() => {
+        const hasActive = tasks.some((t) => t.status === "pending" || t.status === "in_progress");
+        if (!hasActive) return;
+        const handle = window.setInterval(loadTasks, 5000);
+        return () => window.clearInterval(handle);
+    }, [tasks, loadTasks]);
+
     // Clear the ?address= query param once consumed so navigation away doesn't leak it.
     useEffect(() => {
         if (prefillAddress) {
@@ -150,7 +159,9 @@ export function LabelsPage() {
         setQueueing(true);
         try {
             const res = await enqueueLabelFetch(body);
-            toast.success(`Queued ${res.queued} task${res.queued === 1 ? "" : "s"}`);
+            toast.success(
+                `Queued ${res.queued} task${res.queued === 1 ? "" : "s"} — Dagster sensor will drain within 30s`,
+            );
             setAddressesInput("");
             setHashesInput("");
             setSeed("");

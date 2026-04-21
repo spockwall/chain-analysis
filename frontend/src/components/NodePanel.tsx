@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import type { EntityResponse, TransactionResponse } from "../types";
 import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember, ingestAddress } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
+import { useIngestionRuns } from "../context/IngestionRunsContext";
 import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
 import { CopyButton } from "./CopyButton";
 
@@ -27,6 +28,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
     const entityType = node.entity_type || "Unknown";
     const toast = useToastContext();
     const navigate = useNavigate();
+    const { track: trackRun } = useIngestionRuns();
 
     const [members, setMembers] = useState<EntityResponse[]>([]);
     const [memberInput, setMemberInput] = useState("");
@@ -83,16 +85,20 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
 
     const handleIngest = async () => {
         setIngesting(true);
-        const loadId = toast.loading("Fetching transactions from Etherscan…");
         try {
             const result = await ingestAddress({ address: node.address });
-            toast.dismiss(loadId);
-            toast.success(
-                `Ingested ${result.transactions_fetched} txs, ${result.entities_created} entities (${result.duration_seconds.toFixed(1)}s)`,
-            );
-            onIngestComplete?.(node.address);
+            toast.success(`Queued ingest for ${formatAddress(node.address, 4)} — see run pill for progress`);
+            trackRun(result.run_id, {
+                onComplete: (run) => {
+                    if (run.status === "completed") {
+                        toast.success(`Ingest complete — ${run.transactions_processed} txs`);
+                        onIngestComplete?.(node.address);
+                    } else {
+                        toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                    }
+                },
+            });
         } catch (err: unknown) {
-            toast.dismiss(loadId);
             toast.error(err instanceof Error ? err.message : "Ingestion failed");
         } finally {
             setIngesting(false);
@@ -381,9 +387,16 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                     <>
                         <hr className={divider} />
                         <div>
-                            <p className={sectionLabel}>Recent Transactions</p>
-                            <div className="flex flex-col gap-0.5">
-                                {txForNode.slice(0, 10).map((tx) => {
+                            <p className={sectionLabel}>
+                                Transactions
+                                <span className="ml-1.5 text-[0.68rem] font-normal text-gray-400 normal-case tracking-normal">
+                                    {node.transaction_count != null && node.transaction_count > txForNode.length
+                                        ? `showing ${txForNode.length.toLocaleString()} of ${node.transaction_count.toLocaleString()}`
+                                        : `${txForNode.length.toLocaleString()}`}
+                                </span>
+                            </p>
+                            <div className="flex flex-col gap-0.5 max-h-72 overflow-y-auto pr-1">
+                                {txForNode.map((tx) => {
                                     const isSent = tx.from_address === node.address;
                                     const counterparty = isSent ? tx.to_address : tx.from_address;
                                     return (
@@ -412,12 +425,14 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                         </button>
                                     );
                                 })}
-                                {txForNode.length > 10 && (
-                                    <p className="text-[0.65rem] text-gray-400 text-center mt-1 mb-0">
-                                        +{txForNode.length - 10} more
-                                    </p>
-                                )}
                             </div>
+                            {node.transaction_count != null && node.transaction_count > txForNode.length && (
+                                <p className="text-[0.65rem] text-gray-400 mt-1.5 mb-0">
+                                    Only the {txForNode.length.toLocaleString()} transactions in the current graph view are
+                                    shown. Click <span className="font-semibold">Expand Neighbours</span> or open the
+                                    address on Etherscan for the full history.
+                                </p>
+                            )}
                         </div>
                     </>
                 )}

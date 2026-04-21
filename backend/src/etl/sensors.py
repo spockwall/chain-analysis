@@ -27,10 +27,11 @@ DRAIN_LIMIT = int(os.getenv("DAGSTER_TARGETED_DRAIN_LIMIT", "50"))
 @sensor(
     job=targeted_drain_job,
     minimum_interval_seconds=SENSOR_MIN_INTERVAL_SECONDS,
-    default_status=DefaultSensorStatus.STOPPED,
+    default_status=DefaultSensorStatus.RUNNING,
     description=(
         "Trigger `targeted_drain_job` whenever INGEST_TARGETED_QUEUE has "
-        "pending entries. Cursor = last observed LLEN to debounce bursts."
+        "pending entries. Each tick increments an internal counter used as "
+        "the run_key so overlapping/failed drains don't starve future work."
     ),
 )
 def targeted_queue_sensor(context: SensorEvaluationContext):
@@ -43,17 +44,14 @@ def targeted_queue_sensor(context: SensorEvaluationContext):
     if length == 0:
         return SkipReason(f"{TARGETED_QUEUE} is empty")
 
-    # Cursor dedupes so we don't re-fire when the queue is still draining
-    # from the previous run. Move forward only once the previous length was
-    # observed — this creates one run per "queue has work" edge.
-    last_cursor = context.cursor or "0"
-    cursor_value = str(length)
-    if last_cursor == cursor_value:
-        return SkipReason(f"Queue length unchanged at {length}; drain in flight")
-
-    context.update_cursor(cursor_value)
+    # Monotonic tick counter as run_key. Incrementing per non-empty observation
+    # gives Dagster a unique key each time so a prior failure doesn't block
+    # future runs, but each individual RunRequest is still idempotent under
+    # Dagster's own run_key dedup (retries within the same tick are safe).
+    tick = int(context.cursor or "0") + 1
+    context.update_cursor(str(tick))
     return RunRequest(
-        run_key=f"drain-{cursor_value}-{context.cursor}",
+        run_key=f"drain-{tick}",
         run_config=RunConfig(
             ops={"targeted_drain_op": TargetedDrainConfig(limit=DRAIN_LIMIT)},
         ),
