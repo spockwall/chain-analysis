@@ -1,0 +1,31 @@
+# Rust ETL: builds the ingest binary and stages it into a shared volume.
+# One-shot service (exits after copying the binary); pulled in by the dagster
+# services via `depends_on: service_completed_successfully`.
+services:
+  # =============================================================================
+  # Rust ingest binary image (builds once; other services copy the binary in)
+  # =============================================================================
+  ingest-builder:
+    build:
+      context: ../etl-rs
+      dockerfile: Dockerfile
+      target: ingest
+    image: chain-analysis/ingest:local
+    # One-shot: populate the shared volume, exit.
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      [
+        "cp /usr/local/bin/ingest /shared/ingest && echo 'ingest binary
+          staged'",
+      ]
+    volumes:
+      - rust_bin:/shared
+    networks:
+      - chain-analysis-net
+
+volumes:
+  rust_bin:
+
+networks:
+  chain-analysis-net:
+    driver: bridge

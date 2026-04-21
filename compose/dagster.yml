@@ -1,0 +1,85 @@
+# Dagster orchestration: webserver (UI/GraphQL) + daemon (schedules/sensors).
+services:
+  # =============================================================================
+  # Dagster webserver (UI + GraphQL)
+  # =============================================================================
+  dagster-webserver:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: chain-analysis-dagster-webserver
+    command:
+      [
+        "dagster-webserver",
+        "-h",
+        "0.0.0.0",
+        "-p",
+        "3000",
+        "-m",
+        "etl.definitions",
+      ]
+    entrypoint: []
+    ports:
+      - "3000:3000"
+    environment:
+      - DAGSTER_HOME=/opt/dagster/home
+      - RUST_INGEST_BINARY=/opt/rust-bin/ingest
+      - REDIS_URL=redis://redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password123
+      - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/chain_analysis
+      - INGEST_TARGETED_QUEUE=ingest:targeted_queue
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
+      - INGEST_SOURCE=${INGEST_SOURCE:-}
+    volumes:
+      - dagster_home:/opt/dagster/home
+      - rust_bin:/opt/rust-bin:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      ingest-builder:
+        condition: service_completed_successfully
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # Dagster daemon (schedules + sensors + run queue)
+  # =============================================================================
+  dagster-daemon:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: chain-analysis-dagster-daemon
+    command: [ "dagster-daemon", "run", "-m", "etl.definitions" ]
+    entrypoint: []
+    environment:
+      - DAGSTER_HOME=/opt/dagster/home
+      - RUST_INGEST_BINARY=/opt/rust-bin/ingest
+      - REDIS_URL=redis://redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password123
+      - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/chain_analysis
+      - INGEST_TARGETED_QUEUE=ingest:targeted_queue
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
+      - INGEST_SOURCE=${INGEST_SOURCE:-}
+    volumes:
+      - dagster_home:/opt/dagster/home
+      - rust_bin:/opt/rust-bin:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      ingest-builder:
+        condition: service_completed_successfully
+    networks:
+      - chain-analysis-net
+
+volumes:
+  dagster_home:
+
+networks:
+  chain-analysis-net:
+    driver: bridge
