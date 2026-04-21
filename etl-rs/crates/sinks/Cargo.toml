@@ -8,12 +8,15 @@ types = { path = "../types" }
 async-trait = "0.1"
 eyre = "0.6"
 neo4rs = "0.8"
+clickhouse = { version = "0.13", features = ["uuid", "time"] }
 redis = { version = "0.27", features = ["tokio-comp"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+time = "0.3"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 
 [dev-dependencies]
+time = "0.3"
 uuid = { version = "1", features = ["v4"] }

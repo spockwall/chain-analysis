@@ -57,6 +57,41 @@ pub struct ProcessConfig {
     pub dlq_attempt_ttl_secs: u64,
 }
 
+pub struct ClickhouseConfig {
+    pub redis_url: String,
+    pub clickhouse_url: String,
+    pub clickhouse_database: String,
+    pub clickhouse_user: String,
+    pub clickhouse_password: String,
+    pub batch_size: usize,
+    pub consumer_group: String,
+    pub consumer_name: String,
+    pub dlq_max_attempts: u32,
+    pub dlq_suffix: String,
+    pub dlq_attempt_ttl_secs: u64,
+}
+
+impl ClickhouseConfig {
+    pub fn from_env() -> Self {
+        Self {
+            redis_url: env_or("REDIS_URL", "redis://localhost:6379"),
+            clickhouse_url: env_or("CLICKHOUSE_URL", "http://localhost:8123"),
+            clickhouse_database: env_or("CLICKHOUSE_DATABASE", "chain_analysis"),
+            clickhouse_user: env_or("CLICKHOUSE_USER", "default"),
+            clickhouse_password: env_or("CLICKHOUSE_PASSWORD", ""),
+            batch_size: env_or_parse("CLICKHOUSE_BATCH_SIZE", 1000usize),
+            consumer_group: env_or("CLICKHOUSE_CONSUMER_GROUP", "chain-analysis-clickhouse"),
+            consumer_name: env_or(
+                "CLICKHOUSE_CONSUMER_NAME",
+                &format!("ch-consumer-{}", std::process::id()),
+            ),
+            dlq_max_attempts: env_or_parse("CLICKHOUSE_DLQ_MAX_ATTEMPTS", 5u32),
+            dlq_suffix: env_or("CLICKHOUSE_DLQ_SUFFIX", "_dlq"),
+            dlq_attempt_ttl_secs: env_or_parse("CLICKHOUSE_DLQ_ATTEMPT_TTL_SECS", 86_400u64),
+        }
+    }
+}
+
 impl ProcessConfig {
     pub fn from_env() -> Self {
         Self {
