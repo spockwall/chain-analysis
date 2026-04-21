@@ -3,29 +3,42 @@ pub mod resolver;
 
 use eyre::Result;
 use pipeline::ProcessProgressReporter;
-use sinks::{neo4j::Neo4jWriter, postgres_reader::PostgresReader, postgres_writer::PostgresWriter, redis_consumer::StreamConsumer};
+use sinks::{
+    neo4j::Neo4jWriter,
+    postgres_reader::PostgresReader,
+    postgres_writer::PostgresWriter,
+    redis_consumer::{CombinedBatch, StreamConsumer},
+};
 use tracing::{info, warn};
 
-pub async fn process_batch(
+/// Read one combined batch from Redis without processing. The caller decides
+/// what to do with the batch on failure (e.g. DLQ).
+pub async fn read_batch(consumer: &mut StreamConsumer) -> Result<CombinedBatch> {
+    consumer.read_all_batches().await
+}
+
+/// Process a batch read via [`read_batch`]. On success, messages are XACK'd.
+/// On failure, the caller is responsible for retry / DLQ using the raw
+/// messages preserved in `batch.raw_by_stream`.
+pub async fn process_read_batch(
     consumer: &mut StreamConsumer,
     pg: &PostgresReader,
     pg_writer: &PostgresWriter,
     neo4j: &Neo4jWriter,
     reporter: &mut ProcessProgressReporter,
+    batch: CombinedBatch,
 ) -> Result<(u64, u64, u64)> {
-    let combined = consumer.read_all_batches().await?;
-
-    if combined.txs.is_empty() && combined.traces.is_empty() && combined.transfers.is_empty() {
+    if batch.txs.is_empty() && batch.traces.is_empty() && batch.transfers.is_empty() {
         return Ok((0, 0, 0));
     }
 
-    let tx_msg_ids: Vec<String> = combined.txs.iter().map(|(id, _)| id.clone()).collect();
-    let trace_msg_ids: Vec<String> = combined.traces.iter().map(|(id, _)| id.clone()).collect();
-    let transfer_msg_ids: Vec<String> = combined.transfers.iter().map(|(id, _)| id.clone()).collect();
+    let tx_msg_ids: Vec<String> = batch.txs.iter().map(|(id, _)| id.clone()).collect();
+    let trace_msg_ids: Vec<String> = batch.traces.iter().map(|(id, _)| id.clone()).collect();
+    let transfer_msg_ids: Vec<String> = batch.transfers.iter().map(|(id, _)| id.clone()).collect();
 
-    let txs: Vec<_> = combined.txs.into_iter().map(|(_, tx)| tx).collect();
-    let traces: Vec<_> = combined.traces.into_iter().map(|(_, t)| t).collect();
-    let transfers: Vec<_> = combined.transfers.into_iter().map(|(_, t)| t).collect();
+    let txs: Vec<_> = batch.txs.into_iter().map(|(_, tx)| tx).collect();
+    let traces: Vec<_> = batch.traces.into_iter().map(|(_, t)| t).collect();
+    let transfers: Vec<_> = batch.transfers.into_iter().map(|(_, t)| t).collect();
 
     let tx_count = txs.len() as u64;
     let trace_count = traces.len() as u64;
@@ -133,4 +146,17 @@ pub async fn process_batch(
     );
 
     Ok((entity_count, tx_count, trace_count + transfer_count))
+}
+
+/// Back-compat convenience: read + process in one call. Preserves old API
+/// used by one-shot mode.
+pub async fn process_batch(
+    consumer: &mut StreamConsumer,
+    pg: &PostgresReader,
+    pg_writer: &PostgresWriter,
+    neo4j: &Neo4jWriter,
+    reporter: &mut ProcessProgressReporter,
+) -> Result<(u64, u64, u64)> {
+    let batch = read_batch(consumer).await?;
+    process_read_batch(consumer, pg, pg_writer, neo4j, reporter, batch).await
 }

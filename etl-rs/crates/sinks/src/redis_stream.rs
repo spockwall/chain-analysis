@@ -52,17 +52,33 @@ pub struct RedisStreamWriter {
     conn: redis::aio::MultiplexedConnection,
     cursor_key: String,
     failed_key: String,
+    maxlen: Option<u64>,
 }
 
 impl RedisStreamWriter {
-    pub async fn connect(redis_url: &str, source: &str) -> Result<Self> {
+    pub async fn connect(
+        redis_url: &str,
+        source: &str,
+        maxlen: Option<u64>,
+    ) -> Result<Self> {
         let client = redis::Client::open(redis_url)?;
         let conn = client.get_multiplexed_async_connection().await?;
         Ok(Self {
             conn,
             cursor_key: cursor_key(source),
             failed_key: failed_blocks_key(source),
+            maxlen,
         })
+    }
+
+    fn build_xadd(&self, topic: &str, json: &str) -> redis::Cmd {
+        let mut cmd = redis::cmd("XADD");
+        cmd.arg(topic);
+        if let Some(n) = self.maxlen {
+            cmd.arg("MAXLEN").arg("~").arg(n);
+        }
+        cmd.arg("*").arg("data").arg(json);
+        cmd
     }
 
     /// XADD a list of (topic, json) tuples in one Redis pipeline round-trip.
@@ -72,11 +88,7 @@ impl RedisStreamWriter {
         }
         let mut pipe = redis::pipe();
         for (topic, json) in items {
-            pipe.cmd("XADD")
-                .arg(*topic)
-                .arg("*")
-                .arg("data")
-                .arg(json);
+            pipe.add_command(self.build_xadd(topic, json));
         }
         let _: redis::Value = pipe.query_async(&mut self.conn).await?;
         Ok(())
@@ -87,11 +99,8 @@ impl RedisStreamWriter {
 impl TransactionWriter for RedisStreamWriter {
     async fn write_transaction(&mut self, tx: &Transaction) -> Result<()> {
         let json = serde_json::to_string(tx)?;
-        let _: String = redis::cmd("XADD")
-            .arg(TOPIC_INGESTED_TXS)
-            .arg("*")
-            .arg("data")
-            .arg(&json)
+        let _: String = self
+            .build_xadd(TOPIC_INGESTED_TXS, &json)
             .query_async(&mut self.conn)
             .await?;
         debug!(hash = %tx.hash, "Wrote transaction to Redis");
@@ -100,11 +109,8 @@ impl TransactionWriter for RedisStreamWriter {
 
     async fn write_trace(&mut self, trace: &Trace) -> Result<()> {
         let json = serde_json::to_string(trace)?;
-        let _: String = redis::cmd("XADD")
-            .arg(TOPIC_INGESTED_TRACES)
-            .arg("*")
-            .arg("data")
-            .arg(&json)
+        let _: String = self
+            .build_xadd(TOPIC_INGESTED_TRACES, &json)
             .query_async(&mut self.conn)
             .await?;
         debug!(tx_hash = %trace.transaction_hash, "Wrote trace to Redis");
@@ -113,11 +119,8 @@ impl TransactionWriter for RedisStreamWriter {
 
     async fn write_transfer(&mut self, transfer: &Transfer) -> Result<()> {
         let json = serde_json::to_string(transfer)?;
-        let _: String = redis::cmd("XADD")
-            .arg(TOPIC_INGESTED_TRANSFERS)
-            .arg("*")
-            .arg("data")
-            .arg(&json)
+        let _: String = self
+            .build_xadd(TOPIC_INGESTED_TRANSFERS, &json)
             .query_async(&mut self.conn)
             .await?;
         debug!(tx_hash = %transfer.transaction_hash, "Wrote transfer to Redis");

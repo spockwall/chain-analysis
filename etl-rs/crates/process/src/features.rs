@@ -1,5 +1,12 @@
-use types::{Entity, EntityFeatures, Transaction};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use types::{Entity, EntityFeatures, Transaction};
+
+static PARSE_FAILURES: AtomicU64 = AtomicU64::new(0);
+
+pub fn parse_failure_count() -> u64 {
+    PARSE_FAILURES.load(Ordering::Relaxed)
+}
 
 pub fn compute_features(entities: &[Entity], txs: &[Transaction]) -> Vec<EntityFeatures> {
     let mut acc: HashMap<String, FeatureAccumulator> = HashMap::new();
@@ -24,7 +31,18 @@ pub fn compute_features(entities: &[Entity], txs: &[Transaction]) -> Vec<EntityF
     for tx in txs {
         let from = tx.from_address.to_lowercase();
         let to = tx.to_address.to_lowercase();
-        let value: u128 = tx.value.parse().unwrap_or(0);
+        let value: u128 = match tx.value.parse() {
+            Ok(v) => v,
+            Err(_) => {
+                tracing::warn!(
+                    tx_hash = %tx.hash,
+                    value = %tx.value,
+                    "unparseable tx.value, treating as 0 wei"
+                );
+                PARSE_FAILURES.fetch_add(1, Ordering::Relaxed);
+                0
+            }
+        };
         let ts = tx.timestamp;
 
         if let Some(f) = acc.get_mut(&from) {

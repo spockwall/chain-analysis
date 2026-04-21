@@ -4,15 +4,18 @@ use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
-const STREAM_TXS: &str = "ingested_txs";
-const STREAM_TRACES: &str = "ingested_traces";
-const STREAM_TRANSFERS: &str = "ingested_transfers";
+pub const STREAM_TXS: &str = "ingested_txs";
+pub const STREAM_TRACES: &str = "ingested_traces";
+pub const STREAM_TRANSFERS: &str = "ingested_transfers";
 
 #[derive(Default)]
 pub struct CombinedBatch {
     pub txs: Vec<(String, Transaction)>,
     pub traces: Vec<(String, Trace)>,
     pub transfers: Vec<(String, Transfer)>,
+    /// Raw (id, field-pairs) per stream, retained so a failing batch can be
+    /// relocated to a DLQ stream byte-for-byte.
+    pub raw_by_stream: HashMap<String, Vec<(String, Vec<(String, String)>)>>,
 }
 
 pub struct StreamConsumer {
@@ -90,15 +93,34 @@ impl StreamConsumer {
         let mut batch = CombinedBatch::default();
 
         for (stream, msgs) in by_stream {
+            let data_json: Vec<(String, String)> = msgs
+                .iter()
+                .filter_map(|(id, fields)| {
+                    fields
+                        .iter()
+                        .find(|(k, _)| k == "data")
+                        .map(|(_, v)| (id.clone(), v.clone()))
+                })
+                .collect();
+
             match stream.as_str() {
-                STREAM_TXS => batch.txs = decode_messages(msgs),
-                STREAM_TRACES => batch.traces = decode_messages(msgs),
-                STREAM_TRANSFERS => batch.transfers = decode_messages(msgs),
+                STREAM_TXS => batch.txs = decode_messages(data_json),
+                STREAM_TRACES => batch.traces = decode_messages(data_json),
+                STREAM_TRANSFERS => batch.transfers = decode_messages(data_json),
                 other => warn!(stream = other, "Unexpected stream in XREADGROUP response"),
             }
+            batch.raw_by_stream.insert(stream, msgs);
         }
 
         Ok(batch)
+    }
+
+    pub fn conn_mut(&mut self) -> &mut redis::aio::MultiplexedConnection {
+        &mut self.conn
+    }
+
+    pub fn group(&self) -> &str {
+        &self.group
     }
 
     pub async fn ack(&mut self, stream: &str, message_ids: &[String]) -> Result<u64> {
@@ -130,8 +152,10 @@ impl StreamConsumer {
 
 /// Parse XREADGROUP response into raw (stream_name → messages) pairs without
 /// decoding the inner JSON.
-fn parse_xreadgroup_multi(value: redis::Value) -> HashMap<String, Vec<(String, String)>> {
-    let mut by_stream: HashMap<String, Vec<(String, String)>> = HashMap::new();
+fn parse_xreadgroup_multi(
+    value: redis::Value,
+) -> HashMap<String, Vec<(String, Vec<(String, String)>)>> {
+    let mut by_stream: HashMap<String, Vec<(String, Vec<(String, String)>)>> = HashMap::new();
 
     let streams = match value {
         redis::Value::Array(s) => s,
@@ -173,22 +197,28 @@ fn parse_xreadgroup_multi(value: redis::Value) -> HashMap<String, Vec<(String, S
                 _ => continue,
             };
 
-            let mut data_json: Option<String> = None;
+            let mut field_pairs: Vec<(String, String)> = Vec::with_capacity(fields.len() / 2);
             let mut i = 0;
             while i + 1 < fields.len() {
-                if let redis::Value::BulkString(key) = &fields[i] {
-                    if key == b"data" {
-                        if let redis::Value::BulkString(val) = &fields[i + 1] {
-                            data_json = Some(String::from_utf8_lossy(val).to_string());
-                        }
+                let k = match &fields[i] {
+                    redis::Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
+                    _ => {
+                        i += 2;
+                        continue;
                     }
-                }
+                };
+                let v = match &fields[i + 1] {
+                    redis::Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
+                    _ => {
+                        i += 2;
+                        continue;
+                    }
+                };
+                field_pairs.push((k, v));
                 i += 2;
             }
 
-            if let Some(json) = data_json {
-                decoded.push((msg_id, json));
-            }
+            decoded.push((msg_id, field_pairs));
         }
 
         by_stream.insert(stream_name, decoded);
