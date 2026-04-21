@@ -2,19 +2,89 @@
 
 Rust ETL workers for chain-analysis. Redis Streams fan out to two independent
 consumer groups — one writes the operational graph, the other the analytical
-columnar store:
+columnar store.
+
+## Architecture
 
 ```
-                  [Etherscan | Alchemy | Mock]
-                                  │   ← ingest
-                                  ▼
-                 [Redis Streams]  (ingested_txs / traces / transfers)
-                       │                          │
-       ← process ──────┤                          ├── ← clickhouse-process
-                       ▼                          ▼
-              [Neo4j + PostgreSQL]            [ClickHouse]
-              (graph + features)              (OLAP / BI)
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ External providers                                                           │
+│  Etherscan V2 proxy API │ Alchemy JSON-RPC │ Mock (deterministic generator)  │
+└──────────────────────────────┬───────────────────────────────────────────────┘
+                               │ HTTPS (reqwest + rate-limited client)
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Ingest tier — `ingest` binary (Rust, tokio)                                  │
+│  • Mode dispatch: block / address / targeted / reprocess                     │
+│  • `BlockSource` trait → Etherscan | Alchemy | Mock (factory per INGEST_SOURCE)│
+│  • Concurrent fetch: `futures::stream::buffered` over `Arc<dyn BlockSource>` │
+│  • `writer_pipeline`: fan-in → batched XADD MAXLEN ~ N                       │
+│  • Graceful shutdown (tokio watch), retry w/ backoff, failed-block DLQ list  │
+└──────────────────────────────┬───────────────────────────────────────────────┘
+                               │ XADD
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Message bus — Redis 7 Streams                                                │
+│  ingested_txs │ ingested_traces │ ingested_transfers                         │
+│  Two consumer groups read independently (no cross back-pressure):            │
+│   ─ `chain-analysis-process`     → graph + features sink                     │
+│   ─ `chain-analysis-clickhouse`  → OLAP sink                                 │
+│  Poison batches → `{stream}_dlq` after PROCESS_DLQ_MAX_ATTEMPTS              │
+└───────────────┬──────────────────────────────────────┬───────────────────────┘
+                │ XREADGROUP                           │ XREADGROUP
+                ▼                                      ▼
+┌──────────────────────────────┐      ┌──────────────────────────────────────┐
+│ Graph consumer — `process`   │      │ OLAP consumer — `clickhouse-process` │
+│  Rust, tokio                 │      │  Rust, tokio                         │
+│  • Neo4j writer (bolt,neo4rs)│      │  • ClickHouse writer (clickhouse-rs) │
+│  • Postgres writer (sqlx)    │      │  • ethereum-etl column names         │
+│  • Feature derivation        │      │  • Batched INSERT, DDL auto-applied  │
+│  • Per-batch DLQ w/ TTL ctr  │      │  • Per-batch DLQ (separate env vars) │
+└──────────────┬───────────────┘      └─────────────────┬────────────────────┘
+               ▼                                        ▼
+┌──────────────────────────────┐      ┌──────────────────────────────────────┐
+│ Hot + Warm OLTP              │      │ Warm OLAP                            │
+│  Neo4j 5 + GDS (graph)       │      │  ClickHouse (analytical tables)      │
+│  PostgreSQL 17 (features,    │      │  chain_analysis.transactions /       │
+│  labels, run history, auth)  │      │   .traces / .token_transfers         │
+└──────────────┬───────────────┘      └─────────────────┬────────────────────┘
+               │                                        │
+               └────────────────┬───────────────────────┘
+                                ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Query / API tier — Python FastAPI backend                                    │
+│  • Neo4j async driver (Cypher), asyncpg (Postgres), clickhouse-connect       │
+│  • REST endpoints: entities, transactions, groups, paths, features, labels   │
+│  • JWT auth (python-jose), SQLAlchemy async + Alembic migrations             │
+└──────────────────────────────┬───────────────────────────────────────────────┘
+                               │ HTTP/JSON
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Frontend — React 18 + TypeScript (Vite)                                      │
+│  Cytoscape.js (fcose) for graph canvas, React Router v6, Tailwind v3         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Cold tier (archive): MinIO (S3-compatible) — raw data, ML training, compliance.
+Orchestration (Phase D, not yet wired): Dagster assets scheduled to drive
+`ingest` binaries; current `backend/src/etl/` is scaffolded but stale.
 ```
+
+### Per-layer tooling
+
+| Layer | Tool / Library | Purpose |
+|---|---|---|
+| External fetch | `reqwest` + rate-limited client | Etherscan V2 / Alchemy JSON-RPC |
+| Ingest runtime | `tokio` + `futures::stream::buffered` | Concurrent block fetch |
+| Source abstraction | `async_trait` `BlockSource` | Swap providers at runtime |
+| Message bus | Redis 7 Streams | Durable buffer, independent consumer groups |
+| Graph store | Neo4j 5 + GDS, `neo4rs` (Rust), async neo4j (Python) | Transaction-as-Node graph |
+| Relational store | PostgreSQL 17, `sqlx` (Rust), `asyncpg` (Python) | Features, labels, auth, run history |
+| Analytical store | ClickHouse, `clickhouse-rs` (Rust), `clickhouse-connect` (Python) | OLAP / BI |
+| Object store | MinIO (S3 API) | Cold archive, Parquet exports (Phase F) |
+| API | FastAPI + Pydantic | REST façade |
+| Frontend | React 18 + Vite + Cytoscape.js | Analyst UI |
+| Orchestration | Dagster (Phase D) | Scheduling, sensors, lineage |
+| Observability | Prometheus / Grafana / OTel (Phase E) | Metrics, tracing |
 
 The two consumer groups (`chain-analysis-process` and `chain-analysis-clickhouse`)
 share the same streams but ack independently, so analytical writes can't
@@ -199,6 +269,46 @@ Integration coverage:
 CI (`.github/workflows/rust.yml`) runs `fmt`, `clippy`, `test-unit`, and
 `test-integration` (with Redis + ClickHouse service containers) on every
 push/PR that touches `etl-rs/`.
+
+## Orchestration (Dagster)
+
+Phase D wires the `ingest` binary into Dagster so analysts can schedule
+backfills, inspect runs, and auto-drain the targeted-fetch queue from a UI.
+The `process` and `clickhouse-process` consumers stay outside Dagster — they
+are always-on stream consumers, nothing to schedule.
+
+```bash
+# Bring up everything, including Dagster webserver + daemon
+docker compose up -d
+
+# UI at http://localhost:3000
+```
+
+| Job | Trigger | CLI invoked |
+| --- | --- | --- |
+| `backfill_job` | Launchpad (manual) | `ingest block --start N --end M [--with-traces] [--with-transfers]` |
+| `reprocess_job` | Hourly schedules (etherscan :00, alchemy :15) | `ingest reprocess-failed --source {etherscan,alchemy}` |
+| `targeted_drain_job` | Redis sensor on `INGEST_TARGETED_QUEUE` (30s tick) | `ingest targeted from-label-tasks --limit N` |
+| `targeted_addresses_job` | Launchpad (ad-hoc) | `ingest targeted addresses --addrs 0x...,0x...` |
+| `targeted_neighborhood_job` | Launchpad (ad-hoc) | `ingest targeted neighborhood 0x... --hops N` |
+
+Schedules and the sensor default to **stopped** — enable them in the UI
+(Overview → Schedules / Sensors) after confirming the ingest binary is
+reachable.
+
+**Dagster-specific env vars** (in addition to the standard `INGEST_*` /
+`ALCHEMY_*` / `REDIS_URL` knobs consumed by the Rust binary):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DAGSTER_HOME` | `/opt/dagster/home` | SQLite run storage, instance config |
+| `RUST_INGEST_BINARY` | `/opt/rust-bin/ingest` in container | Path Dagster subprocess-execs |
+| `DAGSTER_TARGETED_SENSOR_INTERVAL` | `30` | Seconds between `targeted_queue_sensor` ticks |
+| `DAGSTER_TARGETED_DRAIN_LIMIT` | `50` | `--limit` passed to `ingest targeted from-label-tasks` |
+
+The binary is built once by the `ingest-builder` compose service and staged
+into the shared `rust_bin` volume; `dagster-webserver` and `dagster-daemon`
+mount it read-only at `/opt/rust-bin/`.
 
 ## Operational notes
 
