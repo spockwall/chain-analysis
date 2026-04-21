@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 types = { path = "../types" }
+observability = { path = "../observability" }
 async-trait = "0.1"
 eyre = "0.6"
+metrics = "0.24"
 neo4rs = "0.8"
 clickhouse = { version = "0.13", features = ["uuid", "time"] }
 redis = { version = "0.27", features = ["tokio-comp"] }

@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: chain-analysis-local
+
+scrape_configs:
+  # Rust ETL workers all expose /metrics on port 9100 (see crates/observability).
+  # Services are resolved by their docker-compose hostname on the shared network.
+  # Workers that aren't currently running will simply appear "down" — that's OK.
+  - job_name: ingest
+    static_configs:
+      - targets:
+          - "ingest:9100"
+        labels:
+          tier: ingest
+
+  - job_name: process
+    static_configs:
+      - targets:
+          - "process:9100"
+        labels:
+          tier: consumer
+
+  - job_name: clickhouse-process
+    static_configs:
+      - targets:
+          - "clickhouse-process:9100"
+        labels:
+          tier: consumer
+
+  # Self-scrape so Prometheus health is visible in Grafana.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - "localhost:9090"

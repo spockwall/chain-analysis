@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use metrics::counter;
+use observability::{STREAM_MAXLEN_TRIMS, STREAM_MESSAGES_PUBLISHED};
 use types::{Trace, Transaction, Transfer};
 use eyre::Result;
 use redis::AsyncCommands;
@@ -91,7 +93,30 @@ impl RedisStreamWriter {
             pipe.add_command(self.build_xadd(topic, json));
         }
         let _: redis::Value = pipe.query_async(&mut self.conn).await?;
+        self.record_published(items);
         Ok(())
+    }
+
+    fn record_published(&self, items: &[(&str, String)]) {
+        let mut per_stream: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+        for (topic, _) in items {
+            *per_stream.entry(topic).or_insert(0) += 1;
+        }
+        let trimmed = self.maxlen.is_some();
+        for (topic, n) in per_stream {
+            let stream = topic.to_string();
+            counter!(STREAM_MESSAGES_PUBLISHED, "stream" => stream.clone()).increment(n);
+            if trimmed {
+                counter!(STREAM_MAXLEN_TRIMS, "stream" => stream).increment(n);
+            }
+        }
+    }
+
+    fn record_single(&self, topic: &'static str) {
+        counter!(STREAM_MESSAGES_PUBLISHED, "stream" => topic).increment(1);
+        if self.maxlen.is_some() {
+            counter!(STREAM_MAXLEN_TRIMS, "stream" => topic).increment(1);
+        }
     }
 }
 
@@ -103,6 +128,7 @@ impl TransactionWriter for RedisStreamWriter {
             .build_xadd(TOPIC_INGESTED_TXS, &json)
             .query_async(&mut self.conn)
             .await?;
+        self.record_single(TOPIC_INGESTED_TXS);
         debug!(hash = %tx.hash, "Wrote transaction to Redis");
         Ok(())
     }
@@ -113,6 +139,7 @@ impl TransactionWriter for RedisStreamWriter {
             .build_xadd(TOPIC_INGESTED_TRACES, &json)
             .query_async(&mut self.conn)
             .await?;
+        self.record_single(TOPIC_INGESTED_TRACES);
         debug!(tx_hash = %trace.transaction_hash, "Wrote trace to Redis");
         Ok(())
     }
@@ -123,6 +150,7 @@ impl TransactionWriter for RedisStreamWriter {
             .build_xadd(TOPIC_INGESTED_TRANSFERS, &json)
             .query_async(&mut self.conn)
             .await?;
+        self.record_single(TOPIC_INGESTED_TRANSFERS);
         debug!(tx_hash = %transfer.transaction_hash, "Wrote transfer to Redis");
         Ok(())
     }

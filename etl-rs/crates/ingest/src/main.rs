@@ -226,6 +226,12 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     install_tracing();
 
+    let metrics_port = std::env::var("METRICS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(observability::DEFAULT_METRICS_PORT);
+    observability::init_best_effort("ingest", metrics_port);
+
     let cli = Cli::parse();
     let config = config::Config::from_env();
     let run_id = uuid::Uuid::new_v4().to_string();

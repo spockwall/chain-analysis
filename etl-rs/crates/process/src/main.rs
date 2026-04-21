@@ -1,3 +1,5 @@
+use metrics::counter;
+use observability::{CONSUMER_BATCHES_PROCESSED, DLQ_MESSAGES_MOVED, DLQ_MOVES};
 use pipeline::dlq::{self, BatchKey, DlqPolicy};
 use pipeline::{install_shutdown, ProcessProgressReporter};
 use process::{process_batch, process_read_batch, read_batch};
@@ -50,6 +52,12 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    let metrics_port = std::env::var("METRICS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(observability::DEFAULT_METRICS_PORT);
+    observability::init_best_effort("process", metrics_port);
 
     let cli = Cli::parse();
     let config = config::ProcessConfig::from_env();
@@ -158,6 +166,12 @@ async fn main() -> Result<()> {
                     reporter.report_error(&e.to_string()).await?;
 
                     let group = consumer.group().to_string();
+                    counter!(
+                        CONSUMER_BATCHES_PROCESSED,
+                        "group" => group.clone(),
+                        "outcome" => "error",
+                    )
+                    .increment(1);
                     let conn = consumer.conn_mut();
                     for (stream, msgs) in &raw_snapshot {
                         if msgs.is_empty() { continue; }
@@ -182,10 +196,17 @@ async fn main() -> Result<()> {
                                 count = msgs.len(),
                                 "Batch exceeded max attempts, routing to DLQ"
                             );
-                            if let Err(e) =
-                                dlq::move_batch_to_dlq(conn, stream, &group, msgs, &dlq_policy).await
-                            {
-                                error!(stream, error = %e, "DLQ relocation failed");
+                            match dlq::move_batch_to_dlq(conn, stream, &group, msgs, &dlq_policy).await {
+                                Ok(()) => {
+                                    let stream_label = stream.clone();
+                                    counter!(DLQ_MOVES, "stream" => stream_label.clone())
+                                        .increment(1);
+                                    counter!(DLQ_MESSAGES_MOVED, "stream" => stream_label)
+                                        .increment(msgs.len() as u64);
+                                }
+                                Err(e) => {
+                                    error!(stream, error = %e, "DLQ relocation failed");
+                                }
                             }
                         } else {
                             info!(stream, attempts, "Will retry batch");

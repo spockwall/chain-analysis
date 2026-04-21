@@ -310,6 +310,48 @@ The binary is built once by the `ingest-builder` compose service and staged
 into the shared `rust_bin` volume; `dagster-webserver` and `dagster-daemon`
 mount it read-only at `/opt/rust-bin/`.
 
+## Observability
+
+Each Rust worker exposes Prometheus metrics on `0.0.0.0:${METRICS_PORT:-9100}/metrics`.
+Init is best-effort — a busy port logs a warning and the worker keeps running.
+
+Metric name constants live in `crates/observability/src/lib.rs` (kept in sync
+with Grafana dashboards under `compose/observability/grafana/dashboards/`).
+
+Key metrics:
+
+| Name | Kind | Labels | Tier |
+| --- | --- | --- | --- |
+| `ingest_blocks_fetched_total` | counter | `source` | ingest |
+| `ingest_blocks_failed_total` | counter | `source` | ingest |
+| `ingest_fetch_duration_seconds` | histogram | `source` | ingest |
+| `stream_messages_published_total` | counter | `stream` | ingest |
+| `stream_maxlen_trims_total` | counter | `stream` | ingest |
+| `consumer_batches_processed_total` | counter | `group`, `outcome` | process / clickhouse-process |
+| `consumer_messages_processed_total` | counter | `group`, `stream` | process / clickhouse-process |
+| `consumer_parse_failures_total` | counter | `group`, `stream` | process / clickhouse-process |
+| `consumer_batch_duration_seconds` | histogram | `group` | process / clickhouse-process |
+| `dlq_moves_total` | counter | `stream` | process / clickhouse-process |
+| `dlq_messages_moved_total` | counter | `stream` | process / clickhouse-process |
+
+A global `service` label (`ingest`, `process`, `clickhouse-process`) is added
+by the exporter so dashboards can separate binaries running on the same host.
+
+### Local stack
+
+`compose/observability.yml` runs Prometheus (`:9090`) and Grafana (`:3001`).
+Prometheus is configured via `compose/observability/prometheus.yml`; Grafana
+is provisioned with a Prometheus datasource and the `ETL Overview` dashboard.
+
+```bash
+docker compose up -d prometheus grafana
+open http://localhost:3001   # Grafana — anonymous Viewer access enabled
+open http://localhost:9090   # Prometheus UI
+```
+
+Workers that aren't currently running will show as `down` in Prometheus; that
+is expected — the `ingest` job runs on-demand via Dagster.
+
 ## Operational notes
 
 Reset a stuck consumer group:
