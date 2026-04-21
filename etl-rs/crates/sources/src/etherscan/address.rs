@@ -41,6 +41,7 @@ where
 }
 
 /// Fetch normal transactions for a specific address via Etherscan V2 `txlist`.
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_address_transactions(
     base_url: &str,
     api_key: &str,
@@ -135,6 +136,7 @@ pub async fn fetch_address_transactions(
 }
 
 /// Fetch internal transactions for a specific address via Etherscan V2 `txlistinternal`.
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_address_internal_txs(
     base_url: &str,
     api_key: &str,
@@ -235,6 +237,7 @@ pub async fn fetch_address_internal_txs(
 }
 
 /// Fetch ERC-20 token transfers for a specific address via Etherscan V2 `tokentx`.
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_address_token_transfers(
     base_url: &str,
     api_key: &str,

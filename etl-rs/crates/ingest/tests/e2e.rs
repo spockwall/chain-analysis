@@ -12,6 +12,8 @@ use ingest::modes::targeted::{run_targeted, TargetSpec};
 use pipeline::{ProgressReporter, RetryPolicy};
 use redis::AsyncCommands;
 use sinks::redis_stream::{RedisStreamWriter, TransactionWriter};
+use sources::mock::MockSource;
+use std::sync::Arc;
 
 fn e2e_redis_url() -> Option<String> {
     std::env::var("E2E_REDIS_URL").ok()
@@ -39,20 +41,11 @@ async fn mock_ingest_populates_stream() {
     let reporter = ProgressReporter::new_dry_run("e2e-test-run");
     let retry = RetryPolicy::default();
 
+    let source_handle: ingest::DynBlockSource = Arc::new(MockSource);
     let (_w, _r, total) = ingest::ingest_block_range_pipelined(
-        &config::Config {
-            etherscan_api_key: None,
-            etherscan_base_url: "unused".into(),
-            etherscan_chain_id: 1,
-            redis_url: redis_url.clone(),
-            batch_size: 100,
-            stream_maxlen: None,
-            targeted_queue_key: "unused".into(),
-            postgres_url: None,
-        },
+        source_handle,
         1,
         3,
-        true,
         writer,
         reporter,
         &retry,
@@ -117,6 +110,10 @@ async fn from_label_tasks_drains_queue() {
         stream_maxlen: None,
         targeted_queue_key: queue_key.clone(),
         postgres_url: None,
+        ingest_source: None,
+        alchemy_api_key: None,
+        alchemy_base_url: String::new(),
+        alchemy_chain: String::new(),
     };
 
     let _total = run_targeted(

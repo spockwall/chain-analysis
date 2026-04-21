@@ -5,7 +5,7 @@ consumer groups — one writes the operational graph, the other the analytical
 columnar store:
 
 ```
-                            [Etherscan API]
+                  [Etherscan | Alchemy | Mock]
                                   │   ← ingest
                                   ▼
                  [Redis Streams]  (ingested_txs / traces / transfers)
@@ -26,7 +26,7 @@ back-pressure graph ingest and vice versa.
 |---|---|
 | `types` | Shared on-chain value types (`Transaction`, `Trace`, `Transfer`, entity enums) |
 | `config` | Env-based `Config` and `ProcessConfig` |
-| `sources` | Etherscan V2 client + deterministic mock generator |
+| `sources` | `BlockSource` trait + Etherscan V2, Alchemy JSON-RPC, and mock impls |
 | `sinks` | Redis Streams writer, Redis consumer, Neo4j + Postgres + ClickHouse writers |
 | `pipeline` | Retry policy, DLQ helpers, shutdown handle, progress reporters |
 | `ingest` | `ingest` binary — fetches from Etherscan and publishes to Redis Streams |
@@ -106,13 +106,36 @@ The Python backend queries ClickHouse directly (via `clickhouse-driver` or
 `clickhouse-connect`) — no Rust `query` crate yet. A Rust CLI over the same
 tables is a later item.
 
+## Data sources
+
+`ingest` dispatches through a `BlockSource` trait. Provider is selected by
+`INGEST_SOURCE` (`etherscan` | `alchemy` | `mock`). When unset, it infers from
+whichever API key is populated (alchemy > etherscan), falling back to `mock`.
+
+| Source | Fetch style | Traces | Transfers | Address mode |
+|---|---|---|---|---|
+| `etherscan` | V2 proxy JSON | `eth_getBlockReceipts`-ish via proxy | Log scan | ✅ (txlist) |
+| `alchemy` | JSON-RPC pull | `trace_block` (Parity) | `eth_getLogs` w/ Transfer topic0 | ❌ (no txlist equivalent) |
+| `mock` | Deterministic generator | — | — | — |
+
+Address-mode ingestion (`ingest address 0x...`, targeted neighborhood / hashes)
+is Etherscan-only — Alchemy exposes no `txlist` equivalent. For Alchemy users,
+rely on `ingest block --follow` or `targeted hashes` for specific tx lookups.
+
+Values larger than `u128` in ERC-20 Transfer logs are truncated to the low 128
+bits with a warn log — mirrors the ClickHouse writer's documented u128 caveat.
+
 ## Environment variables
 
 | Variable | Default | Used by |
 |---|---|---|
-| `ETHERSCAN_API_KEY` | *(unset → mock data)* | ingest |
+| `INGEST_SOURCE` | *(inferred)* | ingest |
+| `ETHERSCAN_API_KEY` | *(unset → mock or alchemy fallback)* | ingest |
 | `ETHERSCAN_BASE_URL` | `https://api.etherscan.io/v2/api` | ingest |
 | `ETHERSCAN_CHAIN_ID` | `1` | ingest |
+| `ALCHEMY_API_KEY` | *(unset)* | ingest |
+| `ALCHEMY_BASE_URL` | `https://eth-mainnet.g.alchemy.com/v2/` | ingest |
+| `ALCHEMY_CHAIN` | `eth-mainnet` | ingest (informational) |
 | `REDIS_URL` | `redis://localhost:6379` | ingest, process |
 | `INGEST_BATCH_SIZE` | `1000` | ingest |
 | `INGEST_STREAM_MAXLEN` | `1000000` (`0` disables) | ingest |
