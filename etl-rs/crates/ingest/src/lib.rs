@@ -1,3 +1,4 @@
+pub mod modes;
 pub mod writer_pipeline;
 
 use eyre::Result;
@@ -99,6 +100,7 @@ async fn fetch_block_data(
     Ok((txs, traces, transfers))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn ingest_address(
     config: &config::Config,
     address: &str,

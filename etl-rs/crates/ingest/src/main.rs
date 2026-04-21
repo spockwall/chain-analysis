@@ -1,8 +1,10 @@
-use ingest::{get_latest_block, ingest_address, ingest_block_range_pipelined};
-use pipeline::{ProgressReporter, RetryPolicy};
-use sinks::redis_stream::{RedisStreamWriter, StdoutWriter, TransactionWriter};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use color_eyre::eyre::Result;
+use ingest::modes::reprocess::reprocess_failed_blocks;
+use ingest::modes::targeted::{run_targeted, TargetSpec};
+use ingest::{get_latest_block, ingest_address, ingest_block_range_pipelined};
+use pipeline::{install_shutdown, ProgressReporter, RetryPolicy};
+use sinks::redis_stream::{RedisStreamWriter, StdoutWriter, TransactionWriter};
 use std::time::Duration;
 use tracing::info;
 
@@ -12,285 +14,396 @@ use tracing::info;
     about = "Blockchain transaction ingestion worker",
     long_about = "Fetches Ethereum transactions from Etherscan and writes them to Redis Streams.\n\
                   \n\
-                  Two modes:\n\
-                  \n\
-                  ADDRESS MODE  (--address 0x...)\n\
-                    Fetches all transactions for a specific address via Etherscan account APIs.\n\
-                    Requires ETHERSCAN_API_KEY. No mock fallback.\n\
-                  \n\
-                  BLOCK MODE  (--start-block N --end-block M)\n\
-                    Fetches all transactions in a block range via Etherscan proxy APIs.\n\
-                    Falls back to deterministic mock data when ETHERSCAN_API_KEY is not set.\n\
-                  \n\
-                  After running ingest, run the `process` binary to consume Redis → Neo4j + PostgreSQL."
+                  Subcommands (preferred): `ingest block`, `ingest address`, `ingest targeted`,\n\
+                  `ingest reprocess-failed`. If no subcommand is given, the legacy flat args\n\
+                  (--address / --start-block / --end-block / --follow) are parsed for\n\
+                  backwards compatibility."
 )]
 struct Cli {
-    // ── Block-range mode ─────────────────────────────────────────────────────
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
 
-    /// First block to fetch (block mode). Defaults to last saved cursor, or chain tip if no cursor.
+    #[command(flatten)]
+    legacy: LegacyArgs,
+}
+
+#[derive(clap::Args)]
+struct LegacyArgs {
+    /// First block to fetch (block mode). Defaults to last saved cursor, or chain tip.
     #[arg(long)]
     start_block: Option<u64>,
-
     /// Last block to fetch (block mode). Defaults to current chain tip.
     #[arg(long)]
     end_block: Option<u64>,
-
-    /// Keep polling for new blocks after the initial range is processed (block mode only).
+    /// Keep polling for new blocks after the initial range is processed.
     #[arg(long, default_value_t = false)]
     follow: bool,
-
     /// Seconds between block polls in follow mode.
     #[arg(long, default_value_t = 12)]
     poll_interval: u64,
-
-    /// How many block fetches to keep in flight concurrently (block mode).
+    /// How many block fetches to keep in flight concurrently.
     #[arg(long, default_value_t = 5)]
     fetch_concurrency: usize,
-
-    // ── Address mode ─────────────────────────────────────────────────────────
-
-    /// Ethereum address to fetch (enables address mode). Requires ETHERSCAN_API_KEY.
+    /// Ethereum address to fetch (enables address mode).
     #[arg(long)]
     address: Option<String>,
-
-    /// Earliest block to include when fetching by address (address mode).
+    /// Earliest block to include when fetching by address.
     #[arg(long, default_value_t = 0)]
     addr_start_block: u64,
-
-    /// Latest block to include when fetching by address (address mode, default = latest).
+    /// Latest block to include when fetching by address.
     #[arg(long, default_value_t = 99_999_999)]
     addr_end_block: u64,
-
-    // ── Data options ─────────────────────────────────────────────────────────
-
-    /// Also fetch internal transactions (traces) — both modes.
+    /// Also fetch internal transactions (traces).
     #[arg(long, default_value_t = false)]
     with_traces: bool,
-
-    /// Also fetch ERC-20 token transfers — both modes.
+    /// Also fetch ERC-20 token transfers.
     #[arg(long, default_value_t = false)]
     with_transfers: bool,
-
-    // ── Output / behaviour ───────────────────────────────────────────────────
-
-    /// Print fetched data to stdout instead of writing to Redis (testing).
+    /// Print fetched data to stdout instead of writing to Redis.
     #[arg(long, default_value_t = false)]
     dry_run: bool,
-
-    /// Label used for the Redis cursor key (identifies which source last ran).
+    /// Label used for the Redis cursor key.
     #[arg(long, default_value = "etherscan")]
     source: String,
-
-    /// Max retries per Etherscan request before giving up.
+    /// Max retries per Etherscan request.
     #[arg(long, default_value_t = 5)]
     max_retries: u32,
-
-    /// Initial retry backoff in seconds (doubles on each retry, capped at 30s).
+    /// Initial retry backoff in seconds.
     #[arg(long, default_value_t = 1)]
     retry_backoff_secs: u64,
-
-    /// Unique identifier for this run (auto-generated UUID if not set).
+    /// Unique identifier for this run.
     #[arg(long, default_value_t = uuid::Uuid::new_v4().to_string())]
     run_id: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    color_eyre::install()?;
+#[derive(Subcommand)]
+enum Cmd {
+    /// Fetch a block range via Etherscan proxy APIs (falls back to mock data without an API key).
+    Block {
+        #[arg(long)]
+        start: Option<u64>,
+        #[arg(long)]
+        end: Option<u64>,
+        #[arg(long, default_value_t = false)]
+        follow: bool,
+        #[arg(long, default_value_t = 12)]
+        poll_interval: u64,
+        #[arg(long, default_value_t = 5)]
+        fetch_concurrency: usize,
+        #[arg(long, default_value_t = false)]
+        with_traces: bool,
+        #[arg(long, default_value_t = false)]
+        with_transfers: bool,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        #[arg(long, default_value = "etherscan")]
+        source: String,
+    },
+    /// Fetch all transactions for a single address.
+    Address {
+        addr: String,
+        #[arg(long, default_value_t = 0)]
+        start: u64,
+        #[arg(long, default_value_t = 99_999_999)]
+        end: u64,
+        #[arg(long, default_value_t = false)]
+        with_traces: bool,
+        #[arg(long, default_value_t = false)]
+        with_transfers: bool,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        #[arg(long, default_value = "etherscan")]
+        source: String,
+    },
+    /// Drain `ingest:failed_blocks:{source}` by re-fetching each block.
+    ReprocessFailed {
+        #[arg(long, default_value = "etherscan")]
+        source: String,
+        #[arg(long, default_value_t = 5)]
+        fetch_concurrency: usize,
+        #[arg(long, default_value_t = false)]
+        with_traces: bool,
+        #[arg(long, default_value_t = false)]
+        with_transfers: bool,
+    },
+    /// Targeted fetching for manual labeling workflows.
+    Targeted {
+        #[command(subcommand)]
+        mode: TargetedMode,
+    },
+}
+
+#[derive(Subcommand)]
+enum TargetedMode {
+    /// Fetch transactions for a comma-separated list of addresses.
+    Addresses {
+        #[arg(long, value_delimiter = ',')]
+        addrs: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        with_traces: bool,
+        #[arg(long, default_value_t = false)]
+        with_transfers: bool,
+    },
+    /// Fetch specific transactions by hash.
+    Hashes {
+        #[arg(long, value_delimiter = ',')]
+        hashes: Vec<String>,
+    },
+    /// BFS a neighborhood around a seed address up to N hops.
+    Neighborhood {
+        seed: String,
+        #[arg(long, default_value_t = 1)]
+        hops: u8,
+        #[arg(long, default_value_t = false)]
+        with_traces: bool,
+        #[arg(long, default_value_t = false)]
+        with_transfers: bool,
+    },
+    /// Drain queued label-task fetches from `ingest:targeted_queue`.
+    FromLabelTasks {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = false)]
+        with_traces: bool,
+        #[arg(long, default_value_t = false)]
+        with_transfers: bool,
+    },
+}
+
+fn install_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+}
+
+async fn make_writer(
+    dry_run: bool,
+    redis_url: &str,
+    source: &str,
+    maxlen: Option<u64>,
+) -> Result<Box<dyn TransactionWriter>> {
+    if dry_run {
+        Ok(Box::new(StdoutWriter))
+    } else {
+        Ok(Box::new(
+            RedisStreamWriter::connect(redis_url, source, maxlen).await?,
+        ))
+    }
+}
+
+async fn make_reporter(
+    dry_run: bool,
+    redis_url: &str,
+    run_id: &str,
+) -> Result<ProgressReporter> {
+    if dry_run {
+        Ok(ProgressReporter::new_dry_run(run_id))
+    } else {
+        Ok(ProgressReporter::new_redis(redis_url, run_id).await?)
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    color_eyre::install()?;
+    install_tracing();
 
     let cli = Cli::parse();
     let config = config::Config::from_env();
+    let run_id = uuid::Uuid::new_v4().to_string();
 
+    match cli.cmd {
+        Some(Cmd::Block {
+            start,
+            end,
+            follow,
+            poll_interval,
+            fetch_concurrency,
+            with_traces,
+            with_transfers,
+            dry_run,
+            source,
+        }) => {
+            run_block_mode(
+                &config,
+                &run_id,
+                start,
+                end,
+                follow,
+                poll_interval,
+                fetch_concurrency,
+                with_traces,
+                with_transfers,
+                dry_run,
+                &source,
+            )
+            .await
+        }
+        Some(Cmd::Address {
+            addr,
+            start,
+            end,
+            with_traces,
+            with_transfers,
+            dry_run,
+            source,
+        }) => {
+            run_address_mode(
+                &config,
+                &run_id,
+                &addr,
+                start,
+                end,
+                with_traces,
+                with_transfers,
+                dry_run,
+                &source,
+            )
+            .await
+        }
+        Some(Cmd::ReprocessFailed {
+            source,
+            fetch_concurrency,
+            with_traces,
+            with_transfers,
+        }) => {
+            let use_mock = config.etherscan_api_key.is_none();
+            let writer = make_writer(false, &config.redis_url, &source, config.stream_maxlen).await?;
+            let reporter = make_reporter(false, &config.redis_url, &run_id).await?;
+            let retry_policy = RetryPolicy::default();
+            let (_w, _r, ok, txs) = reprocess_failed_blocks(
+                &config,
+                &source,
+                writer,
+                reporter,
+                &retry_policy,
+                with_traces,
+                with_transfers,
+                fetch_concurrency,
+            )
+            .await?;
+            info!(use_mock, reprocessed = ok, transactions = txs, "reprocess-failed done");
+            Ok(())
+        }
+        Some(Cmd::Targeted { mode }) => run_targeted_mode(&config, &run_id, mode).await,
+        None => run_legacy(cli.legacy, &config).await,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_block_mode(
+    config: &config::Config,
+    run_id: &str,
+    start: Option<u64>,
+    end: Option<u64>,
+    follow: bool,
+    poll_interval: u64,
+    fetch_concurrency: usize,
+    with_traces: bool,
+    with_transfers: bool,
+    dry_run: bool,
+    source: &str,
+) -> Result<()> {
     let use_mock = config.etherscan_api_key.is_none();
     if use_mock {
         info!("No ETHERSCAN_API_KEY set; using mock data");
     }
+    let source_label = if use_mock { "mock" } else { source };
 
-    let source = if use_mock { "mock" } else { &cli.source };
+    let retry_policy = RetryPolicy::default();
 
-    let retry_policy = RetryPolicy {
-        max_retries: cli.max_retries,
-        initial_backoff: Duration::from_secs(cli.retry_backoff_secs),
-        ..RetryPolicy::default()
-    };
+    let mut writer = make_writer(dry_run, &config.redis_url, source_label, config.stream_maxlen).await?;
 
-    let mut writer: Box<dyn TransactionWriter> = if cli.dry_run {
-        Box::new(StdoutWriter)
-    } else {
-        Box::new(RedisStreamWriter::connect(&config.redis_url, source).await?)
-    };
-
-    // ─── Address mode ───────────────────────────────────────────────────
-    if let Some(ref address) = cli.address {
-        info!(
-            address = %address,
-            start_block = cli.addr_start_block,
-            end_block = cli.addr_end_block,
-            with_traces = cli.with_traces,
-            with_transfers = cli.with_transfers,
-            "Starting address ingestion"
-        );
-
-        let mut progress_reporter = if cli.dry_run {
-            ProgressReporter::new_dry_run(&cli.run_id)
-        } else {
-            ProgressReporter::new_redis(&config.redis_url, &cli.run_id).await?
-        };
-
-        let total = ingest_address(
-            &config,
-            address,
-            cli.addr_start_block,
-            cli.addr_end_block,
-            &mut writer,
-            &mut progress_reporter,
-            cli.with_traces,
-            cli.with_transfers,
-        )
-        .await?;
-
-        info!(address = %address, transactions = total, "Address ingestion complete");
-        return Ok(());
-    }
-
-    // ─── Block-range mode ────────────────────────────────────────────────
-    let start_block = match cli.start_block {
+    let start_block = match start {
         Some(sb) => sb,
-        None => {
-            if let Some(last) = writer.get_cursor().await? {
-                let resume = last + 1;
-                info!(last_ingested = last, resuming_from = resume, "Resuming from Redis cursor");
-                resume
-            } else {
-                let latest = get_latest_block(&config, use_mock, 0).await?;
+        None => match writer.get_cursor().await? {
+            Some(last) => {
+                info!(last_ingested = last, resuming_from = last + 1, "Resuming from Redis cursor");
+                last + 1
+            }
+            None => {
+                let latest = get_latest_block(config, use_mock, 0).await?;
                 info!(latest_block = latest, "No cursor found, starting from chain tip");
                 latest
             }
-        }
+        },
     };
 
-    let end_block = match cli.end_block {
+    let end_block = match end {
         Some(eb) => eb,
         None => {
-            let latest = get_latest_block(&config, use_mock, start_block).await?;
-            info!(latest_block = latest, "No --end-block specified, using chain tip");
+            let latest = get_latest_block(config, use_mock, start_block).await?;
+            info!(latest_block = latest, "No --end specified, using chain tip");
             latest
         }
     };
 
     info!(
-        run_id = %cli.run_id,
-        start_block, end_block,
-        follow = cli.follow,
-        dry_run = cli.dry_run,
-        with_traces = cli.with_traces,
-        with_transfers = cli.with_transfers,
-        fetch_concurrency = cli.fetch_concurrency,
-        source = %cli.source,
-        "Starting ingestion (pipelined)"
+        %run_id,
+        start_block, end_block, follow, dry_run,
+        with_traces, with_transfers, fetch_concurrency,
+        "Starting block ingestion"
     );
 
-    if start_block > end_block {
-        info!("start_block > end_block, nothing to ingest in initial range");
-        if !cli.follow {
-            return Ok(());
-        }
-    }
+    let progress_reporter = make_reporter(dry_run, &config.redis_url, run_id).await?;
 
-    let progress_reporter = if cli.dry_run {
-        ProgressReporter::new_dry_run(&cli.run_id)
-    } else {
-        ProgressReporter::new_redis(&config.redis_url, &cli.run_id).await?
-    };
+    let total_blocks = if start_block <= end_block { end_block - start_block + 1 } else { 0 };
 
-    let total_blocks = if start_block <= end_block {
-        end_block - start_block + 1
-    } else {
-        0
-    };
-
-    // Initial range — pipelined fetch + batched writer task.
     let (mut writer, mut progress_reporter, mut total_txs) = ingest_block_range_pipelined(
-        &config,
+        config,
         start_block,
         end_block,
         use_mock,
         writer,
         progress_reporter,
         &retry_policy,
-        cli.with_traces,
-        cli.with_transfers,
-        cli.fetch_concurrency,
+        with_traces,
+        with_transfers,
+        fetch_concurrency,
         total_blocks,
         0,
     )
     .await?;
 
-    if !cli.follow {
-        progress_reporter
-            .report_complete(total_blocks, total_txs)
-            .await?;
-        info!(
-            run_id = %cli.run_id,
-            blocks = total_blocks,
-            transactions = total_txs,
-            "Ingestion complete"
-        );
+    if !follow {
+        progress_reporter.report_complete(total_blocks, total_txs).await?;
+        info!(%run_id, blocks = total_blocks, transactions = total_txs, "Ingestion complete");
         return Ok(());
     }
 
-    // ─── Follow mode ────────────────────────────────────────────────────
-    let poll = Duration::from_secs(cli.poll_interval);
+    let poll = Duration::from_secs(poll_interval);
     let mut cursor = end_block + 1;
+    info!(poll_interval_secs = poll_interval, next_block = cursor, "Entering follow mode (SIGINT/SIGTERM to stop)");
 
-    info!(
-        poll_interval_secs = cli.poll_interval,
-        next_block = cursor,
-        "Entering follow mode (Ctrl+C to stop)"
-    );
-
+    let mut shutdown = install_shutdown();
     loop {
-        tokio::time::sleep(poll).await;
+        if shutdown.is_shutdown() {
+            info!("Shutdown signal received, exiting follow loop");
+            break;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(poll) => {}
+            _ = shutdown.wait() => break,
+        }
 
-        let latest = match get_latest_block(&config, use_mock, start_block).await {
+        let latest = match get_latest_block(config, use_mock, start_block).await {
             Ok(n) => n,
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to fetch latest block number, retrying next cycle");
                 continue;
             }
         };
-
         if latest < cursor {
             continue;
         }
+        info!(from = cursor, to = latest, new_blocks = latest - cursor + 1, "New blocks detected");
 
-        info!(
-            from = cursor,
-            to = latest,
-            new_blocks = latest - cursor + 1,
-            "New blocks detected"
-        );
-
-        // Reuse writer + reporter across cycles by passing/receiving ownership.
         let (w, r, txs_after) = ingest_block_range_pipelined(
-            &config,
-            cursor,
-            latest,
-            use_mock,
-            writer,
-            progress_reporter,
-            &retry_policy,
-            cli.with_traces,
-            cli.with_transfers,
-            cli.fetch_concurrency,
-            0,
-            total_txs,
+            config, cursor, latest, use_mock, writer, progress_reporter,
+            &retry_policy, with_traces, with_transfers, fetch_concurrency, 0, total_txs,
         )
         .await?;
 
@@ -298,5 +411,99 @@ async fn main() -> Result<()> {
         progress_reporter = r;
         total_txs = txs_after;
         cursor = latest + 1;
+    }
+
+    progress_reporter.report_complete(0, total_txs).await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_address_mode(
+    config: &config::Config,
+    run_id: &str,
+    addr: &str,
+    start: u64,
+    end: u64,
+    with_traces: bool,
+    with_transfers: bool,
+    dry_run: bool,
+    source: &str,
+) -> Result<()> {
+    let mut writer = make_writer(dry_run, &config.redis_url, source, config.stream_maxlen).await?;
+    let mut progress_reporter = make_reporter(dry_run, &config.redis_url, run_id).await?;
+
+    let total = ingest_address(
+        config,
+        addr,
+        start,
+        end,
+        &mut writer,
+        &mut progress_reporter,
+        with_traces,
+        with_transfers,
+    )
+    .await?;
+
+    info!(%addr, transactions = total, "Address ingestion complete");
+    Ok(())
+}
+
+async fn run_targeted_mode(
+    config: &config::Config,
+    run_id: &str,
+    mode: TargetedMode,
+) -> Result<()> {
+    let (spec, with_traces, with_transfers) = match mode {
+        TargetedMode::Addresses { addrs, with_traces, with_transfers } => {
+            (TargetSpec::Addresses(addrs), with_traces, with_transfers)
+        }
+        TargetedMode::Hashes { hashes } => (TargetSpec::Hashes(hashes), false, false),
+        TargetedMode::Neighborhood { seed, hops, with_traces, with_transfers } => {
+            (TargetSpec::Neighborhood { seed, hops }, with_traces, with_transfers)
+        }
+        TargetedMode::FromLabelTasks { limit, with_traces, with_transfers } => {
+            (TargetSpec::FromLabelTasks { limit }, with_traces, with_transfers)
+        }
+    };
+
+    let mut writer = make_writer(false, &config.redis_url, "etherscan", config.stream_maxlen).await?;
+    let mut reporter = make_reporter(false, &config.redis_url, run_id).await?;
+
+    let total = run_targeted(config, spec, &mut writer, &mut reporter, with_traces, with_transfers).await?;
+    info!(transactions = total, "Targeted ingestion complete");
+    Ok(())
+}
+
+/// Legacy flat-arg path: if no subcommand is given, dispatch exactly as the
+/// pre-subcommand binary did (address vs block mode).
+async fn run_legacy(args: LegacyArgs, config: &config::Config) -> Result<()> {
+    if let Some(addr) = args.address {
+        run_address_mode(
+            config,
+            &args.run_id,
+            &addr,
+            args.addr_start_block,
+            args.addr_end_block,
+            args.with_traces,
+            args.with_transfers,
+            args.dry_run,
+            &args.source,
+        )
+        .await
+    } else {
+        run_block_mode(
+            config,
+            &args.run_id,
+            args.start_block,
+            args.end_block,
+            args.follow,
+            args.poll_interval,
+            args.fetch_concurrency,
+            args.with_traces,
+            args.with_transfers,
+            args.dry_run,
+            &args.source,
+        )
+        .await
     }
 }

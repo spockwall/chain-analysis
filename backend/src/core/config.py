@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     # =========================================================================
     queue_provider: Literal["redis", "kafka", "sqs"] = "redis"
     redis_url: str = "redis://localhost:6379"
+    ingest_targeted_queue: str = "ingest:targeted_queue"
 
     # Kafka (alternative)
     kafka_bootstrap_servers: str = "localhost:9092"

@@ -15,10 +15,18 @@ pub struct Config {
     pub etherscan_chain_id: u64,
     pub redis_url: String,
     pub batch_size: usize,
+    /// Approximate cap for each ingest stream. `None` disables trimming.
+    pub stream_maxlen: Option<u64>,
+    /// Redis list key used by the backend's POST /api/labels/fetch to hand
+    /// targeted-ingest work to the `ingest targeted from-label-tasks` runner.
+    pub targeted_queue_key: String,
+    /// Postgres URL for targeted-ingest modes that query `label_tasks`.
+    pub postgres_url: Option<String>,
 }
 
 impl Config {
     pub fn from_env() -> Self {
+        let maxlen: u64 = env_or_parse("INGEST_STREAM_MAXLEN", 1_000_000u64);
         Self {
             etherscan_api_key: std::env::var("ETHERSCAN_API_KEY")
                 .ok()
@@ -27,6 +35,9 @@ impl Config {
             etherscan_chain_id: env_or_parse("ETHERSCAN_CHAIN_ID", 1),
             redis_url: env_or("REDIS_URL", "redis://localhost:6379"),
             batch_size: env_or_parse("INGEST_BATCH_SIZE", 1000),
+            stream_maxlen: if maxlen == 0 { None } else { Some(maxlen) },
+            targeted_queue_key: env_or("INGEST_TARGETED_QUEUE", "ingest:targeted_queue"),
+            postgres_url: std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty()),
         }
     }
 }
@@ -41,6 +52,9 @@ pub struct ProcessConfig {
     pub batch_size: usize,
     pub consumer_group: String,
     pub consumer_name: String,
+    pub dlq_max_attempts: u32,
+    pub dlq_suffix: String,
+    pub dlq_attempt_ttl_secs: u64,
 }
 
 impl ProcessConfig {
@@ -61,6 +75,9 @@ impl ProcessConfig {
                 "PROCESS_CONSUMER_NAME",
                 &format!("consumer-{}", std::process::id()),
             ),
+            dlq_max_attempts: env_or_parse("PROCESS_DLQ_MAX_ATTEMPTS", 5u32),
+            dlq_suffix: env_or("PROCESS_DLQ_SUFFIX", "_dlq"),
+            dlq_attempt_ttl_secs: env_or_parse("PROCESS_DLQ_ATTEMPT_TTL_SECS", 86_400u64),
         }
     }
 }
