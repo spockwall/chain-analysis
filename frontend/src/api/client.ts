@@ -15,6 +15,12 @@ import type {
     GroupUpdateRequest,
     IngestAddressRequest,
     IngestAddressResponse,
+    AnnotationCreateRequest,
+    AnnotationResponse,
+    LabelFetchRequest,
+    LabelFetchResponse,
+    LabelTaskResponse,
+    LabelTaskStatus,
     LoginRequest,
     NeighborsResponse,
     NodeUpsertRequest,
@@ -284,6 +290,45 @@ export async function ingestAddress(body: IngestAddressRequest): Promise<IngestA
         method: "POST",
         body: JSON.stringify(body),
     });
+}
+
+// Labeling endpoints
+
+export async function enqueueLabelFetch(body: LabelFetchRequest): Promise<LabelFetchResponse> {
+    return request<LabelFetchResponse>("/labels/fetch", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export interface ListLabelTasksOptions {
+    status?: LabelTaskStatus;
+    limit?: number;
+    offset?: number;
+}
+
+export async function listLabelTasks(options: ListLabelTasksOptions = {}): Promise<LabelTaskResponse[]> {
+    const params = new URLSearchParams();
+    if (options.status) params.set("status", options.status);
+    if (options.limit !== undefined) params.set("limit", options.limit.toString());
+    if (options.offset !== undefined) params.set("offset", options.offset.toString());
+    const query = params.toString();
+    return request<LabelTaskResponse[]>(`/labels/tasks${query ? `?${query}` : ""}`);
+}
+
+export async function getLabelTask(taskId: number): Promise<LabelTaskResponse> {
+    return request<LabelTaskResponse>(`/labels/tasks/${taskId}`);
+}
+
+export async function createAnnotation(body: AnnotationCreateRequest): Promise<AnnotationResponse> {
+    return request<AnnotationResponse>("/labels/annotations", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function getEntityAnnotations(address: string, limit = 50): Promise<AnnotationResponse[]> {
+    return request<AnnotationResponse[]>(`/labels/annotations/${address}?limit=${limit}`);
 }
 
 // Utility functions

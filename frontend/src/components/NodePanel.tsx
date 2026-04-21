@@ -2,6 +2,7 @@
  * Node details panel — Oravia style
  */
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import type { EntityResponse, TransactionResponse } from "../types";
 import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember, ingestAddress } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
@@ -25,6 +26,7 @@ const btnIcon =
 export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress, overrideMembers, onIngestComplete }: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
     const toast = useToastContext();
+    const navigate = useNavigate();
 
     const [members, setMembers] = useState<EntityResponse[]>([]);
     const [memberInput, setMemberInput] = useState("");
@@ -252,6 +254,23 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
                                 <polyline points="7 10 12 15 17 10" />
                                 <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                        </button>
+                        <button
+                            className="w-full px-3.5 py-[9px] rounded-lg text-[0.78rem] font-semibold font-[inherit] cursor-pointer flex items-center justify-between transition-colors bg-white text-gray-900 border border-gray-200 hover:bg-gray-50"
+                            onClick={() => navigate(`/labels?address=${encodeURIComponent(node.address)}`)}
+                        >
+                            Label this entity
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                            >
+                                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                                <line x1="7" y1="7" x2="7.01" y2="7" />
                             </svg>
                         </button>
                         <a
