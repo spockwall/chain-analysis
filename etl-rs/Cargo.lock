@@ -1639,6 +1639,7 @@ dependencies = [
  "tokio",
  "tracing",
  "types",
+ "uuid",
 ]
 
 [[package]]
@@ -2205,6 +2206,7 @@ dependencies = [
  "tokio",
  "tracing",
  "types",
+ "uuid",
 ]
 
 [[package]]

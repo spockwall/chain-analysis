@@ -108,3 +108,26 @@ pub async fn move_batch_to_dlq(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_key_redis_key_format() {
+        let k = BatchKey {
+            stream: "ingested_txs".into(),
+            first_id: "1-0".into(),
+            last_id: "5-0".into(),
+        };
+        assert_eq!(k.redis_key(), "process:retry:ingested_txs:1-0:5-0");
+    }
+
+    #[test]
+    fn dlq_policy_default_matches_process_config_defaults() {
+        let p = DlqPolicy::default();
+        assert_eq!(p.max_attempts, 5);
+        assert_eq!(p.dlq_suffix, "_dlq");
+        assert_eq!(p.attempt_ttl_secs, 86_400);
+    }
+}
