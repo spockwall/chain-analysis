@@ -1,0 +1,55 @@
+name: etl-rs
+
+on:
+  push:
+    paths:
+      - 'etl-rs/**'
+      - '.github/workflows/rust.yml'
+  pull_request:
+    paths:
+      - 'etl-rs/**'
+      - '.github/workflows/rust.yml'
+
+defaults:
+  run:
+    working-directory: etl-rs
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            etl-rs/target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('etl-rs/Cargo.lock') }}
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            etl-rs/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('etl-rs/Cargo.lock') }}
+      - run: cargo test --workspace --lib --bins
