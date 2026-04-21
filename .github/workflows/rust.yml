@@ -66,8 +66,24 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        ports:
+          - 8123:8123
+        env:
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+          CLICKHOUSE_PASSWORD: clickhouse123
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --ulimit nofile=262144:262144
     env:
       E2E_REDIS_URL: redis://localhost:6379
+      E2E_CLICKHOUSE_URL: http://localhost:8123
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse123
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
