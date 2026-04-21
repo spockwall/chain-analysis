@@ -5,65 +5,39 @@ use eyre::Result;
 use futures::stream::{self, StreamExt};
 use pipeline::{with_retry, ProgressReporter, RetryPolicy};
 use sinks::redis_stream::TransactionWriter;
-use sources::{etherscan, mock};
+use sources::{etherscan, BlockSource};
+use std::sync::Arc;
 use tracing::{error, info, warn};
 use types::{Trace, Transaction, Transfer};
 use writer_pipeline::{spawn_writer, WriterCommand, WriterHandles};
 
-pub async fn fetch_block(
-    config: &config::Config,
-    block_num: u64,
-    use_mock: bool,
-) -> Result<Vec<Transaction>> {
-    if use_mock {
-        Ok(mock::generate_mock_block(block_num))
-    } else {
-        etherscan::block::fetch_block_transactions(
-            &config.etherscan_base_url,
-            config.etherscan_api_key.as_deref().unwrap(),
-            config.etherscan_chain_id,
-            block_num,
-        )
-        .await
-    }
+/// Convenience alias. All pipelined ingest functions accept a shared handle so
+/// they can clone it into spawned fetch tasks.
+pub type DynBlockSource = Arc<dyn BlockSource>;
+
+pub async fn fetch_block(source: &dyn BlockSource, block_num: u64) -> Result<Vec<Transaction>> {
+    source.fetch_block(block_num).await
 }
 
-pub async fn get_latest_block(config: &config::Config, use_mock: bool, hint: u64) -> Result<u64> {
-    if use_mock {
-        Ok(mock::mock_latest_block(hint))
-    } else {
-        etherscan::block::fetch_latest_block_number(
-            &config.etherscan_base_url,
-            config.etherscan_api_key.as_deref().unwrap(),
-            config.etherscan_chain_id,
-        )
-        .await
-    }
+pub async fn get_latest_block(source: &dyn BlockSource) -> Result<u64> {
+    source.latest_block().await
 }
 
 async fn fetch_block_data(
-    config: &config::Config,
+    source: &dyn BlockSource,
     block_num: u64,
-    use_mock: bool,
     retry_policy: &RetryPolicy,
     with_traces: bool,
     with_transfers: bool,
 ) -> Result<(Vec<Transaction>, Vec<Trace>, Vec<Transfer>)> {
     let txs = with_retry(retry_policy, &format!("fetch_block_{}", block_num), || {
-        fetch_block(config, block_num, use_mock)
+        fetch_block(source, block_num)
     })
     .await?;
 
     let traces_fut = async {
-        if with_traces && !use_mock {
-            match etherscan::traces::fetch_block_traces(
-                &config.etherscan_base_url,
-                config.etherscan_api_key.as_deref().unwrap(),
-                config.etherscan_chain_id,
-                block_num,
-            )
-            .await
-            {
+        if with_traces {
+            match source.fetch_traces(block_num).await {
                 Ok(t) => t,
                 Err(e) => {
                     warn!(block = block_num, error = %e, "Failed to fetch traces, skipping");
@@ -76,15 +50,8 @@ async fn fetch_block_data(
     };
 
     let transfers_fut = async {
-        if with_transfers && !use_mock {
-            match etherscan::erc20::fetch_block_transfers(
-                &config.etherscan_base_url,
-                config.etherscan_api_key.as_deref().unwrap(),
-                config.etherscan_chain_id,
-                block_num,
-            )
-            .await
-            {
+        if with_transfers {
+            match source.fetch_transfers(block_num).await {
                 Ok(t) => t,
                 Err(e) => {
                     warn!(block = block_num, error = %e, "Failed to fetch transfers, skipping");
@@ -100,6 +67,9 @@ async fn fetch_block_data(
     Ok((txs, traces, transfers))
 }
 
+/// Address-mode ingestion. Only valid when the active source is Etherscan
+/// (Alchemy's JSON-RPC has no `txlist`-equivalent; Alchemy users should rely
+/// on `ingest block --follow` or targeted hash fetches instead).
 #[allow(clippy::too_many_arguments)]
 pub async fn ingest_address(
     config: &config::Config,
@@ -180,10 +150,9 @@ pub async fn ingest_address(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn ingest_block_range_pipelined(
-    config: &config::Config,
+    source: DynBlockSource,
     start: u64,
     end: u64,
-    use_mock: bool,
     writer: Box<dyn TransactionWriter>,
     mut progress_reporter: ProgressReporter,
     retry_policy: &RetryPolicy,
@@ -203,17 +172,19 @@ pub async fn ingest_block_range_pipelined(
 
     if start <= end {
         let buffered = stream::iter(start..=end)
-            .map(|block_num| async move {
-                let res = fetch_block_data(
-                    config,
-                    block_num,
-                    use_mock,
-                    retry_policy,
-                    with_traces,
-                    with_transfers,
-                )
-                .await;
-                (block_num, res)
+            .map(|block_num| {
+                let source = Arc::clone(&source);
+                async move {
+                    let res = fetch_block_data(
+                        source.as_ref(),
+                        block_num,
+                        retry_policy,
+                        with_traces,
+                        with_transfers,
+                    )
+                    .await;
+                    (block_num, res)
+                }
             })
             .buffered(fetch_concurrency);
         tokio::pin!(buffered);

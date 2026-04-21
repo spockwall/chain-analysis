@@ -1,8 +1,44 @@
-use types::Transaction;
+use async_trait::async_trait;
+use eyre::Result;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use types::{Trace, Transaction, Transfer};
+
+use crate::block_source::BlockSource;
 
 static MOCK_TIP: AtomicU64 = AtomicU64::new(0);
+
+/// Deterministic mock source. Stateless except for the shared `MOCK_TIP` used
+/// by `latest_block()` in follow-mode.
+#[derive(Default)]
+pub struct MockSource;
+
+#[async_trait]
+impl BlockSource for MockSource {
+    fn name(&self) -> &'static str {
+        "mock"
+    }
+
+    async fn latest_block(&self) -> Result<u64> {
+        Ok(mock_latest_block(0))
+    }
+
+    async fn fetch_block(&self, block_num: u64) -> Result<Vec<Transaction>> {
+        Ok(generate_mock_block(block_num))
+    }
+
+    async fn fetch_traces(&self, _block_num: u64) -> Result<Vec<Trace>> {
+        Ok(Vec::new())
+    }
+
+    async fn fetch_transfers(&self, _block_num: u64) -> Result<Vec<Transfer>> {
+        Ok(Vec::new())
+    }
+
+    async fn fetch_tx_by_hash(&self, _tx_hash: &str) -> Result<Option<Transaction>> {
+        Ok(None)
+    }
+}
 
 pub fn mock_latest_block(start_block: u64) -> u64 {
     let now = SystemTime::now()

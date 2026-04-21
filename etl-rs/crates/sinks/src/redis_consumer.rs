@@ -8,6 +8,11 @@ pub const STREAM_TXS: &str = "ingested_txs";
 pub const STREAM_TRACES: &str = "ingested_traces";
 pub const STREAM_TRANSFERS: &str = "ingested_transfers";
 
+/// One Redis stream message: (id, field-pairs).
+pub type RawMessage = (String, Vec<(String, String)>);
+/// `stream_name → messages`, used when quarantining a failed batch into a DLQ.
+pub type RawByStream = HashMap<String, Vec<RawMessage>>;
+
 #[derive(Default)]
 pub struct CombinedBatch {
     pub txs: Vec<(String, Transaction)>,
@@ -15,7 +20,7 @@ pub struct CombinedBatch {
     pub transfers: Vec<(String, Transfer)>,
     /// Raw (id, field-pairs) per stream, retained so a failing batch can be
     /// relocated to a DLQ stream byte-for-byte.
-    pub raw_by_stream: HashMap<String, Vec<(String, Vec<(String, String)>)>>,
+    pub raw_by_stream: RawByStream,
 }
 
 pub struct StreamConsumer {
@@ -152,10 +157,8 @@ impl StreamConsumer {
 
 /// Parse XREADGROUP response into raw (stream_name → messages) pairs without
 /// decoding the inner JSON.
-fn parse_xreadgroup_multi(
-    value: redis::Value,
-) -> HashMap<String, Vec<(String, Vec<(String, String)>)>> {
-    let mut by_stream: HashMap<String, Vec<(String, Vec<(String, String)>)>> = HashMap::new();
+fn parse_xreadgroup_multi(value: redis::Value) -> RawByStream {
+    let mut by_stream: RawByStream = HashMap::new();
 
     let streams = match value {
         redis::Value::Array(s) => s,

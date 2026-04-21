@@ -22,6 +22,12 @@ pub struct Config {
     pub targeted_queue_key: String,
     /// Postgres URL for targeted-ingest modes that query `label_tasks`.
     pub postgres_url: Option<String>,
+    /// Data-source selector: `"etherscan"` | `"alchemy"` | `"mock"`. Unset →
+    /// inferred from whichever provider key is populated, defaulting to mock.
+    pub ingest_source: Option<String>,
+    pub alchemy_api_key: Option<String>,
+    pub alchemy_base_url: String,
+    pub alchemy_chain: String,
 }
 
 impl Config {
@@ -38,6 +44,18 @@ impl Config {
             stream_maxlen: if maxlen == 0 { None } else { Some(maxlen) },
             targeted_queue_key: env_or("INGEST_TARGETED_QUEUE", "ingest:targeted_queue"),
             postgres_url: std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty()),
+            ingest_source: std::env::var("INGEST_SOURCE")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_ascii_lowercase()),
+            alchemy_api_key: std::env::var("ALCHEMY_API_KEY")
+                .ok()
+                .filter(|s| !s.is_empty() && s != "your_alchemy_api_key_here"),
+            alchemy_base_url: env_or(
+                "ALCHEMY_BASE_URL",
+                "https://eth-mainnet.g.alchemy.com/v2/",
+            ),
+            alchemy_chain: env_or("ALCHEMY_CHAIN", "eth-mainnet"),
         }
     }
 }

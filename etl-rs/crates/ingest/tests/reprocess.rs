@@ -8,6 +8,8 @@ use ingest::modes::reprocess::reprocess_failed_blocks;
 use pipeline::{ProgressReporter, RetryPolicy};
 use redis::AsyncCommands;
 use sinks::redis_stream::{RedisStreamWriter, TransactionWriter};
+use sources::mock::MockSource;
+use std::sync::Arc;
 
 fn e2e_redis_url() -> Option<String> {
     std::env::var("E2E_REDIS_URL").ok()
@@ -49,12 +51,26 @@ async fn reprocess_drains_failed_blocks_set() {
         stream_maxlen: None,
         targeted_queue_key: "unused".into(),
         postgres_url: None,
+        ingest_source: None,
+        alchemy_api_key: None,
+        alchemy_base_url: String::new(),
+        alchemy_chain: String::new(),
     };
 
-    let (_w, _r, ok_count, total_txs) =
-        reprocess_failed_blocks(&cfg, &source, writer, reporter, &retry, false, false, 2)
-            .await
-            .expect("reprocess");
+    let block_source: ingest::DynBlockSource = Arc::new(MockSource);
+    let (_w, _r, ok_count, total_txs) = reprocess_failed_blocks(
+        &cfg,
+        &source,
+        block_source,
+        writer,
+        reporter,
+        &retry,
+        false,
+        false,
+        2,
+    )
+    .await
+    .expect("reprocess");
 
     assert_eq!(ok_count, 2, "expected both blocks reprocessed, got {}", ok_count);
     assert!(total_txs > 0, "expected mock ingest to produce txs, got {}", total_txs);

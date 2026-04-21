@@ -2,11 +2,26 @@ use clap::{Parser, Subcommand};
 use color_eyre::eyre::Result;
 use ingest::modes::reprocess::reprocess_failed_blocks;
 use ingest::modes::targeted::{run_targeted, TargetSpec};
-use ingest::{get_latest_block, ingest_address, ingest_block_range_pipelined};
+use ingest::{get_latest_block, ingest_address, ingest_block_range_pipelined, DynBlockSource};
 use pipeline::{install_shutdown, ProgressReporter, RetryPolicy};
 use sinks::redis_stream::{RedisStreamWriter, StdoutWriter, TransactionWriter};
+use sources::{make_source, SourceConfig};
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
+
+fn build_source(config: &config::Config) -> Result<DynBlockSource> {
+    let src_cfg = SourceConfig {
+        ingest_source: config.ingest_source.clone(),
+        etherscan_api_key: config.etherscan_api_key.clone(),
+        etherscan_base_url: config.etherscan_base_url.clone(),
+        etherscan_chain_id: config.etherscan_chain_id,
+        alchemy_api_key: config.alchemy_api_key.clone(),
+        alchemy_base_url: config.alchemy_base_url.clone(),
+    };
+    let boxed = make_source(&src_cfg)?;
+    Ok(Arc::from(boxed))
+}
 
 #[derive(Parser)]
 #[command(
@@ -227,8 +242,10 @@ async fn main() -> Result<()> {
             dry_run,
             source,
         }) => {
+            let block_source = build_source(&config)?;
             run_block_mode(
                 &config,
+                block_source,
                 &run_id,
                 start,
                 end,
@@ -270,13 +287,15 @@ async fn main() -> Result<()> {
             with_traces,
             with_transfers,
         }) => {
-            let use_mock = config.etherscan_api_key.is_none();
+            let block_source = build_source(&config)?;
+            let provider = block_source.name();
             let writer = make_writer(false, &config.redis_url, &source, config.stream_maxlen).await?;
             let reporter = make_reporter(false, &config.redis_url, &run_id).await?;
             let retry_policy = RetryPolicy::default();
             let (_w, _r, ok, txs) = reprocess_failed_blocks(
                 &config,
                 &source,
+                block_source,
                 writer,
                 reporter,
                 &retry_policy,
@@ -285,7 +304,7 @@ async fn main() -> Result<()> {
                 fetch_concurrency,
             )
             .await?;
-            info!(use_mock, reprocessed = ok, transactions = txs, "reprocess-failed done");
+            info!(provider, reprocessed = ok, transactions = txs, "reprocess-failed done");
             Ok(())
         }
         Some(Cmd::Targeted { mode }) => run_targeted_mode(&config, &run_id, mode).await,
@@ -296,6 +315,7 @@ async fn main() -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn run_block_mode(
     config: &config::Config,
+    block_source: DynBlockSource,
     run_id: &str,
     start: Option<u64>,
     end: Option<u64>,
@@ -307,11 +327,12 @@ async fn run_block_mode(
     dry_run: bool,
     source: &str,
 ) -> Result<()> {
-    let use_mock = config.etherscan_api_key.is_none();
-    if use_mock {
-        info!("No ETHERSCAN_API_KEY set; using mock data");
-    }
-    let source_label = if use_mock { "mock" } else { source };
+    let provider = block_source.name();
+    info!(provider, "Block ingestion using data source");
+    // When the CLI user passes a custom `--source` label we honor it for the
+    // Redis cursor key; otherwise prefer the provider name so mock runs don't
+    // collide with real ingestion cursors.
+    let source_label = if source == "etherscan" { provider } else { source };
 
     let retry_policy = RetryPolicy::default();
 
@@ -325,7 +346,7 @@ async fn run_block_mode(
                 last + 1
             }
             None => {
-                let latest = get_latest_block(config, use_mock, 0).await?;
+                let latest = get_latest_block(block_source.as_ref()).await?;
                 info!(latest_block = latest, "No cursor found, starting from chain tip");
                 latest
             }
@@ -335,7 +356,7 @@ async fn run_block_mode(
     let end_block = match end {
         Some(eb) => eb,
         None => {
-            let latest = get_latest_block(config, use_mock, start_block).await?;
+            let latest = get_latest_block(block_source.as_ref()).await?;
             info!(latest_block = latest, "No --end specified, using chain tip");
             latest
         }
@@ -353,10 +374,9 @@ async fn run_block_mode(
     let total_blocks = if start_block <= end_block { end_block - start_block + 1 } else { 0 };
 
     let (mut writer, mut progress_reporter, mut total_txs) = ingest_block_range_pipelined(
-        config,
+        block_source.clone(),
         start_block,
         end_block,
-        use_mock,
         writer,
         progress_reporter,
         &retry_policy,
@@ -389,7 +409,7 @@ async fn run_block_mode(
             _ = shutdown.wait() => break,
         }
 
-        let latest = match get_latest_block(config, use_mock, start_block).await {
+        let latest = match get_latest_block(block_source.as_ref()).await {
             Ok(n) => n,
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to fetch latest block number, retrying next cycle");
@@ -402,7 +422,7 @@ async fn run_block_mode(
         info!(from = cursor, to = latest, new_blocks = latest - cursor + 1, "New blocks detected");
 
         let (w, r, txs_after) = ingest_block_range_pipelined(
-            config, cursor, latest, use_mock, writer, progress_reporter,
+            block_source.clone(), cursor, latest, writer, progress_reporter,
             &retry_policy, with_traces, with_transfers, fetch_concurrency, 0, total_txs,
         )
         .await?;
@@ -491,8 +511,10 @@ async fn run_legacy(args: LegacyArgs, config: &config::Config) -> Result<()> {
         )
         .await
     } else {
+        let block_source = build_source(config)?;
         run_block_mode(
             config,
+            block_source,
             &args.run_id,
             args.start_block,
             args.end_block,

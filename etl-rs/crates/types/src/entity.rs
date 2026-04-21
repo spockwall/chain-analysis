@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum EntityType {
     EOA,
     Contract,
@@ -12,6 +12,7 @@ pub enum EntityType {
     DEX,
     CEXHotWallet,
     Application,
+    #[default]
     Unknown,
 }
 
@@ -31,15 +32,10 @@ impl fmt::Display for EntityType {
     }
 }
 
-impl Default for EntityType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RiskLevel {
+    #[default]
     Unknown,
     Low,
     Medium,
@@ -56,12 +52,6 @@ impl fmt::Display for RiskLevel {
             Self::High => write!(f, "high"),
             Self::Critical => write!(f, "critical"),
         }
-    }
-}
-
-impl Default for RiskLevel {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 

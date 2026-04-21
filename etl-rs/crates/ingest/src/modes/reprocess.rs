@@ -4,7 +4,7 @@ use redis::AsyncCommands;
 use sinks::redis_stream::TransactionWriter;
 use tracing::{info, warn};
 
-use crate::ingest_block_range_pipelined;
+use crate::{ingest_block_range_pipelined, DynBlockSource};
 
 /// Drain `ingest:failed_blocks:{source}` by re-fetching each block and
 /// pushing it through the normal pipelined writer. On success the block
@@ -12,7 +12,8 @@ use crate::ingest_block_range_pipelined;
 #[allow(clippy::too_many_arguments)]
 pub async fn reprocess_failed_blocks(
     config: &config::Config,
-    source: &str,
+    source_label: &str,
+    block_source: DynBlockSource,
     writer: Box<dyn TransactionWriter>,
     progress_reporter: ProgressReporter,
     retry_policy: &RetryPolicy,
@@ -22,19 +23,18 @@ pub async fn reprocess_failed_blocks(
 ) -> Result<(Box<dyn TransactionWriter>, ProgressReporter, u64, u64)> {
     let client = redis::Client::open(config.redis_url.clone())?;
     let mut conn = client.get_multiplexed_async_connection().await?;
-    let key = format!("ingest:failed_blocks:{}", source);
+    let key = format!("ingest:failed_blocks:{}", source_label);
 
     let blocks: Vec<u64> = conn.smembers(&key).await?;
     if blocks.is_empty() {
-        info!(source, "No failed blocks to reprocess");
+        info!(source = source_label, "No failed blocks to reprocess");
         return Ok((writer, progress_reporter, 0, 0));
     }
 
-    info!(source, count = blocks.len(), "Reprocessing failed blocks");
+    info!(source = source_label, count = blocks.len(), "Reprocessing failed blocks");
 
     // The pipelined range driver expects contiguous ranges, so run each
     // failed block as a single-block range. That's fine — DLQ is a rare path.
-    let use_mock = config.etherscan_api_key.is_none();
     let mut writer = writer;
     let mut progress_reporter = progress_reporter;
     let mut total_txs = 0u64;
@@ -42,10 +42,9 @@ pub async fn reprocess_failed_blocks(
 
     for block_num in &blocks {
         let (w, r, txs_after) = ingest_block_range_pipelined(
-            config,
+            block_source.clone(),
             *block_num,
             *block_num,
-            use_mock,
             writer,
             progress_reporter,
             retry_policy,
@@ -67,6 +66,6 @@ pub async fn reprocess_failed_blocks(
         }
     }
 
-    info!(source, reprocessed = ok_count, total_txs, "Reprocessing complete");
+    info!(source = source_label, reprocessed = ok_count, total_txs, "Reprocessing complete");
     Ok((writer, progress_reporter, ok_count, total_txs))
 }
