@@ -2,6 +2,7 @@ use eyre::{Context, Result};
 use pipeline::ProgressReporter;
 use redis::AsyncCommands;
 use serde::Deserialize;
+use sinks::postgres_writer::PostgresWriter;
 use sinks::redis_stream::TransactionWriter;
 use sources::etherscan;
 use std::collections::HashSet;
@@ -22,6 +23,11 @@ pub enum TargetSpec {
 struct QueuedTask {
     #[serde(default)]
     task_id: Option<i64>,
+    /// Web-originated runs carry a pre-inserted ingestion_runs row.
+    /// Dagster-sensor drains of label-task entries omit this field and
+    /// rely on the labeling workflow tables for progress instead.
+    #[serde(default)]
+    run_id: Option<String>,
     spec: QueuedSpec,
 }
 
@@ -39,6 +45,7 @@ pub async fn run_targeted(
     spec: TargetSpec,
     writer: &mut Box<dyn TransactionWriter>,
     reporter: &mut ProgressReporter,
+    pg_writer: Option<&PostgresWriter>,
     with_traces: bool,
     with_transfers: bool,
 ) -> Result<u64> {
@@ -60,8 +67,16 @@ pub async fn run_targeted(
             .await
         }
         TargetSpec::FromLabelTasks { limit } => {
-            run_from_label_tasks(config, limit, writer, reporter, with_traces, with_transfers)
-                .await
+            run_from_label_tasks(
+                config,
+                limit,
+                writer,
+                reporter,
+                pg_writer,
+                with_traces,
+                with_transfers,
+            )
+            .await
         }
     }
 }
@@ -207,6 +222,7 @@ async fn run_from_label_tasks(
     limit: u32,
     writer: &mut Box<dyn TransactionWriter>,
     reporter: &mut ProgressReporter,
+    pg_writer: Option<&PostgresWriter>,
     with_traces: bool,
     with_transfers: bool,
 ) -> Result<u64> {
@@ -234,20 +250,83 @@ async fn run_from_label_tasks(
             }
         };
 
-        info!(task_id = ?task.task_id, "Draining targeted queue entry");
+        info!(task_id = ?task.task_id, run_id = ?task.run_id, "Draining targeted queue entry");
+
+        // Transition run row to `running` before we start fetching so the
+        // frontend poller can flip the pill out of `queued` within one tick.
+        if let (Some(pg), Some(run_id)) = (pg_writer, task.run_id.as_deref()) {
+            if let Err(e) = pg
+                .update_ingestion_run(run_id, "running", 0, 0, 0, None)
+                .await
+            {
+                warn!(run_id, error = %e, "Failed to mark run as running");
+            }
+        }
+
         let spec = match task.spec {
             QueuedSpec::Addresses { addrs } => TargetSpec::Addresses(addrs),
             QueuedSpec::Hashes { hashes } => TargetSpec::Hashes(hashes),
             QueuedSpec::Neighborhood { seed, hops } => TargetSpec::Neighborhood { seed, hops },
         };
 
-        total +=
-            Box::pin(run_targeted(config, spec, writer, reporter, with_traces, with_transfers))
-                .await?;
+        let result = Box::pin(run_targeted(
+            config,
+            spec,
+            writer,
+            reporter,
+            pg_writer,
+            with_traces,
+            with_transfers,
+        ))
+        .await;
+
+        match result {
+            Ok(n) => {
+                total += n;
+                if let (Some(pg), Some(run_id)) = (pg_writer, task.run_id.as_deref()) {
+                    if let Err(e) = pg
+                        .update_ingestion_run(run_id, "completed", n as i64, 0, 0, None)
+                        .await
+                    {
+                        warn!(run_id, error = %e, "Failed to mark run as completed");
+                    }
+                }
+            }
+            Err(e) => {
+                let tag = classify_error(&e);
+                let msg = format!("{}: {}", tag, e);
+                warn!(run_id = ?task.run_id, error = %e, tag, "Targeted fetch failed");
+                if let (Some(pg), Some(run_id)) = (pg_writer, task.run_id.as_deref()) {
+                    if let Err(e2) = pg
+                        .update_ingestion_run(run_id, "failed", 0, 0, 0, Some(&msg))
+                        .await
+                    {
+                        warn!(run_id, error = %e2, "Failed to mark run as failed");
+                    }
+                }
+                // Keep draining remaining queue entries even if one fails;
+                // each run tracks its own status independently.
+            }
+        }
     }
 
     info!(drained, total, "from-label-tasks complete");
     Ok(total)
+}
+
+/// Classify a fetch error into a short tag the frontend can map to an
+/// actionable help message (see `RunStatusPill`).
+fn classify_error(err: &eyre::Report) -> &'static str {
+    let s = format!("{:#}", err).to_lowercase();
+    if s.contains("429") || s.contains("rate limit") {
+        "rate_limited"
+    } else if s.contains("401") || s.contains("403") || s.contains("api key") {
+        "auth"
+    } else if s.contains("timeout") || s.contains("connection") || s.contains("dns") {
+        "network"
+    } else {
+        "unknown"
+    }
 }
 
 #[cfg(test)]
@@ -287,6 +366,13 @@ mod tests {
             }
             other => panic!("wrong variant: {:?}", other),
         }
+    }
+
+    #[test]
+    fn queued_spec_parses_run_id() {
+        let json = r#"{"task_id":null,"run_id":"abc123","spec":{"mode":"addresses","addrs":["0x1"]}}"#;
+        let task: QueuedTask = serde_json::from_str(json).unwrap();
+        assert_eq!(task.run_id.as_deref(), Some("abc123"));
     }
 
     #[test]

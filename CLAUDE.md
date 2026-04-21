@@ -6,14 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Open phases teammates can pick up. Ordered by user-facing value.
 
-### Phase H — ETL end-to-end cooperation (IN PROGRESS)
-Make the backend, Rust ETL, and frontend cooperate on a single ingestion path.
-Today `POST /api/pipeline/ingest-address` fetches Etherscan in Python and
-blocks synchronously, duplicating what `etl-rs/crates/ingest` already does.
-The labels flow LPUSHes to `ingest:targeted_queue` but the Dagster sensor
-defaults to stopped. Deliverables: collapse to one Rust-driven path, make the
-backend route async (queue + return `run_id`), enable the sensor by default,
-add a run-status pill + polling hook in the frontend. Full plan at
+### Phase H — ETL end-to-end cooperation (COMPLETE)
+Single Rust-driven ingestion path, async run tracking via `ingestion_runs`,
+Dagster sensor on by default, run-status pill in the footer, graph + run
+state persisted across refresh. Follow-up H.9 added UI surfaces for the
+remaining Rust capabilities: NodePanel "Deep trace (2 hops)", ETLPage
+"Ingest Transactions by Hash" card, and an admin-gated Dagster Launchpad
+deep-link on `/etl`. Plan archived at
 `/Users/spockwall/.claude/plans/read-readme-md-now-glowing-toast.md`.
 
 ### Phase I — AML Detections UI

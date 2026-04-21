@@ -121,6 +121,7 @@ async fn from_label_tasks_drains_queue() {
         TargetSpec::FromLabelTasks { limit: 10 },
         &mut writer,
         &mut reporter,
+        None,
         false,
         false,
     )

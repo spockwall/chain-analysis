@@ -296,9 +296,16 @@ docker compose up -d
 | `targeted_addresses_job` | Launchpad (ad-hoc) | `ingest targeted addresses --addrs 0x...,0x...` |
 | `targeted_neighborhood_job` | Launchpad (ad-hoc) | `ingest targeted neighborhood 0x... --hops N` |
 
-Schedules and the sensor default to **stopped** — enable them in the UI
-(Overview → Schedules / Sensors) after confirming the ingest binary is
-reachable.
+The `targeted_queue_sensor` is declared with `default_status=RUNNING` so
+`/labels` "Queue fetch" and `/api/pipeline/ingest-address` Just Work on a
+**fresh** deploy. Note Dagster persists sensor state once observed — if the
+sensor was ever registered with a different default (or manually stopped),
+changing the code default won't revive it. In that case start it once via
+Dagster UI (Automation → Sensors → toggle `targeted_queue_sensor`) or
+GraphQL (`mutation { startSensor(sensorSelector: {...}) }`). Hourly
+reprocess schedules default to **stopped** — enable them in the Dagster UI
+(Overview → Schedules) once you're confident the upstream source isn't
+persistently failing.
 
 **Dagster-specific env vars** (in addition to the standard `INGEST_*` /
 `ALCHEMY_*` / `REDIS_URL` knobs consumed by the Rust binary):
@@ -408,6 +415,59 @@ human-in-the-loop side of ingestion:
 
 The `NodePanel` in the graph explorer has a **Label this entity** button that
 deep-links into `/labels?address=0x…` with the address prefilled.
+
+## Web-triggered ingest
+
+`POST /api/pipeline/ingest-address` is a thin wrapper that validates the
+address, inserts a `queued` row into `ingestion_runs`, and LPUSHes a job with
+the pre-assigned `run_id` onto `ingest:targeted_queue`. The Rust worker
+(`ingest targeted from-label-tasks`) drains the queue, transitions the run
+row `queued → running → completed|failed`, and records counts + error tags.
+The frontend polls `GET /api/ingestion-runs/{run_id}` every 2s through
+`useIngestionRun` and `RunStatusPill` in the top nav.
+
+Additional UI entry points that reuse `POST /api/labels/fetch` (no run pill —
+fire-and-forget, Dagster sensor drains within one tick):
+
+- **NodePanel → Deep trace (2 hops)** — queues `{mode:"neighborhood"}` for
+  the selected entity.
+- **ETLPage → Ingest Transactions by Hash** — queues `{mode:"hashes"}` for
+  a newline-separated hash list.
+
+Admins see an extra **Orchestration** section on `/etl` with deep-links to
+the Dagster Launchpad for `reprocess_job` and the Dagster UI.
+
+Error tags written by the Rust drain (see `classify_error` in
+`crates/ingest/src/modes/targeted.rs`):
+
+| Tag            | Cause                                         | UI message |
+|----------------|-----------------------------------------------|------------|
+| `rate_limited` | 429 after exhausting Etherscan backoff        | "Etherscan rate limit hit — it will auto-retry shortly." |
+| `auth`         | 401/403 or missing `ETHERSCAN_API_KEY`        | "ETHERSCAN_API_KEY is missing or invalid — check .env" |
+| `network`      | Connection/DNS/timeout                        | "Network error reaching Etherscan — check connectivity." |
+| `unknown`      | Anything else                                 | "Ingest failed — see backend logs for details." |
+
+## Smoke test
+
+Verify the ETL cooperates end-to-end against a fresh deploy:
+
+1. `docker compose up -d` — wait for `chain-analysis-backend` healthy.
+2. Log into the frontend (`http://localhost:5173`), open `/explorer`,
+   search `0x742d35cc6634c0532925a3b844bc9e7595f0beb0`.
+3. Click **Fetch Transactions**. A toast appears immediately ("Queued —
+   graph will refresh when run completes"). The **run pill** in the nav
+   flips `queued → running` within one sensor tick (~30s), then `completed`
+   within ~15s of pickup.
+4. The graph repopulates automatically on completion. Opening the pill
+   shows the recent run with tx counts.
+5. On `/labels`, queue a fetch for the same address. A new `pending` task
+   appears; within 30s the sensor drains it and the row flips to
+   `in_progress`. The page auto-refreshes every 5s while any task is
+   pending.
+6. **Auth failure path** — unset `ETHERSCAN_API_KEY`, restart `ingest` (or
+   the container running it), trigger a fetch. The run should end in
+   `status=failed`, `error_message` starting with `auth`, and the pill
+   dropdown should render the ETHERSCAN_API_KEY help text.
 
 ## Operational notes
 

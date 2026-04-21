@@ -1228,6 +1228,7 @@ dependencies = [
  "serde_json",
  "sinks",
  "sources",
+ "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",

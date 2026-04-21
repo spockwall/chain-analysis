@@ -17,10 +17,12 @@ import {
     upsertTransaction,
     deleteTransaction,
     ingestAddress,
+    enqueueLabelFetch,
     formatAddress,
     formatWei,
     type TransactionUpsertRequest,
 } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { parseTxImportFile, type ParsedTxRow } from "../utils/txImportParser";
 import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 import {
@@ -49,8 +51,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     );
 }
 
+const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
 export function ETLPage() {
     const toast = useToastContext();
+    const { user } = useAuth();
     const { health } = useHealth({ refreshInterval: 30000 });
     const {
         stats,
@@ -115,6 +120,33 @@ export function ETLPage() {
         },
     });
     const { track: trackRun } = useIngestionRuns();
+
+    // ── Ingest hashes state ──────────────────────────────────────────────────
+    const [ingestHashes, setIngestHashes] = useState("");
+    const [ingestHashesLoading, setIngestHashesLoading] = useState(false);
+    const parsedHashLines = ingestHashes
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+    const validHashes = parsedHashLines.filter((l) => TX_HASH_RE.test(l));
+    const invalidHashes = parsedHashLines.filter((l) => !TX_HASH_RE.test(l));
+
+    const handleIngestHashes = async () => {
+        if (validHashes.length === 0) {
+            toast.error("No valid tx hashes to queue");
+            return;
+        }
+        setIngestHashesLoading(true);
+        try {
+            await enqueueLabelFetch({ mode: "hashes", hashes: validHashes });
+            toast.success(`Queued ${validHashes.length} hash(es) for ingestion`);
+            setIngestHashes("");
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : "Failed to queue hashes");
+        } finally {
+            setIngestHashesLoading(false);
+        }
+    };
 
     const overallHealthy = health?.status === "healthy";
 
@@ -566,6 +598,58 @@ export function ETLPage() {
                             <p className="font-mono text-[0.68rem] text-gray-500 mt-2">
                                 Run ID: {ingestRun.run_id}
                             </p>
+                        </div>
+                    )}
+                </Section>
+
+                {/* Ingest Transactions by Hash */}
+                <Section title="Ingest Transactions by Hash">
+                    <p className="text-[0.75rem] text-gray-500 mb-3">
+                        Paste newline-separated transaction hashes to queue them through the Rust ingest worker.
+                        Fire-and-forget — no per-hash progress is tracked.
+                    </p>
+                    <textarea
+                        value={ingestHashes}
+                        onChange={(e) => setIngestHashes(e.target.value)}
+                        placeholder={"0xabc…\n0xdef…"}
+                        rows={5}
+                        className={`${monoCls} w-full resize-y min-h-[100px]`}
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                        <div className="text-[0.72rem] text-gray-500">
+                            {validHashes.length > 0 && (
+                                <span className="text-emerald-600 font-medium">
+                                    {validHashes.length} valid
+                                </span>
+                            )}
+                            {validHashes.length > 0 && invalidHashes.length > 0 && <span> · </span>}
+                            {invalidHashes.length > 0 && (
+                                <span className="text-rose-600 font-medium">
+                                    {invalidHashes.length} invalid
+                                </span>
+                            )}
+                        </div>
+                        <button
+                            onClick={handleIngestHashes}
+                            disabled={ingestHashesLoading || validHashes.length === 0}
+                            className={btnPrimary}
+                        >
+                            {ingestHashesLoading
+                                ? "Queueing…"
+                                : `Queue ${validHashes.length || ""} Hash${validHashes.length === 1 ? "" : "es"}`.trim()}
+                        </button>
+                    </div>
+                    {invalidHashes.length > 0 && (
+                        <div className="mt-2 p-2.5 border border-rose-200 bg-rose-50 rounded-lg text-[0.7rem] text-rose-700">
+                            <p className="font-semibold mb-1">Invalid lines (skipped):</p>
+                            <ul className="list-disc pl-5 font-mono">
+                                {invalidHashes.slice(0, 5).map((h, i) => (
+                                    <li key={i} className="break-all">{h}</li>
+                                ))}
+                                {invalidHashes.length > 5 && (
+                                    <li>… and {invalidHashes.length - 5} more</li>
+                                )}
+                            </ul>
                         </div>
                     )}
                 </Section>
@@ -1192,6 +1276,35 @@ export function ETLPage() {
                         </ol>
                     </div>
                 </Section>
+
+                {user?.role === "admin" && (
+                    <Section title="Orchestration (admin)">
+                        <p className="text-[0.75rem] text-gray-500 mb-3">
+                            Open the Dagster UI to inspect jobs, sensors, and schedules. Reprocess drains{" "}
+                            <code className="font-mono text-[0.72rem] bg-gray-100 px-1 py-[1px] rounded">ingest:failed_blocks:{"{"}source{"}"}</code>{" "}
+                            and re-runs the failed blocks. Runs on an hourly schedule by default; use the Launchpad
+                            link below to trigger it manually.
+                        </p>
+                        <div className="flex gap-2 flex-wrap">
+                            <a
+                                href="http://localhost:3000/jobs/reprocess_job/launchpad"
+                                target="_blank"
+                                rel="noreferrer"
+                                className={btnPrimary}
+                            >
+                                Open Reprocess Launchpad
+                            </a>
+                            <a
+                                href="http://localhost:3000"
+                                target="_blank"
+                                rel="noreferrer"
+                                className={btnSecondary}
+                            >
+                                Open Dagster UI
+                            </a>
+                        </div>
+                    </Section>
+                )}
             </div>
         </div>
     );

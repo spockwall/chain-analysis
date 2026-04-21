@@ -87,14 +87,15 @@ class PostgresAdapter:
         """Execute a raw SQL query and return results."""
         async with self.session() as session:
             result = await session.execute(text(query), params or {})
-            # For SELECT queries, return rows as dicts
+            rows: list[dict[str, Any]] = []
             if result.returns_rows:
-                rows = result.fetchall()
+                fetched = result.fetchall()
                 columns = result.keys()
-                return [dict(zip(columns, row)) for row in rows]
-            # For INSERT/UPDATE/DELETE, commit and return empty
+                rows = [dict(zip(columns, row)) for row in fetched]
+            # Always commit — INSERT ... RETURNING reports returns_rows=True,
+            # so skipping commit on that branch silently rolls the write back.
             await session.commit()
-            return []
+            return rows
 
     async def execute_many(self, query: str, params_list: list[dict[str, Any]]) -> int:
         """Execute a query multiple times with different parameters."""
