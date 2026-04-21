@@ -1,45 +1,37 @@
-"""
-Dagster definitions for the Chain-Analysis ETL pipeline.
+"""Dagster definitions for chain-analysis ETL orchestration (Phase D).
 
-Run with: dagster dev -f src/etl/definitions.py
+Run with::
+
+    dagster dev -m etl.definitions
 """
+
+from __future__ import annotations
 
 from dagster import Definitions
 
-from etl.assets import (
-    computed_features,
-    graph_nodes,
-    graph_transactions,
-    raw_transactions,
-    resolved_entities,
+from etl.jobs import (
+    backfill_job,
+    reprocess_job,
+    targeted_addresses_job,
+    targeted_drain_job,
+    targeted_neighborhood_job,
 )
-from etl.resources import (
-    Neo4jResource,
-    PostgresResource,
-    RedisResource,
-    RustWorkerResource,
+from etl.resources import RustIngestResource
+from etl.schedules import reprocess_alchemy_hourly, reprocess_etherscan_hourly
+from etl.sensors import targeted_queue_sensor
+
+
+defs = Definitions(
+    jobs=[
+        backfill_job,
+        reprocess_job,
+        targeted_addresses_job,
+        targeted_neighborhood_job,
+        targeted_drain_job,
+    ],
+    sensors=[targeted_queue_sensor],
+    schedules=[reprocess_etherscan_hourly, reprocess_alchemy_hourly],
+    resources={
+        "rust_ingest": RustIngestResource(),
+    },
 )
-
-# Define all Dagster assets
-all_assets = [
-    raw_transactions,
-    resolved_entities,
-    computed_features,
-    graph_nodes,
-    graph_transactions,
-]
-
-# Define resources with configuration
-resources = {
-    "rust_worker": RustWorkerResource(
-        rust_binary_dir="../../etl-rs/target/release",
-        ingest_binary="ingest",
-        dry_run=False,
-    ),
-    "neo4j": Neo4jResource(),
-    "postgres": PostgresResource(),
-    "redis": RedisResource(),
-}
-
-# Create Dagster definitions
-defs = Definitions(assets=all_assets, resources=resources)
