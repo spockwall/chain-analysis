@@ -170,4 +170,29 @@ mod tests {
         let features = compute_features(&[], &[]);
         assert!(features.is_empty());
     }
+
+    static COUNTER_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn parse_failure_counter_increments_on_bad_value() {
+        let _g = COUNTER_MUTEX.lock().unwrap();
+        let before = parse_failure_count();
+        let entities = vec![make_entity("0xa"), make_entity("0xb")];
+        let txs = vec![make_tx("0xa", "0xb", "notanumber", 100)];
+        let features = compute_features(&entities, &txs);
+        // no panic; value treated as 0
+        let a = features.iter().find(|f| f.address == "0xa").unwrap();
+        assert_eq!(a.volume_out, "0");
+        assert_eq!(parse_failure_count(), before + 1);
+    }
+
+    #[test]
+    fn parse_failure_counter_unchanged_for_good_values() {
+        let _g = COUNTER_MUTEX.lock().unwrap();
+        let before = parse_failure_count();
+        let entities = vec![make_entity("0xa"), make_entity("0xb")];
+        let txs = vec![make_tx("0xa", "0xb", "42", 100)];
+        let _ = compute_features(&entities, &txs);
+        assert_eq!(parse_failure_count(), before);
+    }
 }

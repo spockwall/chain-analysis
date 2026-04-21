@@ -249,3 +249,50 @@ async fn run_from_label_tasks(
     info!(drained, total, "from-label-tasks complete");
     Ok(total)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queued_spec_parses_addresses() {
+        let json = r#"{"task_id":42,"spec":{"mode":"addresses","addrs":["0xabc","0xdef"]}}"#;
+        let task: QueuedTask = serde_json::from_str(json).unwrap();
+        assert_eq!(task.task_id, Some(42));
+        match task.spec {
+            QueuedSpec::Addresses { addrs } => assert_eq!(addrs, vec!["0xabc", "0xdef"]),
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn queued_spec_parses_hashes() {
+        let json = r#"{"spec":{"mode":"hashes","hashes":["0x1","0x2"]}}"#;
+        let task: QueuedTask = serde_json::from_str(json).unwrap();
+        assert_eq!(task.task_id, None);
+        match task.spec {
+            QueuedSpec::Hashes { hashes } => assert_eq!(hashes.len(), 2),
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn queued_spec_parses_neighborhood() {
+        let json = r#"{"task_id":1,"spec":{"mode":"neighborhood","seed":"0xseed","hops":2}}"#;
+        let task: QueuedTask = serde_json::from_str(json).unwrap();
+        match task.spec {
+            QueuedSpec::Neighborhood { seed, hops } => {
+                assert_eq!(seed, "0xseed");
+                assert_eq!(hops, 2);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn queued_spec_rejects_unknown_mode() {
+        let json = r#"{"spec":{"mode":"garbage","addrs":[]}}"#;
+        let err = serde_json::from_str::<QueuedTask>(json);
+        assert!(err.is_err());
+    }
+}

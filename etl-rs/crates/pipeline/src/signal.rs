@@ -59,3 +59,26 @@ pub fn install_shutdown() -> ShutdownHandle {
 
     ShutdownHandle { rx }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn handle_starts_not_shutdown() {
+        let mut h = install_shutdown();
+        assert!(!h.is_shutdown());
+        // wait() must not complete immediately — prove by timing out
+        let res = tokio::time::timeout(Duration::from_millis(10), h.wait()).await;
+        assert!(res.is_err(), "wait() completed before signal was sent");
+        assert!(!h.is_shutdown());
+    }
+
+    #[tokio::test]
+    async fn handle_clone_sees_same_state() {
+        let h = install_shutdown();
+        let h2 = h.clone();
+        assert_eq!(h.is_shutdown(), h2.is_shutdown());
+    }
+}

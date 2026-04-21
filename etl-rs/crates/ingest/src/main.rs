@@ -507,3 +507,97 @@ async fn run_legacy(args: LegacyArgs, config: &config::Config) -> Result<()> {
         .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn cli_parses_block_subcommand() {
+        let cli = Cli::try_parse_from(["ingest", "block", "--start", "10", "--end", "15"]).unwrap();
+        match cli.cmd {
+            Some(Cmd::Block { start, end, follow, .. }) => {
+                assert_eq!(start, Some(10));
+                assert_eq!(end, Some(15));
+                assert!(!follow);
+            }
+            other => panic!("wrong variant: {:?}", other.is_some()),
+        }
+    }
+
+    #[test]
+    fn cli_parses_targeted_addresses_csv() {
+        let cli = Cli::try_parse_from([
+            "ingest",
+            "targeted",
+            "addresses",
+            "--addrs",
+            "0xa,0xb,0xc",
+        ])
+        .unwrap();
+        match cli.cmd {
+            Some(Cmd::Targeted {
+                mode: TargetedMode::Addresses { addrs, .. },
+            }) => assert_eq!(addrs, vec!["0xa", "0xb", "0xc"]),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_targeted_neighborhood_default_hops() {
+        let cli = Cli::try_parse_from(["ingest", "targeted", "neighborhood", "0xseed"]).unwrap();
+        match cli.cmd {
+            Some(Cmd::Targeted {
+                mode: TargetedMode::Neighborhood { seed, hops, .. },
+            }) => {
+                assert_eq!(seed, "0xseed");
+                assert_eq!(hops, 1);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_targeted_from_label_tasks() {
+        let cli = Cli::try_parse_from([
+            "ingest",
+            "targeted",
+            "from-label-tasks",
+            "--limit",
+            "100",
+        ])
+        .unwrap();
+        match cli.cmd {
+            Some(Cmd::Targeted {
+                mode: TargetedMode::FromLabelTasks { limit, .. },
+            }) => assert_eq!(limit, 100),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_reprocess_failed_default_source() {
+        let cli = Cli::try_parse_from(["ingest", "reprocess-failed"]).unwrap();
+        match cli.cmd {
+            Some(Cmd::ReprocessFailed { source, .. }) => assert_eq!(source, "etherscan"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_legacy_flat_args() {
+        let cli = Cli::try_parse_from([
+            "ingest",
+            "--address",
+            "0xabcdef",
+            "--with-traces",
+            "--dry-run",
+        ])
+        .unwrap();
+        assert!(cli.cmd.is_none());
+        assert_eq!(cli.legacy.address.as_deref(), Some("0xabcdef"));
+        assert!(cli.legacy.with_traces);
+        assert!(cli.legacy.dry_run);
+    }
+}

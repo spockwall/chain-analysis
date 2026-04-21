@@ -40,7 +40,7 @@ jobs:
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('etl-rs/Cargo.lock') }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  test:
+  test-unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,5 +51,31 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             etl-rs/target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('etl-rs/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-test-unit-${{ hashFiles('etl-rs/Cargo.lock') }}
       - run: cargo test --workspace --lib --bins
+
+  test-integration:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      E2E_REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            etl-rs/target
+          key: ${{ runner.os }}-cargo-test-integration-${{ hashFiles('etl-rs/Cargo.lock') }}
+      - run: cargo test --workspace --tests
