@@ -4,6 +4,15 @@ global:
   external_labels:
     cluster: chain-analysis-local
 
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "alertmanager:9093"
+
 scrape_configs:
   # Rust ETL workers all expose /metrics on port 9100 (see crates/observability).
   # Services are resolved by their docker-compose hostname on the shared network.

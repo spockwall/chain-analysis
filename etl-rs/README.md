@@ -352,6 +352,59 @@ open http://localhost:9090   # Prometheus UI
 Workers that aren't currently running will show as `down` in Prometheus; that
 is expected — the `ingest` job runs on-demand via Dagster.
 
+### Alerting
+
+Alertmanager runs alongside Prometheus on `:9093`. Alert rules live in
+`compose/observability/alerts.yml`; routing + receivers in
+`compose/observability/alertmanager.yml`.
+
+| Alert | Severity | Fires when |
+| --- | --- | --- |
+| `PrometheusTargetDown` | info | A scrape target has been unreachable for 10m. Expected while idle; investigate only if a schedule should have fired. |
+| `HighIngestFetchFailureRate` | warning | >5% of block fetches for a given source are failing over 5m (sustained 10m). |
+| `IngestFetchLatencyHigh` | warning | p95 block-fetch latency >10s over 10m (sustained 15m). |
+| `HighParseFailureRate` | warning | A consumer group is failing to parse >0.1 msg/s from a stream over 5m (sustained 10m). Usually schema drift. |
+| `DLQMovesFiring` | critical | Any batch has been relocated to a DLQ stream in the last 15m. Inspect with `redis-cli XRANGE {stream}_dlq - + COUNT 5`. |
+| `ConsumerBatchLatencyHigh` | warning | p95 consumer batch duration >30s over 10m (sustained 15m). |
+
+The default receiver is `null` — alerts fire and are visible in the
+Alertmanager UI (`http://localhost:9093`) but no external notification is
+sent. To enable Slack, uncomment the `slack` receiver block in
+`alertmanager.yml`, point `api_url_file` at a file containing the webhook URL,
+and change the top-level `route.receiver` to `slack`.
+
+Silence a noisy alert via the Alertmanager UI or:
+
+```bash
+curl -XPOST http://localhost:9093/api/v2/silences \
+  -H 'Content-Type: application/json' \
+  -d '{"matchers":[{"name":"alertname","value":"HighIngestFetchFailureRate","isRegex":false}],"startsAt":"2026-04-21T00:00:00Z","endsAt":"2026-04-22T00:00:00Z","createdBy":"me","comment":"known upstream outage"}'
+```
+
+Reload alert rules without restarting Prometheus:
+
+```bash
+curl -XPOST http://localhost:9090/-/reload
+```
+
+## Labeling UX
+
+The frontend `/labels` page (`frontend/src/pages/LabelsPage.tsx`) drives the
+human-in-the-loop side of ingestion:
+
+1. **Queue targeted fetch** — operators submit `addresses`, transaction `hashes`,
+   or a `neighborhood` seed. `POST /api/labels/fetch` LPUSHes jobs onto the
+   Redis list `ingest:targeted_queue` and creates pending `label_tasks` rows.
+2. **Sensor drains the queue** — Dagster's `targeted_queue_sensor` (30s tick)
+   spawns `targeted_drain_job`, which shells out to the Rust `ingest targeted`
+   subcommand against those addresses.
+3. **Analysts annotate** — pending tasks appear in the task table; submitting
+   the annotation form (`POST /api/labels/annotations`) writes to the
+   `annotations` table and flips the task's status to `completed`.
+
+The `NodePanel` in the graph explorer has a **Label this entity** button that
+deep-links into `/labels?address=0x…` with the address prefilled.
+
 ## Operational notes
 
 Reset a stuck consumer group:

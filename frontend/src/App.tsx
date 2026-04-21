@@ -9,6 +9,7 @@ import {
     ETLPage,
     GroupsPage,
     HomePage,
+    LabelsPage,
     LoginPage,
     SignupPage,
 } from "./pages";
@@ -90,6 +91,14 @@ function App() {
                                                         navigate(`/explorer?address=${encodeURIComponent(addr)}`)
                                                     }
                                                 />
+                                            </ProtectedRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/labels"
+                                        element={
+                                            <ProtectedRoute>
+                                                <LabelsPage />
                                             </ProtectedRoute>
                                         }
                                     />

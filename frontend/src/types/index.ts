@@ -229,3 +229,60 @@ export interface IngestAddressResponse {
     features_computed: boolean;
     duration_seconds: number;
 }
+
+// ── Labeling ──────────────────────────────────────────────────────────────────
+
+export type LabelTaskStatus =
+    | "pending"
+    | "in_progress"
+    | "completed"
+    | "cancelled";
+
+export interface LabelTaskResponse {
+    id: number;
+    entity_address: string;
+    status: LabelTaskStatus;
+    priority: number;
+    title: string | null;
+    description: string | null;
+    assignee_id: number | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface LabelFetchRequest {
+    mode: "addresses" | "hashes" | "neighborhood";
+    addresses?: string[];
+    hashes?: string[];
+    seed?: string;
+    hops?: number;
+}
+
+export interface LabelFetchResponse {
+    task_ids: number[];
+    queued: number;
+}
+
+export interface AnnotationCreateRequest {
+    task_id: number;
+    entity_address: string;
+    entity_type?: EntityType | null;
+    risk_level: RiskLevel;
+    labels?: string[];
+    notes?: string | null;
+    evidence?: string | null;
+    confidence?: number | null;
+}
+
+export interface AnnotationResponse {
+    id: number;
+    task_id: number;
+    user_id: number | null;
+    entity_address: string;
+    entity_type: EntityType | null;
+    risk_level: RiskLevel;
+    labels: string[];
+    notes: string | null;
+    confidence: number | null;
+    created_at: string;
+}

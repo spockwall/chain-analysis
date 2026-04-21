@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Route, Routes, useNavigate, useLocation } from "react-router-dom";
 import { SearchBar } from "./SearchBar";
-import { LogoIcon, ExplorerIcon, GroupsIcon, EtlIcon, DashboardIcon, AdminIcon } from "./NavIcons";
+import { LogoIcon, ExplorerIcon, GroupsIcon, EtlIcon, DashboardIcon, AdminIcon, LabelsIcon } from "./NavIcons";
 import { useAuth } from "../context/AuthContext";
 
 const NAV_TABS: Array<{
@@ -12,6 +12,7 @@ const NAV_TABS: Array<{
 }> = [
     { to: "/explorer", label: "Explorer", icon: <ExplorerIcon /> },
     { to: "/groups", label: "Groups", icon: <GroupsIcon /> },
+    { to: "/labels", label: "Labels", icon: <LabelsIcon /> },
     { to: "/etl", label: "ETL", icon: <EtlIcon /> },
     { to: "/dashboard", label: "Dashboard", icon: <DashboardIcon /> },
     { to: "/admin/users", label: "Admin", icon: <AdminIcon />, roles: ["admin"] },

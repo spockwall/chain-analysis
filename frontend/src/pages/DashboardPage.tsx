@@ -6,6 +6,15 @@ import { useGraphStats } from "../hooks/useGraphStats";
 import { btnSecondary } from "@/constants";
 const sectionLabel = "text-[0.65rem] font-semibold tracking-[0.1em] uppercase text-gray-400";
 
+const EXTERNAL_TOOLS: Array<{ name: string; url: string; description: string }> = [
+    { name: "Dagster", url: "http://localhost:3000", description: "ETL orchestration" },
+    { name: "Grafana", url: "http://localhost:3001", description: "Metrics dashboards" },
+    { name: "Prometheus", url: "http://localhost:9090", description: "Metrics & targets" },
+    { name: "Alertmanager", url: "http://localhost:9093", description: "Alert routing" },
+    { name: "Neo4j Browser", url: "http://localhost:7474", description: "Graph queries" },
+    { name: "MinIO Console", url: "http://localhost:9001", description: "Object storage" },
+];
+
 export function DashboardPage() {
     const { health, loading, error, lastChecked, refresh } = useHealth({
         refreshInterval: 30000,
@@ -89,6 +98,40 @@ export function DashboardPage() {
                             <p className="text-[0.78rem] text-gray-400">No graph data — run the ETL pipeline first.</p>
                         )
                     )}
+                </div>
+
+                {/* Observability & orchestration tools */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+                    <p className={`${sectionLabel} mb-4`}>Observability & Orchestration</p>
+                    <div className="grid grid-cols-2 gap-2">
+                        {EXTERNAL_TOOLS.map((tool) => (
+                            <a
+                                key={tool.name}
+                                href={tool.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2.5 px-3.5 py-2.5 border border-gray-200 rounded-lg bg-gray-50 hover:bg-white hover:border-gray-300 transition-colors no-underline"
+                            >
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-[0.8rem] font-semibold text-gray-900">{tool.name}</div>
+                                    <div className="text-[0.68rem] text-gray-400 truncate">{tool.description}</div>
+                                </div>
+                                <svg
+                                    width="12"
+                                    height="12"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    className="text-gray-400 shrink-0"
+                                >
+                                    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                                    <polyline points="15 3 21 3 21 9" />
+                                    <line x1="10" y1="14" x2="21" y2="3" />
+                                </svg>
+                            </a>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Service health */}
