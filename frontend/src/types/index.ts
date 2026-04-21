@@ -222,12 +222,27 @@ export interface IngestAddressRequest {
 export interface IngestAddressResponse {
     address: string;
     run_id: string;
-    transactions_fetched: number;
-    internal_transactions_fetched: number;
-    entities_created: number;
-    transactions_created: number;
-    features_computed: boolean;
-    duration_seconds: number;
+    status: string;
+}
+
+export type IngestionRunStatus = "queued" | "running" | "completed" | "failed";
+
+export interface IngestionRun {
+    id: number;
+    run_id: string;
+    chain_id: number;
+    start_block: number;
+    end_block: number;
+    data_source: string;
+    status: IngestionRunStatus;
+    error_message: string | null;
+    transactions_processed: number;
+    traces_processed: number;
+    nodes_created: number;
+    edges_created: number;
+    started_at: string | null;
+    completed_at: string | null;
+    dagster_run_id: string | null;
 }
 
 // ── Labeling ──────────────────────────────────────────────────────────────────

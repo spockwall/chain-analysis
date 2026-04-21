@@ -89,6 +89,7 @@ class EntityType(str, PyEnum):
 class IngestionStatus(str, PyEnum):
     """Ingestion run status."""
 
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"

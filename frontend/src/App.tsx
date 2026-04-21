@@ -16,21 +16,15 @@ import {
 import { ToastContext } from "./context/ToastContext";
 import { useToast } from "./hooks/useToast";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { IngestionRunsProvider } from "./context/IngestionRunsContext";
 import "./index.css";
 
 function ExplorerRoute() {
-    const [params, setParams] = useSearchParams();
+    const [params] = useSearchParams();
     const address = params.get("address");
     const tx = params.get("tx");
-    return (
-        <GraphExplorerPage
-            initialAddress={address}
-            initialTxHash={tx}
-            onAddressLoad={() => {
-                if (address || tx) setParams({}, { replace: true });
-            }}
-        />
-    );
+    // Keep the address/tx in the URL so a refresh restores the same view.
+    return <GraphExplorerPage initialAddress={address} initialTxHash={tx} />;
 }
 
 /** Redirects to /login if not authenticated (waits for auth to load). */
@@ -61,6 +55,7 @@ function App() {
     return (
         <AuthProvider>
             <ToastContext.Provider value={toast}>
+                <IngestionRunsProvider>
                 <Nav />
                 <Routes>
                     {/* Public routes */}
@@ -134,6 +129,7 @@ function App() {
                 </Routes>
                 <Footer />
                 <Toaster />
+                </IngestionRunsProvider>
             </ToastContext.Provider>
         </AuthProvider>
     );

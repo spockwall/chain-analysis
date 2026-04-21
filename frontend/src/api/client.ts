@@ -15,6 +15,7 @@ import type {
     GroupUpdateRequest,
     IngestAddressRequest,
     IngestAddressResponse,
+    IngestionRun,
     AnnotationCreateRequest,
     AnnotationResponse,
     LabelFetchRequest,
@@ -290,6 +291,16 @@ export async function ingestAddress(body: IngestAddressRequest): Promise<IngestA
         method: "POST",
         body: JSON.stringify(body),
     });
+}
+
+// Ingestion runs (polled by useIngestionRun + RunStatusPill)
+
+export async function fetchIngestionRun(runId: string): Promise<IngestionRun> {
+    return request<IngestionRun>(`/ingestion-runs/${runId}`);
+}
+
+export async function listIngestionRuns(limit = 10): Promise<IngestionRun[]> {
+    return request<IngestionRun[]>(`/ingestion-runs?limit=${limit}`);
 }
 
 // Labeling endpoints

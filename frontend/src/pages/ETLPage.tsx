@@ -5,6 +5,8 @@ import { useState, useCallback, useRef } from "react";
 import { useHealth } from "../hooks/useHealth";
 import { useGraphStats } from "../hooks/useGraphStats";
 import { useToastContext } from "../context/ToastContext";
+import { useIngestionRun } from "../hooks/useIngestionRun";
+import { useIngestionRuns } from "../context/IngestionRunsContext";
 import {
     fetchEntity,
     fetchNeighbors,
@@ -20,7 +22,7 @@ import {
     type TransactionUpsertRequest,
 } from "../api/client";
 import { parseTxImportFile, type ParsedTxRow } from "../utils/txImportParser";
-import type { EntityResponse, EntityType, IngestAddressResponse, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
+import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 import {
     ENTITY_TYPES,
     RISK_LEVELS,
@@ -104,7 +106,15 @@ export function ETLPage() {
     // ── Ingest address state ─────────────────────────────────────────────────
     const [ingestAddr, setIngestAddr] = useState("");
     const [ingestLoading, setIngestLoading] = useState(false);
-    const [ingestResult, setIngestResult] = useState<IngestAddressResponse | null>(null);
+    const [ingestRunId, setIngestRunId] = useState<string | null>(null);
+    const ingestRun = useIngestionRun(ingestRunId, {
+        onComplete: (run) => {
+            if (run.status === "completed") {
+                refreshStats();
+            }
+        },
+    });
+    const { track: trackRun } = useIngestionRuns();
 
     const overallHealthy = health?.status === "healthy";
 
@@ -115,18 +125,22 @@ export function ETLPage() {
             return;
         }
         setIngestLoading(true);
-        setIngestResult(null);
-        const id = toast.loading("Fetching from Etherscan…");
+        setIngestRunId(null);
         try {
             const result = await ingestAddress({ address: addr });
-            setIngestResult(result);
-            toast.dismiss(id);
-            toast.success(
-                `Ingested ${result.transactions_fetched} txs, ${result.entities_created} entities`,
-            );
-            refreshStats();
+            setIngestRunId(result.run_id);
+            trackRun(result.run_id, {
+                onComplete: (run) => {
+                    if (run.status === "completed") {
+                        toast.success(`Ingest complete — ${run.transactions_processed} txs`);
+                        refreshStats();
+                    } else {
+                        toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                    }
+                },
+            });
+            toast.success("Queued — follow progress in the run pill");
         } catch (err) {
-            toast.dismiss(id);
             toast.error(err instanceof Error ? err.message : "Ingestion failed");
         } finally {
             setIngestLoading(false);
@@ -168,7 +182,7 @@ export function ETLPage() {
         }
         setTxLookupLoading(true);
         setTxLookupResult(null);
-        let id = toast.loading("Looking up transaction…");
+        const id = toast.loading("Looking up transaction…");
         try {
             const result = await fetchTransaction(hash);
             setTxLookupResult(result);
@@ -182,16 +196,26 @@ export function ETLPage() {
                     entityResult?.address ||
                     (isValidAddress(searchAddress.trim().toLowerCase()) ? searchAddress.trim().toLowerCase() : null);
                 if (addrToIngest) {
-                    id = toast.loading(`Not in DB. Ingesting ${addrToIngest.slice(0, 10)}… from chain…`);
                     try {
-                        await ingestAddress({ address: addrToIngest });
-                        const result = await fetchTransaction(hash);
-                        setTxLookupResult(result);
-                        toast.dismiss(id);
-                        toast.success(`Found after ingestion: ${hash.slice(0, 10)}…`);
+                        const queued = await ingestAddress({ address: addrToIngest });
+                        toast.success(`Queued ingest of ${addrToIngest.slice(0, 10)}…`);
+                        trackRun(queued.run_id, {
+                            onComplete: async (run) => {
+                                if (run.status !== "completed") {
+                                    toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                                    return;
+                                }
+                                try {
+                                    const result = await fetchTransaction(hash);
+                                    setTxLookupResult(result);
+                                    toast.success(`Found after ingestion: ${hash.slice(0, 10)}…`);
+                                } catch {
+                                    toast.error("Ingest succeeded but transaction still not found");
+                                }
+                            },
+                        });
                     } catch (ingestErr: any) {
-                        toast.dismiss(id);
-                        toast.error(ingestErr?.message || "Ingestion failed or transaction still not found");
+                        toast.error(ingestErr?.message || "Failed to queue ingest");
                     }
                 } else {
                     toast.error("Transaction not found. Enter a source address below to auto-ingest.");
@@ -503,17 +527,32 @@ export function ETLPage() {
                             {ingestLoading ? "Ingesting…" : "Ingest"}
                         </button>
                     </div>
-                    {ingestResult && (
-                        <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-green-50">
-                            <p className="text-[0.78rem] font-semibold text-green-700 mb-2">Ingestion Complete</p>
+                    {ingestRun && (
+                        <div
+                            className={`mt-3 p-3 border rounded-lg ${
+                                ingestRun.status === "completed"
+                                    ? "border-green-200 bg-green-50"
+                                    : ingestRun.status === "failed"
+                                      ? "border-rose-200 bg-rose-50"
+                                      : "border-sky-200 bg-sky-50"
+                            }`}
+                        >
+                            <p
+                                className={`text-[0.78rem] font-semibold mb-2 uppercase tracking-wide ${
+                                    ingestRun.status === "completed"
+                                        ? "text-green-700"
+                                        : ingestRun.status === "failed"
+                                          ? "text-rose-700"
+                                          : "text-sky-700"
+                                }`}
+                            >
+                                Run {ingestRun.status}
+                            </p>
                             <div className="grid grid-cols-3 gap-3">
                                 {[
-                                    { v: ingestResult.transactions_fetched, l: "Txs Fetched" },
-                                    { v: ingestResult.internal_transactions_fetched, l: "Internal Txs" },
-                                    { v: ingestResult.entities_created, l: "Entities Created" },
-                                    { v: ingestResult.transactions_created, l: "Txs Created" },
-                                    { v: ingestResult.features_computed ? "Yes" : "No", l: "Features" },
-                                    { v: `${ingestResult.duration_seconds.toFixed(1)}s`, l: "Duration" },
+                                    { v: ingestRun.transactions_processed, l: "Txs Processed" },
+                                    { v: ingestRun.traces_processed, l: "Traces" },
+                                    { v: ingestRun.nodes_created, l: "Nodes Created" },
                                 ].map(({ v, l }) => (
                                     <div key={l}>
                                         <div className="text-[1rem] font-bold text-gray-900 leading-none">{v}</div>
@@ -521,8 +560,11 @@ export function ETLPage() {
                                     </div>
                                 ))}
                             </div>
+                            {ingestRun.error_message && (
+                                <p className="text-[0.72rem] text-rose-700 mt-2">{ingestRun.error_message}</p>
+                            )}
                             <p className="font-mono text-[0.68rem] text-gray-500 mt-2">
-                                Run ID: {ingestResult.run_id}
+                                Run ID: {ingestRun.run_id}
                             </p>
                         </div>
                     )}

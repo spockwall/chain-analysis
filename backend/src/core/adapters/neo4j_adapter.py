@@ -281,43 +281,47 @@ class Neo4jAdapter:
         # All three direction variants anchor on the entity_address unique index and
         # traverse SENT/RECEIVED relationships — no Transaction property scan occurs.
         # Complexity: O(log E + K) where K = tx degree, bounded by LIMIT.
+        # Order by block_number DESC so when LIMIT truncates we keep the most
+        # recent txs — critical for high-volume addresses (exchanges, mixers)
+        # where an unordered LIMIT would return arbitrary slices.
         if direction == "out":
-            # Follows outgoing SENT edges: center → tx → neighbor.
-            # LIMIT applied before aggregation to cap rows before collect().
             query = """
             MATCH (center:Entity {address: $address})-[:SENT]->(tx:Transaction)-[:RECEIVED]->(neighbor:Entity)
             WITH tx, neighbor
+            ORDER BY tx.block_number DESC
             LIMIT $limit
             RETURN
                 collect(DISTINCT neighbor) AS neighbors,
                 collect(DISTINCT tx)       AS txs
             """
         elif direction == "in":
-            # Traverses in reverse: neighbor → tx → center.
-            # Relationship direction is explicit so the planner uses the RECEIVED index.
             query = """
             MATCH (neighbor:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(center:Entity {address: $address})
             WITH tx, neighbor
+            ORDER BY tx.block_number DESC
             LIMIT $limit
             RETURN
                 collect(DISTINCT neighbor) AS neighbors,
                 collect(DISTINCT tx)       AS txs
             """
         else:
-            # Two independent OPTIONAL MATCHes from the same anchor node.
-            # Results are concatenated then filtered for NULLs (arise when one
-            # direction has no transactions). LIMIT caps the final collection.
+            # Union out + in at the row level so LIMIT caps the combined tx set
+            # (previous version collected everything first, then LIMIT on a single
+            # row did nothing useful — thousands of edges would hit the canvas).
             query = """
-            MATCH (center:Entity {address: $address})
-            OPTIONAL MATCH (center)-[:SENT]->(out_tx:Transaction)-[:RECEIVED]->(out_nb:Entity)
-            OPTIONAL MATCH (in_nb:Entity)-[:SENT]->(in_tx:Transaction)-[:RECEIVED]->(center)
-            WITH
-                collect(DISTINCT out_nb)  + collect(DISTINCT in_nb)  AS neighbors,
-                collect(DISTINCT out_tx) + collect(DISTINCT in_tx)   AS txs
-            RETURN
-                [x IN neighbors WHERE x IS NOT NULL] AS neighbors,
-                [x IN txs      WHERE x IS NOT NULL] AS txs
+            CALL {
+                MATCH (:Entity {address: $address})-[:SENT]->(tx:Transaction)-[:RECEIVED]->(neighbor:Entity)
+                RETURN tx, neighbor
+                UNION
+                MATCH (neighbor:Entity)-[:SENT]->(tx:Transaction)-[:RECEIVED]->(:Entity {address: $address})
+                RETURN tx, neighbor
+            }
+            WITH tx, neighbor
+            ORDER BY tx.block_number DESC
             LIMIT $limit
+            RETURN
+                collect(DISTINCT neighbor) AS neighbors,
+                collect(DISTINCT tx)       AS txs
             """
 
         result = await self.execute_query(

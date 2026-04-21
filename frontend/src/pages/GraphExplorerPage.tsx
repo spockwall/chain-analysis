@@ -2,10 +2,12 @@
  * Graph Explorer page — main address search & graph view.
  */
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { GraphCanvas, type LayoutName, type GraphFilters } from "../components/GraphCanvas";
 import { NodePanel } from "../components/NodePanel";
 import { TxPanel } from "../components/TxPanel";
 import { useToastContext } from "../context/ToastContext";
+import { useIngestionRuns } from "../context/IngestionRunsContext";
 import type { EntityResponse, NeighborsResponse, PathResponse, TransactionResponse } from "../types";
 import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
 import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
@@ -14,7 +16,6 @@ import { Background } from "../components/Background";
 interface GraphExplorerPageProps {
     initialAddress?: string | null;
     initialTxHash?: string | null;
-    onAddressLoad?: () => void;
 }
 
 const DEFAULT_FILTERS: GraphFilters = {
@@ -27,8 +28,10 @@ const DEFAULT_FILTERS: GraphFilters = {
 const monoInput =
     "w-60 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none transition-colors focus:border-blue-400";
 
-export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad }: GraphExplorerPageProps) {
+export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplorerPageProps) {
     const toast = useToastContext();
+    const { track: trackRun } = useIngestionRuns();
+    const [, setSearchParams] = useSearchParams();
     const [graphData, setGraphData] = useState<NeighborsResponse | null>(null);
     const [selectedNode, setSelectedNode] = useState<EntityResponse | null>(null);
     const [selectedEdge, setSelectedEdge] = useState<TransactionResponse | null>(null);
@@ -49,28 +52,24 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     const [pathLoading, setPathLoading] = useState(false);
 
     useEffect(() => {
-        if (initialAddress) {
-            handleSearch(initialAddress);
-            onAddressLoad?.();
-        }
+        if (initialAddress) handleSearch(initialAddress);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialAddress]);
 
     useEffect(() => {
-        if (initialTxHash) {
-            handleTxSearch(initialTxHash);
-            onAddressLoad?.();
-        }
+        if (initialTxHash) handleTxSearch(initialTxHash);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialTxHash]);
 
     const handleSearch = async (address: string) => {
+        // Keep URL in sync so a refresh restores this view.
+        setSearchParams({ address }, { replace: true });
         setLoading(true);
         const loadId = toast.loading("Fetching graph data…");
         try {
             const [entityResult, neighborsResult] = await Promise.allSettled([
                 fetchEntity(address),
-                fetchNeighbors(address, { depth: 1, limit: 50 }),
+                fetchNeighbors(address, { depth: 1, limit: 500 }),
             ]);
 
             // Tolerate 404 — synthesise a stub so the canvas can still render
@@ -97,8 +96,9 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     };
 
     const handleTxSearch = async (hash: string) => {
+        setSearchParams({ tx: hash }, { replace: true });
         setLoading(true);
-        let loadId = toast.loading("Fetching transaction…");
+        const loadId = toast.loading("Fetching transaction…");
         try {
             let tx: TransactionResponse | null = null;
             try {
@@ -113,16 +113,25 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                         return;
                     }
                     toast.dismiss(loadId);
-                    loadId = toast.loading(`Transaction not found. Ingesting ${addrToIngest.slice(0, 10)}… from chain…`);
+                    toast.info(
+                        `Transaction not found. Queued ingest of ${addrToIngest.slice(0, 10)}… — retry when the run pill shows completed.`,
+                    );
                     try {
-                        await ingestAddress({ address: addrToIngest });
-                        toast.success("Ingestion complete. Retrying transaction lookup…");
-                        tx = await fetchTransaction(hash);
+                        const queued = await ingestAddress({ address: addrToIngest });
+                        trackRun(queued.run_id, {
+                            onComplete: (run) => {
+                                if (run.status === "completed") {
+                                    toast.success("Ingest complete — try the transaction again.");
+                                } else {
+                                    toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                                }
+                            },
+                        });
                     } catch (ingestErr: any) {
-                        toast.error(ingestErr?.message || "Ingestion failed");
-                        setLoading(false);
-                        return;
+                        toast.error(ingestErr?.message || "Failed to queue ingest");
                     }
+                    setLoading(false);
+                    return;
                 } else {
                     throw err;
                 }
@@ -229,11 +238,23 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
             setSelectedEdge(await fetchTransaction(txHash));
         } catch (err: any) {
             if (err?.status === 404 && currentAddress) {
+                // Queue an async ingest; show a placeholder edge now and
+                // retry the fetch when the run completes.
+                setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
                 try {
-                    await ingestAddress({ address: currentAddress });
-                    setSelectedEdge(await fetchTransaction(txHash));
+                    const queued = await ingestAddress({ address: currentAddress });
+                    trackRun(queued.run_id, {
+                        onComplete: async (run) => {
+                            if (run.status !== "completed") return;
+                            try {
+                                setSelectedEdge(await fetchTransaction(txHash));
+                            } catch {
+                                // still missing — leave placeholder
+                            }
+                        },
+                    });
                 } catch {
-                    setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
+                    // ignore; placeholder already shown
                 }
             } else {
                 setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
@@ -245,7 +266,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         setLoading(true);
         const loadId = toast.loading("Expanding node…");
         try {
-            const neighbors = await fetchNeighbors(address, { depth: 1, limit: 50 });
+            const neighbors = await fetchNeighbors(address, { depth: 1, limit: 500 });
             if (graphData) {
                 const existingAddresses = new Set(graphData.nodes.map((n) => n.address));
                 const newNodes = neighbors.nodes.filter((n) => !existingAddresses.has(n.address));
@@ -283,18 +304,22 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
 
     const handleIngestAndLoad = async (address: string) => {
         setLoading(true);
-        const loadId = toast.loading("Fetching transactions from Etherscan…");
         try {
             const result = await ingestAddress({ address });
-            toast.dismiss(loadId);
-            toast.success(
-                `Ingested ${result.transactions_fetched} txs, ${result.entities_created} entities`,
-            );
-            // Re-search to load the newly ingested data
-            await handleSearch(address);
+            toast.success("Queued ingest — graph will refresh when run completes.");
+            trackRun(result.run_id, {
+                onComplete: async (run) => {
+                    if (run.status !== "completed") {
+                        toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                        return;
+                    }
+                    toast.success(`Ingest complete — ${run.transactions_processed} txs`);
+                    await handleSearch(address);
+                },
+            });
         } catch (err) {
-            toast.dismiss(loadId);
-            toast.error(err instanceof Error ? err.message : "Ingestion failed");
+            toast.error(err instanceof Error ? err.message : "Failed to queue ingest");
+        } finally {
             setLoading(false);
         }
     };
@@ -729,7 +754,14 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 </span>
                                 <span className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500">
                                     <span className="w-[5px] h-[5px] rounded-full bg-emerald-500" />
-                                    {graphData.total_transactions} transactions
+                                    {graphData.total_transactions.toLocaleString()} transactions
+                                    {selectedNode?.transaction_count != null &&
+                                        selectedNode.address === graphData.center_address &&
+                                        selectedNode.transaction_count > graphData.total_transactions && (
+                                            <span className="text-gray-400 font-normal">
+                                                &nbsp;of {selectedNode.transaction_count.toLocaleString()}
+                                            </span>
+                                        )}
                                 </span>
                                 {graphData.total_transactions === 0 && graphData.center_address && (
                                     <button
@@ -781,7 +813,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                             </div>
                             <button
                                 className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-gray-200 rounded-lg text-[0.75rem] text-gray-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-colors font-mono hover:bg-gray-50 hover:border-gray-300"
-                                onClick={() => handleSearch("0x28c6c06298d514db089934071355e5743bf21d60")}
+                                onClick={() => setSearchParams({ address: "0x28c6c06298d514db089934071355e5743bf21d60" })}
                             >
                                 <svg
                                     width="12"

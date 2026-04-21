@@ -2,6 +2,44 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Roadmap
+
+Open phases teammates can pick up. Ordered by user-facing value.
+
+### Phase H — ETL end-to-end cooperation (IN PROGRESS)
+Make the backend, Rust ETL, and frontend cooperate on a single ingestion path.
+Today `POST /api/pipeline/ingest-address` fetches Etherscan in Python and
+blocks synchronously, duplicating what `etl-rs/crates/ingest` already does.
+The labels flow LPUSHes to `ingest:targeted_queue` but the Dagster sensor
+defaults to stopped. Deliverables: collapse to one Rust-driven path, make the
+backend route async (queue + return `run_id`), enable the sensor by default,
+add a run-status pill + polling hook in the frontend. Full plan at
+`/Users/spockwall/.claude/plans/read-readme-md-now-glowing-toast.md`.
+
+### Phase I — AML Detections UI
+The Cypher queries in `backend/src/graph/queries.py` (peel chain, structuring,
+round trip, fan-out/fan-in, mixer interaction) exist but have no API route
+and no UI. Build `/api/detections/{pattern}?address=…` endpoints and a
+Detections tab that highlights matching subgraphs on the Cytoscape canvas.
+Highest analyst-facing value after Phase H.
+
+### Phase J — Parquet cold-tier export
+`etl-rs/README.md` advertises Parquet exports to MinIO but no code exists.
+Add a Rust binary or Dagster asset that reads from ClickHouse, partitions by
+date, and writes to `chain-analysis-raw/year=YYYY/month=MM/day=DD/…`.
+Unlocks ML training and compliance retention.
+
+### Phase K — E2E test coverage
+No Playwright/Cypress suite. Add a smoke journey: login → ingest address →
+explore → queue label → annotate. Wire into CI alongside existing
+`backend/pytest` and `etl-rs/cargo test`.
+
+### Phase L — Dagster hardening
+Deferred items from the original Phase D plan:
+(a) migrate Dagster run storage from SQLite to the shared Postgres,
+(b) scrape Dagster's `/metrics` endpoint into Prometheus,
+(c) model always-on stream consumers as Dagster assets for lineage.
+
 ## Project Overview
 
 Chain-Analysis is a blockchain transaction analysis platform for detecting and investigating money laundering patterns on Ethereum and EVM-compatible chains. The system models blockchain entities as a property graph, enables human analysts to label suspicious activity, and provides a visual interface for exploring transaction flows.
