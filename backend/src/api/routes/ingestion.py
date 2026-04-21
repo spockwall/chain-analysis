@@ -60,9 +60,17 @@ async def list_ingestion_runs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> list[IngestionRunResponse]:
-    """List ingestion runs, newest first."""
+    """List user-triggered ingestion runs, newest first.
+
+    Excludes `rust-process` rows — those are the long-running stream consumer's
+    lifetime markers (inserted at startup, updated on graceful exit) and would
+    otherwise appear stuck at `running` in the UI for the lifetime of the
+    container.
+    """
     rows = await db.execute(
-        "SELECT * FROM ingestion_runs ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
+        "SELECT * FROM ingestion_runs "
+        "WHERE data_source <> 'rust-process' "
+        "ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
         {"limit": limit, "offset": offset},
     )
     return [_row_to_response(row) for row in rows]

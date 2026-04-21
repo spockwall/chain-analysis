@@ -4,7 +4,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { EntityResponse, TransactionResponse } from "../types";
-import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember, ingestAddress } from "../api/client";
+import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember, ingestAddress, enqueueLabelFetch } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
 import { useIngestionRuns } from "../context/IngestionRunsContext";
 import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
@@ -34,6 +34,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
     const [memberInput, setMemberInput] = useState("");
     const [membersLoading, setMembersLoading] = useState(false);
     const [ingesting, setIngesting] = useState(false);
+    const [tracing, setTracing] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -102,6 +103,18 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
             toast.error(err instanceof Error ? err.message : "Ingestion failed");
         } finally {
             setIngesting(false);
+        }
+    };
+
+    const handleDeepTrace = async () => {
+        setTracing(true);
+        try {
+            await enqueueLabelFetch({ mode: "neighborhood", seed: node.address, hops: 2 });
+            toast.success("Queued neighborhood fetch — Dagster will pick up within 30s");
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : "Failed to queue neighborhood fetch");
+        } finally {
+            setTracing(false);
         }
     };
 
@@ -260,6 +273,32 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
                                 <polyline points="7 10 12 15 17 10" />
                                 <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                        </button>
+                        <button
+                            className="w-full px-3.5 py-[9px] rounded-lg text-[0.78rem] font-semibold font-[inherit] cursor-pointer flex items-center justify-between transition-colors bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 disabled:opacity-45 disabled:cursor-not-allowed"
+                            onClick={handleDeepTrace}
+                            disabled={tracing}
+                            title="Queue a 2-hop neighborhood ingest via the Rust ETL worker"
+                        >
+                            {tracing ? "Queueing…" : "Deep trace (2 hops)"}
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                            >
+                                <circle cx="12" cy="12" r="3" />
+                                <circle cx="4" cy="6" r="2" />
+                                <circle cx="20" cy="6" r="2" />
+                                <circle cx="4" cy="18" r="2" />
+                                <circle cx="20" cy="18" r="2" />
+                                <line x1="12" y1="12" x2="4" y2="6" />
+                                <line x1="12" y1="12" x2="20" y2="6" />
+                                <line x1="12" y1="12" x2="4" y2="18" />
+                                <line x1="12" y1="12" x2="20" y2="18" />
                             </svg>
                         </button>
                         <button

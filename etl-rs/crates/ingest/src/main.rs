@@ -4,6 +4,7 @@ use ingest::modes::reprocess::reprocess_failed_blocks;
 use ingest::modes::targeted::{run_targeted, TargetSpec};
 use ingest::{get_latest_block, ingest_address, ingest_block_range_pipelined, DynBlockSource};
 use pipeline::{install_shutdown, ProgressReporter, RetryPolicy};
+use sinks::postgres_writer::PostgresWriter;
 use sinks::redis_stream::{RedisStreamWriter, StdoutWriter, TransactionWriter};
 use sources::{make_source, SourceConfig};
 use std::sync::Arc;
@@ -495,7 +496,29 @@ async fn run_targeted_mode(
     let mut writer = make_writer(false, &config.redis_url, "etherscan", config.stream_maxlen).await?;
     let mut reporter = make_reporter(false, &config.redis_url, run_id).await?;
 
-    let total = run_targeted(config, spec, &mut writer, &mut reporter, with_traces, with_transfers).await?;
+    // Optional: if DATABASE_URL is set, emit ingestion_runs transitions for
+    // queued entries that carry a `run_id` (e.g. web-triggered fetches).
+    let pg_writer = match config.postgres_url.as_deref() {
+        Some(url) => match sqlx::PgPool::connect(url).await {
+            Ok(pool) => Some(PostgresWriter::new(pool)),
+            Err(e) => {
+                tracing::warn!(error = %e, "ingestion_runs updates disabled: PG connect failed");
+                None
+            }
+        },
+        None => None,
+    };
+
+    let total = run_targeted(
+        config,
+        spec,
+        &mut writer,
+        &mut reporter,
+        pg_writer.as_ref(),
+        with_traces,
+        with_transfers,
+    )
+    .await?;
     info!(transactions = total, "Targeted ingestion complete");
     Ok(())
 }
