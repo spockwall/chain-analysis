@@ -102,6 +102,7 @@ chain-analysis/
         │   ├── GraphExplorerPage.tsx  # Search, path finder, filter panel
         │   ├── GroupsPage.tsx         # Group management
         │   ├── ETLPage.tsx            # Ingestion trigger, run history, entity features lookup
+        │   ├── LabelsPage.tsx         # Queue targeted-fetch jobs + analyst annotation form
         │   └── DashboardPage.tsx      # System health + graph stats
         ├── api/client.ts       # Fetch wrappers for all backend endpoints
         ├── types/index.ts      # TypeScript interfaces

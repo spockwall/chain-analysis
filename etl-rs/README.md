@@ -65,8 +65,12 @@ columnar store.
 └──────────────────────────────────────────────────────────────────────────────┘
 
 Cold tier (archive): MinIO (S3-compatible) — raw data, ML training, compliance.
-Orchestration (Phase D, not yet wired): Dagster assets scheduled to drive
-`ingest` binaries; current `backend/src/etl/` is scaffolded but stale.
+Orchestration: Dagster webserver + daemon wrap the `ingest` binary as
+subprocess-executed jobs (backfill, reprocess, targeted drain). See the
+Orchestration section below.
+Observability: Prometheus scrapes `/metrics` from every Rust worker; Grafana
+renders the `ETL Overview` dashboard; Alertmanager routes rule violations.
+See the Observability section below.
 ```
 
 ### Per-layer tooling
@@ -80,11 +84,11 @@ Orchestration (Phase D, not yet wired): Dagster assets scheduled to drive
 | Graph store | Neo4j 5 + GDS, `neo4rs` (Rust), async neo4j (Python) | Transaction-as-Node graph |
 | Relational store | PostgreSQL 17, `sqlx` (Rust), `asyncpg` (Python) | Features, labels, auth, run history |
 | Analytical store | ClickHouse, `clickhouse-rs` (Rust), `clickhouse-connect` (Python) | OLAP / BI |
-| Object store | MinIO (S3 API) | Cold archive, Parquet exports (Phase F) |
+| Object store | MinIO (S3 API) | Cold archive, Parquet exports |
 | API | FastAPI + Pydantic | REST façade |
 | Frontend | React 18 + Vite + Cytoscape.js | Analyst UI |
-| Orchestration | Dagster (Phase D) | Scheduling, sensors, lineage |
-| Observability | Prometheus / Grafana / OTel (Phase E) | Metrics, tracing |
+| Orchestration | Dagster (webserver + daemon) | Scheduling, sensors, lineage |
+| Observability | Prometheus / Grafana / Alertmanager | Metrics, dashboards, alerting |
 
 The two consumer groups (`chain-analysis-process` and `chain-analysis-clickhouse`)
 share the same streams but ack independently, so analytical writes can't
@@ -272,7 +276,7 @@ push/PR that touches `etl-rs/`.
 
 ## Orchestration (Dagster)
 
-Phase D wires the `ingest` binary into Dagster so analysts can schedule
+Dagster wraps the `ingest` binary so analysts can schedule
 backfills, inspect runs, and auto-drain the targeted-fetch queue from a UI.
 The `process` and `clickhouse-process` consumers stay outside Dagster — they
 are always-on stream consumers, nothing to schedule.
