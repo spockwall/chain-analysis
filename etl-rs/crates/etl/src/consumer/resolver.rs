@@ -184,6 +184,7 @@ mod tests {
         known.insert(
             "0xccc".into(),
             KnownLabel {
+                address: "0xccc".into(),
                 name: "Tornado Cash".into(),
                 entity_type: Some("Mixer".into()),
                 risk_level: Some("critical".into()),

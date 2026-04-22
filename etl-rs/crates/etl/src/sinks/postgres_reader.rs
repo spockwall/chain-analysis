@@ -6,6 +6,7 @@ use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct KnownLabel {
+    pub address: String,
     pub name: String,
     pub entity_type: Option<String>,
     pub risk_level: Option<String>,
@@ -49,6 +50,7 @@ impl PostgresReader {
                 labels.insert(
                     addr.clone(),
                     KnownLabel {
+                        address: addr,
                         name: row.get("name"),
                         entity_type: row.get("entity_type"),
                         risk_level: row.get("risk_level"),
