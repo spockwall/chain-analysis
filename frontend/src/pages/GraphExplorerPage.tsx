@@ -61,28 +61,40 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialTxHash]);
 
-    const handleSearch = async (address: string) => {
+    const handleSearch = async (address: string, opts?: { waitForGraph?: boolean }) => {
         // Keep URL in sync so a refresh restores this view.
         setSearchParams({ address }, { replace: true });
         setLoading(true);
         const loadId = toast.loading("Fetching graph data…");
         try {
-            const [entityResult, neighborsResult] = await Promise.allSettled([
-                fetchEntity(address),
-                fetchNeighbors(address, { depth: 1, limit: 500 }),
-            ]);
+            // When called right after an ingest completes, the Rust worker has
+            // XADDed txs to Redis but task C (stream→Neo4j) may still be
+            // draining. Retry briefly so the first render isn't empty.
+            const maxAttempts = opts?.waitForGraph ? 8 : 1;
+            let entity: EntityResponse | null = null;
+            let neighbors: Awaited<ReturnType<typeof fetchNeighbors>> | null = null;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const [entityResult, neighborsResult] = await Promise.allSettled([
+                    fetchEntity(address),
+                    fetchNeighbors(address, { depth: 1, limit: 500 }),
+                ]);
 
-            // Tolerate 404 — synthesise a stub so the canvas can still render
-            const entity: EntityResponse =
-                entityResult.status === "fulfilled"
-                    ? entityResult.value
-                    : { address, risk_level: "unknown", labels: [], properties: {} };
+                entity =
+                    entityResult.status === "fulfilled"
+                        ? entityResult.value
+                        : { address, risk_level: "unknown", labels: [], properties: {} };
 
-            if (neighborsResult.status === "rejected") throw neighborsResult.reason;
+                if (neighborsResult.status === "rejected") throw neighborsResult.reason;
+                neighbors = neighborsResult.value;
 
-            const neighbors = neighborsResult.value;
+                if (!opts?.waitForGraph || neighbors.nodes.length > 0) break;
+                // Neo4j consumer still draining — back off and retry (0.5s, 1s, ..., up to ~8s total).
+                await new Promise((r) => setTimeout(r, 1000));
+            }
+
+            if (!entity || !neighbors) throw new Error("no graph data");
             setSelectedNode(entity);
-            const centerInNodes = neighbors.nodes.some((n) => n.address === entity.address);
+            const centerInNodes = neighbors.nodes.some((n) => n.address === entity!.address);
             const nodes = centerInNodes ? neighbors.nodes : [entity, ...neighbors.nodes];
             setGraphData({ ...neighbors, nodes, total_nodes: nodes.length });
             setPathResult(null);
@@ -314,7 +326,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                         return;
                     }
                     toast.success(`Ingest complete — ${run.transactions_processed} txs`);
-                    await handleSearch(address);
+                    await handleSearch(address, { waitForGraph: true });
                 },
             });
         } catch (err) {
@@ -841,7 +853,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                                 onClose={() => setSelectedNode(null)}
                                 transactions={graphData?.transactions}
                                 onNavigateToAddress={handleNodeSelect}
-                                onIngestComplete={(addr) => handleSearch(addr)}
+                                onIngestComplete={(addr) => handleSearch(addr, { waitForGraph: true })}
                                 overrideMembers={
                                     selectedNode.address === "synthetic_high_risk_group" && graphData
                                         ? graphData.nodes.filter(n => n.risk_level === "critical")

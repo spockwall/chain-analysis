@@ -4,8 +4,8 @@
  * Flow:
  *  1. Operators queue a fetch (addresses / hashes / neighborhood) → backend LPUSHes
  *     to the Redis INGEST_TARGETED_QUEUE and creates LabelTask rows.
- *  2. Dagster's targeted_queue_sensor drains the queue and runs the Rust ingest
- *     binary against those addresses.
+ *  2. The Rust `worker` binary's task A BRPOPs the queue and runs the
+ *     targeted fetch against Etherscan.
  *  3. Analysts open a pending task from the table and submit an AnnotationCreate,
  *     which flips the task status to `completed`.
  */
@@ -41,7 +41,7 @@ type FetchMode = "addresses" | "hashes" | "neighborhood";
 
 const STATUS_FILTERS: Array<{ value: LabelTaskStatus | "all"; label: string }> = [
     { value: "pending", label: "Pending" },
-    { value: "in_progress", label: "In progress" },
+    { value: "running", label: "running" },
     { value: "completed", label: "Completed" },
     { value: "cancelled", label: "Cancelled" },
     { value: "all", label: "All" },
@@ -49,7 +49,7 @@ const STATUS_FILTERS: Array<{ value: LabelTaskStatus | "all"; label: string }> =
 
 const STATUS_BADGE: Record<LabelTaskStatus, string> = {
     pending: "border border-amber-500 text-amber-600",
-    in_progress: "border border-sky-500 text-sky-600",
+    running: "border border-sky-500 text-sky-600",
     completed: "border border-green-500 text-green-600",
     cancelled: "border border-slate-400 text-slate-500",
 };
@@ -100,9 +100,9 @@ export function LabelsPage() {
     }, [loadTasks]);
 
     // While any task is pending/in-progress, refresh every 5s so analysts see
-    // the Dagster sensor drain + Rust worker complete without a manual reload.
+    // the Rust worker drain + complete without a manual reload.
     useEffect(() => {
-        const hasActive = tasks.some((t) => t.status === "pending" || t.status === "in_progress");
+        const hasActive = tasks.some((t) => t.status === "pending" || t.status === "running");
         if (!hasActive) return;
         const handle = window.setInterval(loadTasks, 5000);
         return () => window.clearInterval(handle);
@@ -160,7 +160,7 @@ export function LabelsPage() {
         try {
             const res = await enqueueLabelFetch(body);
             toast.success(
-                `Queued ${res.queued} task${res.queued === 1 ? "" : "s"} — Dagster sensor will drain within 30s`,
+                `Queued ${res.queued} task${res.queued === 1 ? "" : "s"} — worker will drain within seconds`,
             );
             setAddressesInput("");
             setHashesInput("");
@@ -353,7 +353,7 @@ export function LabelsPage() {
                                                     {new Date(t.created_at).toLocaleString()}
                                                 </td>
                                                 <td className="px-3 py-2 text-right">
-                                                    {t.status === "pending" || t.status === "in_progress" ? (
+                                                    {t.status === "pending" || t.status === "running" ? (
                                                         <button
                                                             type="button"
                                                             onClick={() => openTask(t)}

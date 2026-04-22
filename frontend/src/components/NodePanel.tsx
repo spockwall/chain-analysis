@@ -4,7 +4,15 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { EntityResponse, TransactionResponse } from "../types";
-import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember, ingestAddress, enqueueLabelFetch } from "../api/client";
+import {
+    formatAddress,
+    formatWei,
+    fetchGroupMembers,
+    addGroupMember,
+    removeGroupMember,
+    ingestAddress,
+    enqueueLabelFetch,
+} from "../api/client";
 import { useToastContext } from "../context/ToastContext";
 import { useIngestionRuns } from "../context/IngestionRunsContext";
 import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
@@ -24,11 +32,19 @@ const divider = "border-none border-t border-gray-100 m-0";
 const btnIcon =
     "w-[26px] h-[26px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900";
 
-export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress, overrideMembers, onIngestComplete }: NodePanelProps) {
+export function NodePanel({
+    node,
+    onExpand,
+    onClose,
+    transactions,
+    onNavigateToAddress,
+    overrideMembers,
+    onIngestComplete,
+}: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
     const toast = useToastContext();
     const navigate = useNavigate();
-    const { track: trackRun } = useIngestionRuns();
+    const { track: trackRun, trackTask } = useIngestionRuns();
 
     const [members, setMembers] = useState<EntityResponse[]>([]);
     const [memberInput, setMemberInput] = useState("");
@@ -52,7 +68,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
             .then((res) => {
                 if (!cancelled) setMembers(res.members);
             })
-            .catch(() => { })
+            .catch(() => {})
             .finally(() => {
                 if (!cancelled) setMembersLoading(false);
             });
@@ -109,8 +125,21 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
     const handleDeepTrace = async () => {
         setTracing(true);
         try {
-            await enqueueLabelFetch({ mode: "neighborhood", seed: node.address, hops: 2 });
-            toast.success("Queued neighborhood fetch — Dagster will pick up within 30s");
+            const res = await enqueueLabelFetch({ mode: "neighborhood", seed: node.address, hops: 1 });
+            toast.success("Queued neighborhood fetch — worker will pick up within seconds");
+            const taskId = res.task_ids?.[0];
+            if (taskId) {
+                trackTask(taskId, {
+                    onComplete: (task) => {
+                        if (task.status === "completed") {
+                            toast.success("Neighborhood fetch complete");
+                            onIngestComplete?.(node.address);
+                        } else {
+                            toast.error(`Neighborhood fetch ${task.status}`);
+                        }
+                    },
+                });
+            }
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : "Failed to queue neighborhood fetch");
         } finally {
@@ -168,7 +197,14 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                         </span>
                         {(node.member_count ?? 0) > 0 && (
                             <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase bg-violet-600 text-white border border-violet-600">
-                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <svg
+                                    width="9"
+                                    height="9"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2.5"
+                                >
                                     <circle cx="9" cy="7" r="4" />
                                     <path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2" />
                                     <path d="M16 3.13a4 4 0 010 7.75" />
@@ -281,7 +317,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             disabled={tracing}
                             title="Queue a 2-hop neighborhood ingest via the Rust ETL worker"
                         >
-                            {tracing ? "Queueing…" : "Deep trace (2 hops)"}
+                            {tracing ? "Queueing…" : "Deep trace (1 hop)"}
                             <svg
                                 width="12"
                                 height="12"
@@ -379,7 +415,9 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                                         {m.name}
                                                     </span>
                                                 )}
-                                                <span className={`block font-mono text-[0.66rem] truncate leading-snug ${m.name ? "text-gray-500" : "text-gray-900 hover:underline"}`}>
+                                                <span
+                                                    className={`block font-mono text-[0.66rem] truncate leading-snug ${m.name ? "text-gray-500" : "text-gray-900 hover:underline"}`}
+                                                >
                                                     {formatAddress(m.address, 5)}
                                                 </span>
                                             </button>
@@ -467,9 +505,9 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                             </div>
                             {node.transaction_count != null && node.transaction_count > txForNode.length && (
                                 <p className="text-[0.65rem] text-gray-400 mt-1.5 mb-0">
-                                    Only the {txForNode.length.toLocaleString()} transactions in the current graph view are
-                                    shown. Click <span className="font-semibold">Expand Neighbours</span> or open the
-                                    address on Etherscan for the full history.
+                                    Only the {txForNode.length.toLocaleString()} transactions in the current graph view
+                                    are shown. Click <span className="font-semibold">Expand Neighbours</span> or open
+                                    the address on Etherscan for the full history.
                                 </p>
                             )}
                         </div>
