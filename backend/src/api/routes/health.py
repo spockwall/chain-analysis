@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.deps import GraphDBDep, MessageQueueDep, ObjectStorageDep, RelationalDBDep
+from api.deps import GraphDBDep, MessageQueueDep, RelationalDBDep
 
 router = APIRouter(tags=["health"])
 
@@ -27,7 +27,6 @@ async def health_check(
     graph_db: GraphDBDep,
     relational_db: RelationalDBDep,
     message_queue: MessageQueueDep,
-    object_storage: ObjectStorageDep,
 ) -> HealthResponse:
     """
     Check the health of all services.
@@ -56,13 +55,6 @@ async def health_check(
         services["redis"] = healthy
     except Exception:
         services["redis"] = False
-
-    # Check MinIO
-    try:
-        healthy = await object_storage.health_check()
-        services["minio"] = healthy
-    except Exception:
-        services["minio"] = False
 
     # Overall status
     all_healthy = all(services.values())

@@ -1,4 +1,6 @@
 # Dagster orchestration: webserver (UI/GraphQL) + daemon (schedules/sensors).
+# Both containers share the backend image, which bakes the Rust `ingest`
+# binary at /opt/rust-bin/ingest (see backend/Dockerfile).
 services:
   # =============================================================================
   # Dagster webserver (UI + GraphQL)
@@ -35,12 +37,9 @@ services:
       - INGEST_SOURCE=${INGEST_SOURCE:-}
     volumes:
       - dagster_home:/opt/dagster/home
-      - rust_bin:/opt/rust-bin:ro
     depends_on:
       redis:
         condition: service_healthy
-      ingest-builder:
-        condition: service_completed_successfully
     networks:
       - chain-analysis-net
 
@@ -68,12 +67,9 @@ services:
       - INGEST_SOURCE=${INGEST_SOURCE:-}
     volumes:
       - dagster_home:/opt/dagster/home
-      - rust_bin:/opt/rust-bin:ro
     depends_on:
       redis:
         condition: service_healthy
-      ingest-builder:
-        condition: service_completed_successfully
     networks:
       - chain-analysis-net
 

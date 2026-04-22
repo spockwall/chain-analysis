@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
+# Prometheus — pulls /metrics from each Rust worker on a fixed interval.
+# Scrape config lives next door at compose/prometheus.config.yml.
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: chain-analysis-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.config.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/ready" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - chain-analysis-net
+
+volumes:
+  prometheus_data:
+
+networks:
+  chain-analysis-net:
+    driver: bridge

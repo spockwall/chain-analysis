@@ -35,22 +35,37 @@ and no UI. Build `/api/detections/{pattern}?address=…` endpoints and a
 Detections tab that highlights matching subgraphs on the Cytoscape canvas.
 Highest analyst-facing value after Phase I.
 
-### Phase K — Parquet cold-tier export
-`etl-rs/README.md` advertises Parquet exports to MinIO but no code exists.
-Add a Rust binary or Dagster asset that reads from ClickHouse, partitions by
-date, and writes to `chain-analysis-raw/year=YYYY/month=MM/day=DD/…`.
-Unlocks ML training and compliance retention.
-
 ### Phase L — E2E test coverage
 No Playwright/Cypress suite. Add a smoke journey: login → ingest address →
 explore → queue label → annotate. Wire into CI alongside existing
 `backend/pytest` and `etl-rs/cargo test`.
 
-### Phase M — Dagster hardening
-Deferred items from the original Phase D plan:
-(a) migrate Dagster run storage from SQLite to the shared Postgres,
+### Phase M — Dagster hardening (DORMANT)
+Dagster stack is retained but inactive. Open items:
+(a) migrate run storage from SQLite to the shared Postgres,
 (b) scrape Dagster's `/metrics` endpoint into Prometheus,
 (c) model always-on stream consumers as Dagster assets for lineage.
+The `ingest-builder` one-shot is gone (2026-04-22) — the `ingest` binary is
+now baked into the Dagster image directly (see `backend/Dockerfile`).
+
+### Phase N — ClickHouse activation
+OLAP store is provisioned in `compose/infra.yml` and the
+`clickhouse-process` binary + `clickhouse` sink + migrations
+(`etl-rs/crates/etl/migrations/clickhouse/`) all exist, but no compose
+service runs the consumer. Add a `clickhouse-process` service under
+`compose/etl.yml`, add a Prometheus scrape job, and verify the
+`chain-analysis-clickhouse` consumer group drains
+`ingested_txs/traces/transfers` into the `clickhouse_data` volume.
+
+## Milestones — removed tooling
+
+| Date | Tool | Reason |
+|---|---|---|
+| 2026-04-22 | MinIO object store + `minio-init` | Cold-tier Parquet export (old Phase K) never built; three-tier → two-tier. Re-introduce an object store when ML training / compliance retention lands. |
+| 2026-04-22 | Alertmanager + `alerts.yml` | Ran with the null receiver; never routed a real alert. Prometheus alone is sufficient for local dev. |
+| 2026-04-22 | `ingest-builder` one-shot + `rust_bin` volume | Rolled into the Dagster image via multi-stage COPY in `backend/Dockerfile`. |
+| Phase I    | `process` binary | Absorbed into `worker` task C. |
+| Phase I    | `targeted_queue_sensor`, `targeted_drain_job` | Replaced by `worker` task A. |
 
 ## Project Overview
 
@@ -63,7 +78,6 @@ Chain-Analysis is a blockchain transaction analysis platform for detecting and i
 - Neo4j 5.x + GDS plugin: Graph database with Cypher queries
 - PostgreSQL 17: Entity features, ingestion run history, labeling workflows
 - Redis Streams: Message queue for decoupling ingestion
-- MinIO: S3-compatible object storage (3 buckets: `chain-analysis`, `chain-analysis-raw`, `chain-analysis-processed`)
 - SQLAlchemy (async) + asyncpg + Alembic: PostgreSQL ORM and migrations
 - JWT auth: `python-jose`, stored in `localStorage`, 24h expiry
 
@@ -81,7 +95,7 @@ Chain-Analysis is a blockchain transaction analysis platform for detecting and i
 
 ```
 chain-analysis/
-├── docker-compose.yml          # Neo4j, Postgres, Redis, MinIO, Backend, Frontend + optional profiles
+├── docker-compose.yml          # Neo4j, Postgres, Redis, ClickHouse, Backend, Frontend + optional profiles
 ├── .env.example                # Environment variables template
 ├── etl-rs/                     # Rust ETL workspace (see Rust section below for crate list)
 │   ├── Cargo.toml              # Workspace manifest
@@ -120,8 +134,7 @@ chain-analysis/
 │       │   └── adapters/
 │       │       ├── neo4j_adapter.py    # Neo4j implementation
 │       │       ├── postgres_adapter.py
-│       │       ├── redis_adapter.py
-│       │       └── minio_adapter.py
+│       │       └── redis_adapter.py
 │       ├── services/
 │       │   └── auth.py         # Password hashing, JWT token creation/decode
 │       ├── libs/
@@ -235,7 +248,7 @@ On every container start the backend runs these steps before serving:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Full service health check (Neo4j, PG, Redis, MinIO) |
+| GET | `/health` | Full service health check (Neo4j, PG, Redis) |
 | GET | `/health/live` | Liveness probe |
 | GET | `/health/ready` | Readiness probe (Neo4j + PG only; 503 if not ready) |
 | POST | `/api/auth/login` | JWT login → `{ access_token }` |
@@ -282,13 +295,15 @@ On every container start the backend runs these steps before serving:
 | `annotations` | Human-submitted labels for task records |
 | `users` | Auth users (email, hashed_password) |
 
-### Three-Tier Storage Strategy
+### Two-Tier Storage Strategy
 
 | Tier | Storage | Purpose |
 |------|---------|---------|
 | Hot | Neo4j | Active investigation subgraphs, GDS algorithms |
 | Warm | PostgreSQL | Entity features, labeling data, ingestion history |
-| Cold | MinIO (S3) | Raw data archive, ML training, compliance |
+
+(A cold tier via MinIO/S3 was removed 2026-04-22; see Milestones below.
+ClickHouse is provisioned for future OLAP use — see Phase N.)
 
 ### Custom AML Queries (`graph/queries.py`)
 
@@ -393,7 +408,6 @@ Set in `docker-compose.yml` for local dev; override in `.env` for external deplo
 - `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `REDIS_URL`
-- `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `MINIO_SECURE`
 - `ETHERSCAN_API_KEY` — required for real blockchain data (free at etherscan.io/apis)
 - `JWT_SECRET_KEY` — secret for signing JWT tokens
 

@@ -113,8 +113,9 @@ See `etl-rs/README.md` for subcommands, env vars, orchestration, and observabili
 ```
 chain-analysis/
 ├── docker-compose.yml
-├── compose/                    # Modular compose includes (infra, app, etl, dagster, observability)
-│   └── observability/          # Prometheus, Grafana, Alertmanager configs + dashboards
+├── compose/                    # Modular compose includes (infra, app, etl, dagster, prometheus, grafana)
+│   ├── prometheus.config.yml   # Prometheus scrape config
+│   └── grafana/                # Grafana provisioning + dashboard JSON
 ├── scripts/                    # Init + seed scripts (run by backend on startup)
 ├── etl-rs/                     # Rust ETL workspace (types, config, sources, sinks, pipeline, ingest, process)
 ├── backend/
@@ -271,11 +272,10 @@ All three Rust workers expose Prometheus metrics on `:${METRICS_PORT:-9100}/metr
 |---|---|---|
 | Prometheus | http://localhost:9090 | Metrics + rule evaluation |
 | Grafana | http://localhost:3001 | Dashboards (anonymous Viewer) |
-| Alertmanager | http://localhost:9093 | Alert routing (default receiver = `null`) |
 
-Alert rules live in `compose/observability/alerts.yml` (ingest failure rate, fetch latency, parse failures, DLQ moves, consumer batch latency, target down). Slack delivery is wired but commented — uncomment the `slack` receiver in `alertmanager.yml` to enable.
-
-See `etl-rs/README.md` for the full metric catalog and alert thresholds.
+Scrape config lives in `compose/prometheus.config.yml`. Grafana
+provisioning + dashboard JSON lives in `compose/grafana/`.
+See `etl-rs/README.md` for the full metric catalog.
 
 ## Environment Variables
 

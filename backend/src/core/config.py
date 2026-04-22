@@ -87,28 +87,6 @@ class Settings(BaseSettings):
     sqs_queue_url: str | None = None
 
     # =========================================================================
-    # Object Storage
-    # =========================================================================
-    storage_provider: Literal["local", "minio", "s3", "gcs"] = "minio"
-
-    # MinIO / S3
-    minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin123"
-    minio_bucket: str = "chain-analysis"
-    minio_secure: bool = False
-
-    # S3
-    aws_s3_bucket: str | None = None
-
-    # GCS
-    gcs_bucket: str | None = None
-    gcs_project_id: str | None = None
-
-    # Local filesystem
-    local_storage_path: str = "./storage"
-
-    # =========================================================================
     # Data Sources
     # =========================================================================
     allium_api_key: str | None = None
