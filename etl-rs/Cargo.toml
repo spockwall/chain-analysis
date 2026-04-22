@@ -8,5 +8,7 @@ members = [
     "crates/sinks",
     "crates/pipeline",
     "crates/ingest",
-    "crates/process",
+    "crates/consumer",
+    "crates/clickhouse",
+    "crates/worker",
 ]

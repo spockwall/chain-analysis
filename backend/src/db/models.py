@@ -57,7 +57,7 @@ class TaskStatus(str, PyEnum):
     """Label task status."""
 
     PENDING = "pending"
-    IN_PROGRESS = "in_progress"
+    RUNNING = "running"
     COMPLETED = "completed"
     SKIPPED = "skipped"
 
@@ -349,6 +349,12 @@ class EntityFeatures(Base):
     has_deployed_contract: Mapped[bool] = mapped_column(Boolean, default=False)
     # Whether this address is matched in the known_labels reference table
     is_labeled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Highest block number whose transactions have been ingested for this
+    # address. The Rust worker's refresh loop uses this as a delta cursor.
+    last_synced_block: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
 
     # ── Graph Topology ───────────────────────────────────────────────────────
     # Out-degree: number of outgoing transactions sent

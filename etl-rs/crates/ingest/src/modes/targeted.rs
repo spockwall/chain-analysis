@@ -1,42 +1,83 @@
-use eyre::{Context, Result};
+use eyre::Result;
 use pipeline::ProgressReporter;
-use redis::AsyncCommands;
 use serde::Deserialize;
 use sinks::postgres_writer::PostgresWriter;
 use sinks::redis_stream::TransactionWriter;
 use sources::etherscan;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tracing::{info, warn};
 use types::Transaction;
 
-use crate::ingest_address;
+use crate::{ingest_address, ingest_address_capped};
+
+/// Default cap on transactions fetched per peer during neighborhood BFS.
+/// Override with `NEIGHBORHOOD_TX_LIMIT_PER_ADDR`.
+const DEFAULT_NEIGHBORHOOD_TX_LIMIT: usize = 500;
+/// Default cap on peers expanded per hop (ranked by counterparty frequency).
+/// Override with `MAX_PEERS_PER_HOP`.
+const DEFAULT_MAX_PEERS_PER_HOP: usize = 20;
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
 
 #[derive(Clone, Debug)]
 pub enum TargetSpec {
-    Addresses(Vec<String>),
+    Addresses {
+        addrs: Vec<String>,
+        /// Earliest block to include. Defaults to 0 when None.
+        from_block: Option<u64>,
+    },
     Hashes(Vec<String>),
-    Neighborhood { seed: String, hops: u8 },
-    FromLabelTasks { limit: u32 },
+    Neighborhood {
+        seed: String,
+        hops: u8,
+    },
 }
 
+/// Queue payload written by the backend (`/api/labels/fetch`,
+/// `/api/pipeline/ingest-address`) and by the worker's own refresh loop.
 #[derive(Deserialize, Debug)]
-struct QueuedTask {
+pub struct QueuedTask {
     #[serde(default)]
-    task_id: Option<i64>,
-    /// Web-originated runs carry a pre-inserted ingestion_runs row.
-    /// Dagster-sensor drains of label-task entries omit this field and
-    /// rely on the labeling workflow tables for progress instead.
+    pub task_id: Option<i64>,
+    /// Web-originated runs carry a pre-inserted ingestion_runs row. Label-task
+    /// entries and refresh-loop entries omit this field.
     #[serde(default)]
-    run_id: Option<String>,
-    spec: QueuedSpec,
+    pub run_id: Option<String>,
+    pub spec: QueuedSpec,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "mode", rename_all = "snake_case")]
-enum QueuedSpec {
-    Addresses { addrs: Vec<String> },
-    Hashes { hashes: Vec<String> },
-    Neighborhood { seed: String, hops: u8 },
+pub enum QueuedSpec {
+    Addresses {
+        addrs: Vec<String>,
+        #[serde(default)]
+        from_block: Option<u64>,
+    },
+    Hashes {
+        hashes: Vec<String>,
+    },
+    Neighborhood {
+        seed: String,
+        hops: u8,
+    },
+}
+
+impl From<QueuedSpec> for TargetSpec {
+    fn from(spec: QueuedSpec) -> Self {
+        match spec {
+            QueuedSpec::Addresses { addrs, from_block } => {
+                TargetSpec::Addresses { addrs, from_block }
+            }
+            QueuedSpec::Hashes { hashes } => TargetSpec::Hashes(hashes),
+            QueuedSpec::Neighborhood { seed, hops } => TargetSpec::Neighborhood { seed, hops },
+        }
+    }
 }
 
 /// Execute a targeted fetch. Returns total transactions ingested.
@@ -50,8 +91,18 @@ pub async fn run_targeted(
     with_transfers: bool,
 ) -> Result<u64> {
     match spec {
-        TargetSpec::Addresses(addrs) => {
-            run_addresses(config, &addrs, writer, reporter, with_traces, with_transfers).await
+        TargetSpec::Addresses { addrs, from_block } => {
+            run_addresses(
+                config,
+                &addrs,
+                from_block.unwrap_or(0),
+                writer,
+                reporter,
+                pg_writer,
+                with_traces,
+                with_transfers,
+            )
+            .await
         }
         TargetSpec::Hashes(hashes) => run_hashes(config, &hashes, writer).await,
         TargetSpec::Neighborhood { seed, hops } => {
@@ -59,17 +110,6 @@ pub async fn run_targeted(
                 config,
                 &seed,
                 hops,
-                writer,
-                reporter,
-                with_traces,
-                with_transfers,
-            )
-            .await
-        }
-        TargetSpec::FromLabelTasks { limit } => {
-            run_from_label_tasks(
-                config,
-                limit,
                 writer,
                 reporter,
                 pg_writer,
@@ -81,21 +121,48 @@ pub async fn run_targeted(
     }
 }
 
+/// Resolve the effective `from_block` for `addr`: skip history we've already
+/// ingested by advancing past `entity_features.last_synced_block`, but never
+/// go earlier than the caller-requested floor.
+async fn effective_from_block(
+    pg_writer: Option<&PostgresWriter>,
+    addr: &str,
+    requested_from: u64,
+) -> u64 {
+    let Some(pg) = pg_writer else {
+        return requested_from;
+    };
+    match pg.read_last_synced_blocks(&[addr.to_string()]).await {
+        Ok(map) => {
+            let synced = map.get(&addr.to_lowercase()).copied().unwrap_or(0);
+            let resume = synced.saturating_add(1);
+            requested_from.max(resume)
+        }
+        Err(e) => {
+            warn!(address = %addr, error = %e, "read_last_synced_blocks failed, ingesting full range");
+            requested_from
+        }
+    }
+}
+
 async fn run_addresses(
     config: &config::Config,
     addrs: &[String],
+    from_block: u64,
     writer: &mut Box<dyn TransactionWriter>,
     reporter: &mut ProgressReporter,
+    pg_writer: Option<&PostgresWriter>,
     with_traces: bool,
     with_transfers: bool,
 ) -> Result<u64> {
     let mut total = 0u64;
     for addr in addrs {
-        info!(address = %addr, "targeted: fetching address");
+        let start = effective_from_block(pg_writer, addr, from_block).await;
+        info!(address = %addr, requested_from = from_block, effective_from = start, "targeted: fetching address");
         total += ingest_address(
             config,
             addr,
-            0,
+            start,
             99_999_999,
             writer,
             reporter,
@@ -145,6 +212,7 @@ async fn run_neighborhood(
     hops: u8,
     writer: &mut Box<dyn TransactionWriter>,
     reporter: &mut ProgressReporter,
+    pg_writer: Option<&PostgresWriter>,
     with_traces: bool,
     with_transfers: bool,
 ) -> Result<u64> {
@@ -155,6 +223,10 @@ async fn run_neighborhood(
     let chain_id = config.etherscan_chain_id;
     let base = &config.etherscan_base_url;
 
+    let tx_limit = env_usize("NEIGHBORHOOD_TX_LIMIT_PER_ADDR", DEFAULT_NEIGHBORHOOD_TX_LIMIT);
+    let max_peers = env_usize("MAX_PEERS_PER_HOP", DEFAULT_MAX_PEERS_PER_HOP);
+    info!(tx_limit, max_peers, "neighborhood caps");
+
     let mut visited: HashSet<String> = HashSet::new();
     let mut frontier: Vec<String> = vec![seed.to_lowercase()];
     let mut total = 0u64;
@@ -164,26 +236,27 @@ async fn run_neighborhood(
             break;
         }
         info!(hop, count = frontier.len(), "targeted neighborhood: hop");
-        let mut next: HashSet<String> = HashSet::new();
+        let mut peer_counts: HashMap<String, u32> = HashMap::new();
 
         for addr in &frontier {
             if !visited.insert(addr.clone()) {
                 continue;
             }
-            total += ingest_address(
+            let start = effective_from_block(pg_writer, addr, 0).await;
+            total += ingest_address_capped(
                 config,
                 addr,
-                0,
+                start,
                 99_999_999,
                 writer,
                 reporter,
                 with_traces,
                 with_transfers,
+                Some(tx_limit),
             )
             .await?;
 
             if hop < hops {
-                // Collect counterparties from Etherscan page-1 txlist (cheap).
                 match etherscan::address::fetch_address_transactions(
                     base,
                     api_key,
@@ -201,7 +274,7 @@ async fn run_neighborhood(
                             for peer in [tx.from_address, tx.to_address] {
                                 let p = peer.to_lowercase();
                                 if !p.is_empty() && !visited.contains(&p) {
-                                    next.insert(p);
+                                    *peer_counts.entry(p).or_insert(0) += 1;
                                 }
                             }
                         }
@@ -211,112 +284,27 @@ async fn run_neighborhood(
             }
         }
 
-        frontier = next.into_iter().collect();
+        // Rank by frequency, keep the top N most-connected peers.
+        let mut ranked: Vec<(String, u32)> = peer_counts.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        let kept = ranked.len().min(max_peers);
+        if ranked.len() > max_peers {
+            info!(
+                hop,
+                total_candidates = ranked.len(),
+                kept,
+                "peer cap applied — dropping low-frequency counterparties"
+            );
+        }
+        frontier = ranked.into_iter().take(max_peers).map(|(p, _)| p).collect();
     }
 
-    Ok(total)
-}
-
-async fn run_from_label_tasks(
-    config: &config::Config,
-    limit: u32,
-    writer: &mut Box<dyn TransactionWriter>,
-    reporter: &mut ProgressReporter,
-    pg_writer: Option<&PostgresWriter>,
-    with_traces: bool,
-    with_transfers: bool,
-) -> Result<u64> {
-    let client = redis::Client::open(config.redis_url.clone())?;
-    let mut conn = client.get_multiplexed_async_connection().await?;
-    let queue = &config.targeted_queue_key;
-    let mut total = 0u64;
-    let mut drained = 0u32;
-
-    while drained < limit {
-        let payload: Option<String> = conn
-            .rpop(queue, None)
-            .await
-            .with_context(|| format!("RPOP {}", queue))?;
-        let Some(payload) = payload else {
-            break;
-        };
-        drained += 1;
-
-        let task: QueuedTask = match serde_json::from_str(&payload) {
-            Ok(t) => t,
-            Err(e) => {
-                warn!(error = %e, payload, "Skipping malformed queued task");
-                continue;
-            }
-        };
-
-        info!(task_id = ?task.task_id, run_id = ?task.run_id, "Draining targeted queue entry");
-
-        // Transition run row to `running` before we start fetching so the
-        // frontend poller can flip the pill out of `queued` within one tick.
-        if let (Some(pg), Some(run_id)) = (pg_writer, task.run_id.as_deref()) {
-            if let Err(e) = pg
-                .update_ingestion_run(run_id, "running", 0, 0, 0, None)
-                .await
-            {
-                warn!(run_id, error = %e, "Failed to mark run as running");
-            }
-        }
-
-        let spec = match task.spec {
-            QueuedSpec::Addresses { addrs } => TargetSpec::Addresses(addrs),
-            QueuedSpec::Hashes { hashes } => TargetSpec::Hashes(hashes),
-            QueuedSpec::Neighborhood { seed, hops } => TargetSpec::Neighborhood { seed, hops },
-        };
-
-        let result = Box::pin(run_targeted(
-            config,
-            spec,
-            writer,
-            reporter,
-            pg_writer,
-            with_traces,
-            with_transfers,
-        ))
-        .await;
-
-        match result {
-            Ok(n) => {
-                total += n;
-                if let (Some(pg), Some(run_id)) = (pg_writer, task.run_id.as_deref()) {
-                    if let Err(e) = pg
-                        .update_ingestion_run(run_id, "completed", n as i64, 0, 0, None)
-                        .await
-                    {
-                        warn!(run_id, error = %e, "Failed to mark run as completed");
-                    }
-                }
-            }
-            Err(e) => {
-                let tag = classify_error(&e);
-                let msg = format!("{}: {}", tag, e);
-                warn!(run_id = ?task.run_id, error = %e, tag, "Targeted fetch failed");
-                if let (Some(pg), Some(run_id)) = (pg_writer, task.run_id.as_deref()) {
-                    if let Err(e2) = pg
-                        .update_ingestion_run(run_id, "failed", 0, 0, 0, Some(&msg))
-                        .await
-                    {
-                        warn!(run_id, error = %e2, "Failed to mark run as failed");
-                    }
-                }
-                // Keep draining remaining queue entries even if one fails;
-                // each run tracks its own status independently.
-            }
-        }
-    }
-
-    info!(drained, total, "from-label-tasks complete");
     Ok(total)
 }
 
 /// Classify a fetch error into a short tag the frontend can map to an
 /// actionable help message (see `RunStatusPill`).
-fn classify_error(err: &eyre::Report) -> &'static str {
+pub fn classify_error(err: &eyre::Report) -> &'static str {
     let s = format!("{:#}", err).to_lowercase();
     if s.contains("429") || s.contains("rate limit") {
         "rate_limited"
@@ -339,7 +327,20 @@ mod tests {
         let task: QueuedTask = serde_json::from_str(json).unwrap();
         assert_eq!(task.task_id, Some(42));
         match task.spec {
-            QueuedSpec::Addresses { addrs } => assert_eq!(addrs, vec!["0xabc", "0xdef"]),
+            QueuedSpec::Addresses { addrs, from_block } => {
+                assert_eq!(addrs, vec!["0xabc", "0xdef"]);
+                assert_eq!(from_block, None);
+            }
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn queued_spec_parses_addresses_with_from_block() {
+        let json = r#"{"spec":{"mode":"addresses","addrs":["0xabc"],"from_block":18000000}}"#;
+        let task: QueuedTask = serde_json::from_str(json).unwrap();
+        match task.spec {
+            QueuedSpec::Addresses { from_block, .. } => assert_eq!(from_block, Some(18000000)),
             other => panic!("wrong variant: {:?}", other),
         }
     }

@@ -12,12 +12,10 @@ from etl.ops.ingest import (
     BackfillConfig,
     ReprocessConfig,
     TargetedAddressesConfig,
-    TargetedDrainConfig,
     TargetedNeighborhoodConfig,
     backfill_to_args,
     reprocess_to_args,
     targeted_addresses_to_args,
-    targeted_drain_to_args,
     targeted_neighborhood_to_args,
 )
 
@@ -80,16 +78,3 @@ def test_targeted_neighborhood_args() -> None:
     ]
 
 
-def test_targeted_drain_args() -> None:
-    assert targeted_drain_to_args(TargetedDrainConfig()) == [
-        "targeted",
-        "from-label-tasks",
-        "--limit",
-        "50",
-    ]
-    assert targeted_drain_to_args(TargetedDrainConfig(limit=10)) == [
-        "targeted",
-        "from-label-tasks",
-        "--limit",
-        "10",
-    ]

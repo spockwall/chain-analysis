@@ -121,65 +121,68 @@ impl PostgresWriter {
         Ok(total)
     }
 
-    pub async fn insert_ingestion_run(
+    /// Read `entity_features.last_synced_block` for the given addresses.
+    /// Missing rows are returned as `0` so callers can use the result as a
+    /// per-address delta cursor without special-casing unseen addresses.
+    pub async fn read_last_synced_blocks(
         &self,
-        run_id: &str,
-        start_block: i64,
-        end_block: i64,
-    ) -> Result<()> {
-        sqlx::query(
+        addresses: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>> {
+        let mut out: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for addr in addresses {
+            out.insert(addr.to_lowercase(), 0);
+        }
+        if addresses.is_empty() {
+            return Ok(out);
+        }
+
+        let rows: Vec<(String, i64)> = sqlx::query_as(
             r#"
-            INSERT INTO ingestion_runs
-                (run_id, chain_id, start_block, end_block, data_source, status)
-            VALUES
-                ($1, 1, $2, $3, 'rust-process', 'running'::ingestionstatus)
-            ON CONFLICT (run_id) DO NOTHING
+            SELECT address, COALESCE(last_synced_block, 0)
+              FROM entity_features
+             WHERE chain_id = 1
+               AND address = ANY($1::text[])
             "#,
         )
-        .bind(run_id)
-        .bind(start_block)
-        .bind(end_block)
+        .bind(addresses)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for (addr, blk) in rows {
+            out.insert(addr.to_lowercase(), blk.max(0) as u64);
+        }
+        Ok(out)
+    }
+
+    /// Advance `entity_features.last_synced_block` per address using the
+    /// maximum of the existing and incoming block numbers. Used by the
+    /// worker's stream consumer after a successful batch to keep the
+    /// refresh-loop's delta cursor current.
+    pub async fn bump_last_synced_block(&self, updates: &[(String, u64)]) -> Result<u64> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+
+        let addresses: Vec<String> = updates.iter().map(|(a, _)| a.clone()).collect();
+        let blocks: Vec<i64> = updates.iter().map(|(_, b)| *b as i64).collect();
+
+        let result = sqlx::query(
+            r#"
+            UPDATE entity_features AS ef
+               SET last_synced_block = GREATEST(ef.last_synced_block, u.blk)
+              FROM UNNEST($1::text[], $2::bigint[]) AS u(addr, blk)
+             WHERE ef.address = u.addr
+               AND ef.chain_id = 1
+            "#,
+        )
+        .bind(&addresses)
+        .bind(&blocks)
         .execute(&self.pool)
         .await?;
 
-        info!(run_id, "Ingestion run inserted (running)");
-        Ok(())
+        let affected = result.rows_affected();
+        debug!(affected, pending = updates.len(), "bumped last_synced_block");
+        Ok(affected)
     }
 
-    pub async fn update_ingestion_run(
-        &self,
-        run_id: &str,
-        status: &str,
-        transactions_processed: i64,
-        traces_processed: i64,
-        nodes_created: i64,
-        error_message: Option<&str>,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE ingestion_runs
-            SET status = $2::ingestionstatus,
-                transactions_processed = $3,
-                traces_processed = $4,
-                nodes_created = $5,
-                error_message = $6,
-                completed_at = CASE
-                    WHEN $2 IN ('completed', 'failed') THEN NOW()
-                    ELSE completed_at
-                END
-            WHERE run_id = $1
-            "#,
-        )
-        .bind(run_id)
-        .bind(status)
-        .bind(transactions_processed as i32)
-        .bind(traces_processed as i32)
-        .bind(nodes_created as i32)
-        .bind(error_message)
-        .execute(&self.pool)
-        .await?;
-
-        info!(run_id, status, "Ingestion run updated");
-        Ok(())
-    }
 }

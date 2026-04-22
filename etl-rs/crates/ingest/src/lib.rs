@@ -100,6 +100,35 @@ pub async fn ingest_address(
     with_traces: bool,
     with_transfers: bool,
 ) -> Result<u64> {
+    ingest_address_capped(
+        config,
+        address,
+        start_block,
+        end_block,
+        writer,
+        progress_reporter,
+        with_traces,
+        with_transfers,
+        None,
+    )
+    .await
+}
+
+/// Same as `ingest_address` but caps each of txs / traces / transfers at
+/// `max_per_kind` items. Used by neighborhood BFS so one very active peer
+/// doesn't stall the whole crawl.
+#[allow(clippy::too_many_arguments)]
+pub async fn ingest_address_capped(
+    config: &config::Config,
+    address: &str,
+    start_block: u64,
+    end_block: u64,
+    writer: &mut Box<dyn TransactionWriter>,
+    progress_reporter: &mut ProgressReporter,
+    with_traces: bool,
+    with_transfers: bool,
+    max_per_kind: Option<usize>,
+) -> Result<u64> {
     let base_url = &config.etherscan_base_url;
     let api_key = config
         .etherscan_api_key
@@ -110,23 +139,29 @@ pub async fn ingest_address(
 
     info!(
         address = %addr,
-        with_traces, with_transfers,
+        with_traces, with_transfers, ?max_per_kind,
         "Fetching address data (parallel)"
     );
 
-    let txs_fut = etherscan::address::fetch_all_pages(|page, offset| {
-        etherscan::address::fetch_address_transactions(
-            base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
-        )
-    });
+    let txs_fut = etherscan::address::fetch_pages_capped(
+        |page, offset| {
+            etherscan::address::fetch_address_transactions(
+                base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
+            )
+        },
+        max_per_kind,
+    );
 
     let traces_fut = async {
         if with_traces {
-            etherscan::address::fetch_all_pages(|page, offset| {
-                etherscan::address::fetch_address_internal_txs(
-                    base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
-                )
-            })
+            etherscan::address::fetch_pages_capped(
+                |page, offset| {
+                    etherscan::address::fetch_address_internal_txs(
+                        base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
+                    )
+                },
+                max_per_kind,
+            )
             .await
         } else {
             Ok(Vec::new())
@@ -135,11 +170,14 @@ pub async fn ingest_address(
 
     let transfers_fut = async {
         if with_transfers {
-            etherscan::address::fetch_all_pages(|page, offset| {
-                etherscan::address::fetch_address_token_transfers(
-                    base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
-                )
-            })
+            etherscan::address::fetch_pages_capped(
+                |page, offset| {
+                    etherscan::address::fetch_address_token_transfers(
+                        base_url, api_key, chain_id, &addr, start_block, end_block, page, offset,
+                    )
+                },
+                max_per_kind,
+            )
             .await
         } else {
             Ok(Vec::new())

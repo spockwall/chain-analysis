@@ -55,12 +55,6 @@ class TargetedNeighborhoodConfig(Config):
     hops: int = 1
 
 
-class TargetedDrainConfig(Config):
-    """Configuration for ``ingest targeted from-label-tasks --limit N``."""
-
-    limit: int = 50
-
-
 # ---------------------------------------------------------------------------
 # Pure config → CLI args translators (unit-testable)
 # ---------------------------------------------------------------------------
@@ -100,10 +94,6 @@ def targeted_addresses_to_args(cfg: TargetedAddressesConfig) -> list[str]:
 
 def targeted_neighborhood_to_args(cfg: TargetedNeighborhoodConfig) -> list[str]:
     return ["targeted", "neighborhood", cfg.seed, "--hops", str(cfg.hops)]
-
-
-def targeted_drain_to_args(cfg: TargetedDrainConfig) -> list[str]:
-    return ["targeted", "from-label-tasks", "--limit", str(cfg.limit)]
 
 
 # ---------------------------------------------------------------------------
@@ -153,12 +143,3 @@ def targeted_neighborhood_op(
     rust_ingest: RustIngestResource,
 ) -> None:
     rust_ingest.run(context, targeted_neighborhood_to_args(config))
-
-
-@op
-def targeted_drain_op(
-    context: OpExecutionContext,
-    config: TargetedDrainConfig,
-    rust_ingest: RustIngestResource,
-) -> None:
-    rust_ingest.run(context, targeted_drain_to_args(config))

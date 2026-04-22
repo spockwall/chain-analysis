@@ -1,5 +1,5 @@
 # Multi-stage build for the Rust ETL binaries.
-# Builds `ingest`, `process`, and `clickhouse-process` in one pass and
+# Builds `ingest`, `worker`, and `clickhouse-process` in one pass and
 # produces three minimal runtime images (selectable by --target).
 
 FROM rust:1.89-slim-bookworm AS builder
@@ -28,9 +28,9 @@ COPY --from=builder /build/target/release/ingest /usr/local/bin/ingest
 ENTRYPOINT ["/usr/local/bin/ingest"]
 
 
-FROM runtime-base AS process
-COPY --from=builder /build/target/release/process /usr/local/bin/process
-ENTRYPOINT ["/usr/local/bin/process"]
+FROM runtime-base AS worker
+COPY --from=builder /build/target/release/worker /usr/local/bin/worker
+ENTRYPOINT ["/usr/local/bin/worker"]
 
 
 FROM runtime-base AS clickhouse-process

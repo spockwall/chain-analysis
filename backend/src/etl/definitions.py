@@ -1,4 +1,8 @@
-"""Dagster definitions for chain-analysis ETL orchestration (Phase D).
+"""Dagster definitions for chain-analysis ETL orchestration.
+
+Phase I: the targeted-queue sensor + drain job are gone — the Rust worker
+now consumes `ingest:targeted_queue` directly. Dagster remains as a cold
+harness for manual backfills and scheduled reprocess jobs.
 
 Run with::
 
@@ -13,12 +17,10 @@ from etl.jobs import (
     backfill_job,
     reprocess_job,
     targeted_addresses_job,
-    targeted_drain_job,
     targeted_neighborhood_job,
 )
 from etl.resources import RustIngestResource
 from etl.schedules import reprocess_alchemy_hourly, reprocess_etherscan_hourly
-from etl.sensors import targeted_queue_sensor
 
 
 defs = Definitions(
@@ -27,9 +29,7 @@ defs = Definitions(
         reprocess_job,
         targeted_addresses_job,
         targeted_neighborhood_job,
-        targeted_drain_job,
     ],
-    sensors=[targeted_queue_sensor],
     schedules=[reprocess_etherscan_hourly, reprocess_alchemy_hourly],
     resources={
         "rust_ingest": RustIngestResource(),

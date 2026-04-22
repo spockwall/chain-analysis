@@ -11,7 +11,6 @@ from etl.ops.ingest import (
     backfill_op,
     reprocess_op,
     targeted_addresses_op,
-    targeted_drain_op,
     targeted_neighborhood_op,
 )
 
@@ -34,8 +33,3 @@ def targeted_addresses_job() -> None:
 @job(description="Ad-hoc fetch of a seed address plus N-hop neighborhood.")
 def targeted_neighborhood_job() -> None:
     targeted_neighborhood_op()
-
-
-@job(description="Drain `INGEST_TARGETED_QUEUE` populated by the backend.")
-def targeted_drain_job() -> None:
-    targeted_drain_op()

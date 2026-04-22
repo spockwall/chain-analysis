@@ -1,7 +1,9 @@
-# Rust ETL: builds the ingest/process binaries and stages them.
+# Rust ETL: builds the ingest/worker binaries and stages them.
 # `ingest-builder` is a one-shot service that copies the ingest binary into a
-# shared volume for the Dagster containers to exec. `process` is a long-running
-# consumer that drains Redis Streams into Neo4j + Postgres.
+# shared volume for the Dagster containers to exec. `worker` is a long-running
+# Rust process that (A) drains `ingest:targeted_queue` via BRPOP, (B) refreshes
+# known/high-risk addresses on an interval, and (C) drains Redis Streams into
+# Neo4j + Postgres.
 services:
   # =============================================================================
   # Rust ingest binary image (builds once; other services copy the binary in)
@@ -25,17 +27,19 @@ services:
       - chain-analysis-net
 
   # =============================================================================
-  # Rust process consumer — drains Redis Streams into Neo4j + Postgres.
-  # Without this, ingested transactions pile up in `ingested_txs` but never
-  # reach the graph, so the frontend stays empty.
+  # Rust worker — single long-running container with three tokio tasks:
+  #   A) BRPOP `ingest:targeted_queue` for user-triggered targeted fetches
+  #   B) periodic refresh of known_labels ∪ high-risk entities
+  #   C) XREADGROUP drain of `ingested_*` streams into Neo4j + Postgres
+  # Replaces the old `process` container (deleted in Phase I).
   # =============================================================================
-  process:
+  worker:
     build:
       context: ../etl-rs
       dockerfile: Dockerfile
-      target: process
-    image: chain-analysis/process:local
-    container_name: chain-analysis-process
+      target: worker
+    image: chain-analysis/worker:local
+    container_name: chain-analysis-worker
     restart: unless-stopped
     environment:
       - REDIS_URL=redis://redis:6379
@@ -44,6 +48,12 @@ services:
       - NEO4J_PASSWORD=password123
       - NEO4J_DATABASE=neo4j
       - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/chain_analysis
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - REFRESH_INTERVAL_SECS=300
+      - REFRESH_COOLDOWN_SECS=1800
+      - TARGETED_BRPOP_TIMEOUT_SECS=5
+      - NEIGHBORHOOD_TX_LIMIT_PER_ADDR=500
+      - MAX_PEERS_PER_HOP=20
     depends_on:
       redis:
         condition: service_healthy
