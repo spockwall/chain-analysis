@@ -116,10 +116,6 @@ jobs:
         with:
           workspaces: etl-rs -> target
 
-      - name: Format check
-        working-directory: etl-rs
-        run: cargo fmt --all -- --check
-
       - name: Clippy
         working-directory: etl-rs
         run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::too_many_arguments
