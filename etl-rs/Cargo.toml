@@ -1,14 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/types",
-    "crates/config",
-    "crates/observability",
-    "crates/sources",
-    "crates/sinks",
-    "crates/pipeline",
-    "crates/ingest",
-    "crates/consumer",
-    "crates/clickhouse",
-    "crates/worker",
+    "crates/etl",
+    "crates/bin/ingest",
+    "crates/bin/worker",
+    "crates/bin/clickhouse-process",
 ]

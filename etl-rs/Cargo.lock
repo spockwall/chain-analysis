@@ -361,23 +361,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clickhouse-binary"
-version = "0.1.0"
-dependencies = [
- "clap",
- "color-eyre",
- "config",
- "eyre",
- "metrics",
- "observability",
- "pipeline",
- "sinks",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "clickhouse-derive"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -387,6 +370,20 @@ dependencies = [
  "quote",
  "serde_derive_internals",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "clickhouse-process-bin"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "etl",
+ "eyre",
+ "metrics",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -446,33 +443,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "config"
-version = "0.1.0"
-
-[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
-
-[[package]]
-name = "consumer"
-version = "0.1.0"
-dependencies = [
- "config",
- "eyre",
- "metrics",
- "neo4rs",
- "observability",
- "pipeline",
- "serde",
- "serde_json",
- "sinks",
- "sqlx",
- "tokio",
- "tracing",
- "types",
-]
 
 [[package]]
 name = "core-foundation"
@@ -680,6 +654,29 @@ dependencies = [
  "cfg-if",
  "home",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "etl"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clickhouse",
+ "color-eyre",
+ "eyre",
+ "futures",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "neo4rs",
+ "redis",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1255,29 +1252,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "ingest"
+name = "ingest-bin"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "clap",
  "color-eyre",
- "config",
+ "etl",
  "eyre",
- "futures",
- "metrics",
- "observability",
- "pipeline",
  "redis",
- "reqwest",
- "serde",
- "serde_json",
- "sinks",
- "sources",
  "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "types",
  "uuid",
 ]
 
@@ -1662,17 +1648,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "observability"
-version = "0.1.0"
-dependencies = [
- "eyre",
- "metrics",
- "metrics-exporter-prometheus",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1848,19 +1823,6 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
-
-[[package]]
-name = "pipeline"
-version = "0.1.0"
-dependencies = [
- "eyre",
- "redis",
- "serde_json",
- "tokio",
- "tracing",
- "types",
- "uuid",
-]
 
 [[package]]
 name = "pkcs1"
@@ -2501,27 +2463,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sinks"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "clickhouse",
- "eyre",
- "metrics",
- "neo4rs",
- "observability",
- "redis",
- "serde",
- "serde_json",
- "sqlx",
- "time",
- "tokio",
- "tracing",
- "types",
- "uuid",
-]
-
-[[package]]
 name = "siphasher"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2566,20 +2507,6 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "sources"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "eyre",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "types",
 ]
 
 [[package]]
@@ -3197,14 +3124,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
-name = "types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "unicode-bidi"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3769,29 +3688,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "worker"
+name = "worker-bin"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "config",
- "consumer",
+ "etl",
  "eyre",
- "ingest",
  "metrics",
- "neo4rs",
- "observability",
- "pipeline",
  "redis",
  "serde",
  "serde_json",
- "sinks",
- "sources",
  "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "types",
- "uuid",
 ]
 
 [[package]]
