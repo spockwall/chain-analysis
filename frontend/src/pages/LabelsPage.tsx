@@ -338,7 +338,7 @@ export function LabelsPage() {
                                         return (
                                             <tr
                                                 key={t.id}
-                                                className={`border-t border-gray-100 ${active ? "bg-indigo-50/50" : ""}`}
+                                                className={`border-t border-gray-100 ${active ? "bg-gray-50" : ""}`}
                                             >
                                                 <td className="px-3 py-2 font-mono text-gray-900">
                                                     {formatAddress(t.entity_address)}

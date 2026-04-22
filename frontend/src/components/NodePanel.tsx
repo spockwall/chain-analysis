@@ -366,7 +366,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                     {members.map((m) => (
                                         <div
                                             key={m.address}
-                                            className="flex items-center gap-1.5 px-1 py-[4px] rounded bg-violet-50 border border-violet-100 hover:bg-violet-100 transition-colors"
+                                            className="flex items-center gap-1.5 px-1 py-[4px] rounded border border-gray-200 hover:bg-gray-50 transition-colors"
                                         >
                                             {/* Clickable name + address */}
                                             <button
@@ -375,21 +375,21 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                                 onClick={() => onNavigateToAddress?.(m.address)}
                                             >
                                                 {m.name && (
-                                                    <span className="block text-[0.72rem] font-semibold text-violet-800 truncate leading-snug">
+                                                    <span className="block text-[0.72rem] font-semibold text-gray-800 truncate leading-snug">
                                                         {m.name}
                                                     </span>
                                                 )}
-                                                <span className={`block font-mono text-[0.66rem] truncate leading-snug ${m.name ? "text-violet-500" : "text-gray-900 hover:underline"}`}>
+                                                <span className={`block font-mono text-[0.66rem] truncate leading-snug ${m.name ? "text-gray-500" : "text-gray-900 hover:underline"}`}>
                                                     {formatAddress(m.address, 5)}
                                                 </span>
                                             </button>
                                             {m.entity_type && (
-                                                <span className="shrink-0 inline-flex items-center px-[5px] py-[1px] rounded text-[0.6rem] font-semibold uppercase bg-violet-100 text-violet-700">
+                                                <span className="shrink-0 inline-flex items-center px-[5px] py-[1px] rounded text-[0.6rem] font-semibold uppercase border border-violet-500 text-violet-600">
                                                     {m.entity_type}
                                                 </span>
                                             )}
                                             <button
-                                                className="shrink-0 flex items-center justify-center w-5 h-5 border border-gray-200 rounded bg-transparent cursor-pointer text-gray-400 text-base leading-none p-0 transition-colors hover:text-red-500 hover:bg-red-50"
+                                                className="shrink-0 flex items-center justify-center w-5 h-5 border border-gray-200 rounded bg-transparent cursor-pointer text-gray-400 text-base leading-none p-0 transition-colors hover:text-red-500 hover:border-red-300"
                                                 title="Remove member"
                                                 onClick={() => handleRemoveMember(m.address)}
                                             >
