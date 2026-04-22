@@ -17,7 +17,6 @@ class TestSettings:
         assert settings.environment == "local"
         assert settings.graph_db_provider == "neo4j"
         assert settings.queue_provider == "redis"
-        assert settings.storage_provider == "minio"
 
     def test_database_url_property(self):
         """Test database URL generation."""

@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: chain-analysis-local
+
+scrape_configs:
+  # Rust ETL workers expose /metrics on port 9100 (see crates/etl/src/observability.rs).
+  # Services are resolved by their docker-compose hostname on the shared network.
+  - job_name: worker
+    static_configs:
+      - targets:
+          - "worker:9100"
+        labels:
+          tier: consumer
+
+  # Self-scrape so Prometheus health is visible in Grafana.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - "localhost:9090"

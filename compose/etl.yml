@@ -1,31 +1,8 @@
-# Rust ETL: builds the ingest/worker binaries and stages them.
-# `ingest-builder` is a one-shot service that copies the ingest binary into a
-# shared volume for the Dagster containers to exec. `worker` is a long-running
-# Rust process that (A) drains `ingest:targeted_queue` via BRPOP, (B) refreshes
-# known/high-risk addresses on an interval, and (C) drains Redis Streams into
-# Neo4j + Postgres.
+# Rust ETL: the long-running `worker` process.
+# Task A: drains `ingest:targeted_queue` via BRPOP.
+# Task B: refreshes known/high-risk addresses on an interval.
+# Task C: drains Redis Streams into Neo4j + Postgres.
 services:
-  # =============================================================================
-  # Rust ingest binary image (builds once; other services copy the binary in)
-  # =============================================================================
-  ingest-builder:
-    build:
-      context: ../etl-rs
-      dockerfile: Dockerfile
-      target: ingest
-    image: chain-analysis/ingest:local
-    # One-shot: populate the shared volume, exit.
-    entrypoint: [ "/bin/sh", "-c" ]
-    command:
-      [
-        "cp /usr/local/bin/ingest /shared/ingest && echo 'ingest binary
-          staged'",
-      ]
-    volumes:
-      - rust_bin:/shared
-    networks:
-      - chain-analysis-net
-
   # =============================================================================
   # Rust worker — single long-running container with three tokio tasks:
   #   A) BRPOP `ingest:targeted_queue` for user-triggered targeted fetches
@@ -63,9 +40,6 @@ services:
         condition: service_healthy
     networks:
       - chain-analysis-net
-
-volumes:
-  rust_bin:
 
 networks:
   chain-analysis-net:

@@ -27,7 +27,6 @@ from api.deps import (
     get_graph_db,
     get_relational_db,
     get_message_queue,
-    get_object_storage,
 )
 
 
@@ -45,11 +44,6 @@ def test_settings() -> Settings:
         postgres_user="postgres",
         postgres_password="postgres123",
         redis_url="redis://localhost:6379",
-        minio_endpoint="localhost:9000",
-        minio_access_key="minioadmin",
-        minio_secret_key="minioadmin123",
-        minio_bucket="test-bucket",
-        minio_secure=False,
     )
 
 
@@ -191,72 +185,6 @@ class TestRedisAdapter:
             mock_redis_instance.xadd.assert_called_once()
 
 
-class TestMinioAdapter:
-    """Tests for MinIO adapter."""
-
-    @pytest.mark.asyncio
-    async def test_connect_and_close(self):
-        """Test MinIO connection lifecycle."""
-        with patch("core.adapters.minio_adapter.Minio") as mock_minio:
-            mock_client = MagicMock()
-            mock_client.bucket_exists.return_value = True
-            mock_minio.return_value = mock_client
-
-            adapter = MinioAdapter(
-                endpoint="localhost:9000",
-                access_key="minioadmin",
-                secret_key="minioadmin123",
-                bucket="test-bucket",
-                secure=False,
-            )
-
-            await adapter.connect()
-            assert adapter._client is not None
-
-            await adapter.close()
-            assert adapter._client is None
-
-    @pytest.mark.asyncio
-    async def test_bucket_creation(self):
-        """Test bucket creation if not exists."""
-        with patch("core.adapters.minio_adapter.Minio") as mock_minio:
-            mock_client = MagicMock()
-            mock_client.bucket_exists.return_value = False
-            mock_client.make_bucket = MagicMock()
-            mock_minio.return_value = mock_client
-
-            adapter = MinioAdapter(
-                endpoint="localhost:9000",
-                access_key="minioadmin",
-                secret_key="minioadmin123",
-                bucket="new-bucket",
-                secure=False,
-            )
-
-            await adapter.connect()
-            mock_client.make_bucket.assert_called_once_with("new-bucket")
-
-    @pytest.mark.asyncio
-    async def test_health_check(self):
-        """Test health check."""
-        with patch("core.adapters.minio_adapter.Minio") as mock_minio:
-            mock_client = MagicMock()
-            mock_client.bucket_exists.return_value = True
-            mock_minio.return_value = mock_client
-
-            adapter = MinioAdapter(
-                endpoint="localhost:9000",
-                access_key="minioadmin",
-                secret_key="minioadmin123",
-                bucket="test-bucket",
-                secure=False,
-            )
-            await adapter.connect()
-
-            result = await adapter.health_check()
-            assert result is True
-
-
 class TestDependencyInjection:
     """Tests for dependency injection functions."""
 
@@ -287,15 +215,6 @@ class TestDependencyInjection:
         with pytest.raises(RuntimeError, match="Redis adapter not initialized"):
             get_message_queue()
 
-    def test_get_object_storage_not_initialized(self):
-        """Test get_object_storage raises error when not initialized."""
-        import api.deps as deps
-
-        deps._minio_adapter = None
-
-        with pytest.raises(RuntimeError, match="MinIO adapter not initialized"):
-            get_object_storage()
-
     @pytest.mark.asyncio
     async def test_init_and_close_adapters(self, test_settings):
         """Test adapter initialization and cleanup."""
@@ -320,12 +239,6 @@ class TestDependencyInjection:
             patch.object(
                 RedisStreamsAdapter, "close", new_callable=AsyncMock
             ) as mock_redis_close,
-            patch.object(
-                MinioAdapter, "connect", new_callable=AsyncMock
-            ) as mock_minio_connect,
-            patch.object(
-                MinioAdapter, "close", new_callable=AsyncMock
-            ) as mock_minio_close,
         ):
             # Initialize adapters
             await init_adapters(test_settings)
@@ -334,13 +247,11 @@ class TestDependencyInjection:
             mock_neo4j_connect.assert_called_once()
             mock_pg_connect.assert_called_once()
             mock_redis_connect.assert_called_once()
-            mock_minio_connect.assert_called_once()
 
             # Verify adapters are set
             assert deps._neo4j_adapter is not None
             assert deps._postgres_adapter is not None
             assert deps._redis_adapter is not None
-            assert deps._minio_adapter is not None
 
             # Close adapters
             await close_adapters()
@@ -349,7 +260,6 @@ class TestDependencyInjection:
             mock_neo4j_close.assert_called_once()
             mock_pg_close.assert_called_once()
             mock_redis_close.assert_called_once()
-            mock_minio_close.assert_called_once()
 
 
 class TestAdapterIntegration:
@@ -401,20 +311,3 @@ class TestAdapterIntegration:
         finally:
             await adapter.close()
 
-    @pytest.mark.integration
-    @pytest.mark.asyncio
-    async def test_minio_real_connection(self):
-        """Test real MinIO connection."""
-        adapter = MinioAdapter(
-            endpoint="localhost:9000",
-            access_key="minioadmin",
-            secret_key="minioadmin123",
-            bucket="chain-analysis",
-            secure=False,
-        )
-        try:
-            await adapter.connect()
-            result = await adapter.health_check()
-            assert result is True
-        finally:
-            await adapter.close()

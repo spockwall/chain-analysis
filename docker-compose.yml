@@ -5,4 +5,5 @@ include:
   - compose/app.yml
   - compose/etl.yml
   - compose/dagster.yml
-  - compose/observability.yml
+  - compose/prometheus.yml
+  - compose/grafana.yml

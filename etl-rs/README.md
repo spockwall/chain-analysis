@@ -359,8 +359,8 @@ mount it read-only at `/opt/rust-bin/`.
 Each Rust worker exposes Prometheus metrics on `0.0.0.0:${METRICS_PORT:-9100}/metrics`.
 Init is best-effort — a busy port logs a warning and the worker keeps running.
 
-Metric name constants live in `crates/observability/src/lib.rs` (kept in sync
-with Grafana dashboards under `compose/observability/grafana/dashboards/`).
+Metric name constants live in `crates/etl/src/observability.rs` (kept in sync
+with Grafana dashboards under `compose/grafana/dashboards/`).
 
 Key metrics:
 
@@ -383,9 +383,10 @@ by the exporter so dashboards can separate binaries running on the same host.
 
 ### Local stack
 
-`compose/observability.yml` runs Prometheus (`:9090`) and Grafana (`:3001`).
-Prometheus is configured via `compose/observability/prometheus.yml`; Grafana
-is provisioned with a Prometheus datasource and the `ETL Overview` dashboard.
+`compose/prometheus.yml` runs Prometheus (`:9090`) and `compose/grafana.yml`
+runs Grafana (`:3001`). Prometheus is configured via
+`compose/prometheus.config.yml`; Grafana is provisioned with a Prometheus
+datasource and the `ETL Overview` dashboard from `compose/grafana/`.
 
 ```bash
 docker compose up -d prometheus grafana
@@ -393,43 +394,9 @@ open http://localhost:3001   # Grafana — anonymous Viewer access enabled
 open http://localhost:9090   # Prometheus UI
 ```
 
-Workers that aren't currently running will show as `down` in Prometheus; that
-is expected — the `ingest` job runs on-demand via Dagster.
-
-### Alerting
-
-Alertmanager runs alongside Prometheus on `:9093`. Alert rules live in
-`compose/observability/alerts.yml`; routing + receivers in
-`compose/observability/alertmanager.yml`.
-
-| Alert | Severity | Fires when |
-| --- | --- | --- |
-| `PrometheusTargetDown` | info | A scrape target has been unreachable for 10m. Expected while idle; investigate only if a schedule should have fired. |
-| `HighIngestFetchFailureRate` | warning | >5% of block fetches for a given source are failing over 5m (sustained 10m). |
-| `IngestFetchLatencyHigh` | warning | p95 block-fetch latency >10s over 10m (sustained 15m). |
-| `HighParseFailureRate` | warning | A consumer group is failing to parse >0.1 msg/s from a stream over 5m (sustained 10m). Usually schema drift. |
-| `DLQMovesFiring` | critical | Any batch has been relocated to a DLQ stream in the last 15m. Inspect with `redis-cli XRANGE {stream}_dlq - + COUNT 5`. |
-| `ConsumerBatchLatencyHigh` | warning | p95 consumer batch duration >30s over 10m (sustained 15m). |
-
-The default receiver is `null` — alerts fire and are visible in the
-Alertmanager UI (`http://localhost:9093`) but no external notification is
-sent. To enable Slack, uncomment the `slack` receiver block in
-`alertmanager.yml`, point `api_url_file` at a file containing the webhook URL,
-and change the top-level `route.receiver` to `slack`.
-
-Silence a noisy alert via the Alertmanager UI or:
-
-```bash
-curl -XPOST http://localhost:9093/api/v2/silences \
-  -H 'Content-Type: application/json' \
-  -d '{"matchers":[{"name":"alertname","value":"HighIngestFetchFailureRate","isRegex":false}],"startsAt":"2026-04-21T00:00:00Z","endsAt":"2026-04-22T00:00:00Z","createdBy":"me","comment":"known upstream outage"}'
-```
-
-Reload alert rules without restarting Prometheus:
-
-```bash
-curl -XPOST http://localhost:9090/-/reload
-```
+Only the `worker` target is scraped in the current setup. Alertmanager was
+removed 2026-04-22 — alerts can be re-introduced when there's a real
+receiver to route to.
 
 ## Labeling UX
 

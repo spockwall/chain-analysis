@@ -10,9 +10,7 @@ const EXTERNAL_TOOLS: Array<{ name: string; url: string; description: string }> 
     { name: "Dagster", url: "http://localhost:3000", description: "ETL orchestration" },
     { name: "Grafana", url: "http://localhost:3001", description: "Metrics dashboards" },
     { name: "Prometheus", url: "http://localhost:9090", description: "Metrics & targets" },
-    { name: "Alertmanager", url: "http://localhost:9093", description: "Alert routing" },
     { name: "Neo4j Browser", url: "http://localhost:7474", description: "Graph queries" },
-    { name: "MinIO Console", url: "http://localhost:9001", description: "Object storage" },
 ];
 
 export function DashboardPage() {

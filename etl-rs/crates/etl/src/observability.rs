@@ -15,7 +15,7 @@ use tracing::{info, warn};
 
 // ---------------------------------------------------------------------------
 // Metric names — keep in sync with Grafana dashboards under
-// compose/observability/grafana/dashboards/.
+// compose/grafana/dashboards/.
 // ---------------------------------------------------------------------------
 
 // Ingest tier
