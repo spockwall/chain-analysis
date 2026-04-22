@@ -23,6 +23,7 @@ from api.routes import (
     pipeline_router,
     stats_router,
     transactions_router,
+    ingestion_router,
 )
 from core.config import get_settings
 from libs import logger
