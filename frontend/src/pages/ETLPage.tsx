@@ -24,6 +24,8 @@ import {
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { parseTxImportFile, type ParsedTxRow } from "../utils/txImportParser";
+import { Badge } from "../components/ui/Badge";
+import { RISK_TONE, ENTITY_TONE, RUN_STATUS_TONE } from "../components/ui/tokens";
 import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 import {
     ENTITY_TYPES,
@@ -560,26 +562,12 @@ export function ETLPage() {
                         </button>
                     </div>
                     {ingestRun && (
-                        <div
-                            className={`mt-3 p-3 border rounded-lg ${
-                                ingestRun.status === "completed"
-                                    ? "border-green-200 bg-green-50"
-                                    : ingestRun.status === "failed"
-                                      ? "border-rose-200 bg-rose-50"
-                                      : "border-sky-200 bg-sky-50"
-                            }`}
-                        >
-                            <p
-                                className={`text-[0.78rem] font-semibold mb-2 uppercase tracking-wide ${
-                                    ingestRun.status === "completed"
-                                        ? "text-green-700"
-                                        : ingestRun.status === "failed"
-                                          ? "text-rose-700"
-                                          : "text-sky-700"
-                                }`}
-                            >
-                                Run {ingestRun.status}
-                            </p>
+                        <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
+                            <div className="mb-2">
+                                <Badge tone={RUN_STATUS_TONE[ingestRun.status]} size="sm">
+                                    Run {ingestRun.status}
+                                </Badge>
+                            </div>
                             <div className="grid grid-cols-3 gap-3">
                                 {[
                                     { v: ingestRun.transactions_processed, l: "Txs Processed" },
@@ -593,7 +581,7 @@ export function ETLPage() {
                                 ))}
                             </div>
                             {ingestRun.error_message && (
-                                <p className="text-[0.72rem] text-rose-700 mt-2">{ingestRun.error_message}</p>
+                                <p className="text-[0.72rem] text-red-600 mt-2">{ingestRun.error_message}</p>
                             )}
                             <p className="font-mono text-[0.68rem] text-gray-500 mt-2">
                                 Run ID: {ingestRun.run_id}
@@ -618,13 +606,13 @@ export function ETLPage() {
                     <div className="flex items-center justify-between mt-2">
                         <div className="text-[0.72rem] text-gray-500">
                             {validHashes.length > 0 && (
-                                <span className="text-emerald-600 font-medium">
+                                <span className="text-green-600 font-medium">
                                     {validHashes.length} valid
                                 </span>
                             )}
                             {validHashes.length > 0 && invalidHashes.length > 0 && <span> · </span>}
                             {invalidHashes.length > 0 && (
-                                <span className="text-rose-600 font-medium">
+                                <span className="text-red-600 font-medium">
                                     {invalidHashes.length} invalid
                                 </span>
                             )}
@@ -640,7 +628,7 @@ export function ETLPage() {
                         </button>
                     </div>
                     {invalidHashes.length > 0 && (
-                        <div className="mt-2 p-2.5 border border-rose-200 bg-rose-50 rounded-lg text-[0.7rem] text-rose-700">
+                        <div className="mt-2 p-2.5 border border-red-300 rounded-lg text-[0.7rem] text-red-600">
                             <p className="font-semibold mb-1">Invalid lines (skipped):</p>
                             <ul className="list-disc pl-5 font-mono">
                                 {invalidHashes.slice(0, 5).map((h, i) => (
@@ -676,22 +664,13 @@ export function ETLPage() {
                     {entityResult && (
                         <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
                             <div className="flex items-center gap-2 mb-2">
-                                <span
-                                    className={`inline-flex items-center px-2 py-[3px] rounded text-[0.65rem] font-semibold uppercase ${{
-                                            unknown: "bg-slate-100 text-slate-500",
-                                            low: "bg-green-100 text-green-700",
-                                            medium: "bg-yellow-100 text-yellow-700",
-                                            high: "bg-orange-100 text-orange-700",
-                                            critical: "bg-red-100 text-red-700",
-                                        }[entityResult.risk_level]
-                                        }`}
-                                >
+                                <Badge tone={RISK_TONE[entityResult.risk_level]} size="sm">
                                     {entityResult.risk_level}
-                                </span>
+                                </Badge>
                                 {entityResult.entity_type && (
-                                    <span className="inline-flex items-center px-2 py-[3px] rounded text-[0.65rem] font-semibold uppercase bg-violet-50 text-violet-700">
+                                    <Badge tone={ENTITY_TONE[entityResult.entity_type]} size="sm">
                                         {entityResult.entity_type}
-                                    </span>
+                                    </Badge>
                                 )}
                             </div>
                             <p className="font-mono text-[0.75rem] text-gray-600 mb-2">{entityResult.address}</p>
@@ -1039,11 +1018,11 @@ export function ETLPage() {
 
                             {/* Done summary */}
                             {importDone && !importRunning && (
-                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-green-500">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5">
                                         <polyline points="20 6 9 17 4 12" />
                                     </svg>
-                                    <span className="text-[0.78rem] text-green-700 font-semibold">
+                                    <span className="text-[0.78rem] text-green-600 font-semibold">
                                         Done —{" "}
                                         {importStatuses.filter((s) => s === "ok").length} succeeded,{" "}
                                         {importStatuses.filter((s) => s !== undefined && s !== "ok").length} failed
@@ -1075,11 +1054,11 @@ export function ETLPage() {
                                         {importRows.map((row) => {
                                             const status = importStatuses[row.index];
                                             const rowBg = !row.valid
-                                                ? "bg-red-50"
+                                                ? "bg-red-50/40"
                                                 : status === "ok"
-                                                    ? "bg-green-50"
+                                                    ? "bg-green-50/40"
                                                     : status !== undefined
-                                                        ? "bg-red-50"
+                                                        ? "bg-red-50/40"
                                                         : "bg-white";
                                             return (
                                                 <tr
@@ -1104,23 +1083,15 @@ export function ETLPage() {
                                                     </td>
                                                     <td className="px-2 py-1.5">
                                                         {!row.valid ? (
-                                                            <span
-                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-red-100 text-red-600"
-                                                                title={row.errors.join(" · ")}
-                                                            >
-                                                                ✗ Invalid
-                                                            </span>
+                                                            <Badge tone="danger" size="sm" className={"" /* invalid */}>
+                                                                <span title={row.errors.join(" · ")}>✗ Invalid</span>
+                                                            </Badge>
                                                         ) : status === "ok" ? (
-                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-green-100 text-green-700">
-                                                                ✓ OK
-                                                            </span>
+                                                            <Badge tone="success" size="sm">✓ OK</Badge>
                                                         ) : status !== undefined ? (
-                                                            <span
-                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-red-100 text-red-600"
-                                                                title={status}
-                                                            >
-                                                                ✗ Error
-                                                            </span>
+                                                            <Badge tone="danger" size="sm">
+                                                                <span title={status}>✗ Error</span>
+                                                            </Badge>
                                                         ) : importRunning ? (
                                                             <span className="text-gray-300 text-[0.6rem]">…</span>
                                                         ) : (

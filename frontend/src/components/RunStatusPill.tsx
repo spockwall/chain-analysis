@@ -1,30 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useIngestionRuns } from "../context/IngestionRunsContext";
-import type { IngestionRun, IngestionRunStatus, LabelTaskResponse, LabelTaskStatus } from "../types";
+import type { IngestionRun, LabelTaskResponse } from "../types";
 import { formatAddress } from "../api/client";
+import { Badge } from "./ui/Badge";
+import { Pill } from "./ui/Pill";
+import { RUN_STATUS_TONE, TASK_STATUS_TONE, type Tone } from "./ui/tokens";
 
-type PillTone = "queued" | "running" | "completed" | "failed";
-
-const TONE_STYLES: Record<PillTone, string> = {
-    queued: "bg-amber-50 text-amber-700 border-amber-200",
-    running: "bg-sky-50 text-sky-700 border-sky-200",
-    completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    failed: "bg-rose-50 text-rose-700 border-rose-200",
-};
-
-const DOT_STYLES: Record<PillTone, string> = {
-    queued: "bg-amber-500",
-    running: "bg-sky-500 animate-pulse",
-    completed: "bg-emerald-500",
-    failed: "bg-rose-500",
-};
-
-const TASK_STATUS_STYLES: Record<LabelTaskStatus, string> = {
-    pending: "bg-amber-50 text-amber-700 border-amber-200",
-    in_progress: "bg-sky-50 text-sky-700 border-sky-200",
-    completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    cancelled: "bg-gray-50 text-gray-600 border-gray-200",
-};
+type HeadState = "queued" | "running" | "completed" | "failed";
 
 const ERROR_HELP: Record<string, string> = {
     rate_limited: "Etherscan rate limit hit — it will auto-retry shortly.",
@@ -39,17 +21,16 @@ function errorTag(run: IngestionRun): string {
     return ERROR_HELP[head] ? head : "unknown";
 }
 
-function pickTone(
+function pickHead(
     activeRuns: IngestionRun[],
     recentRun: IngestionRun | undefined,
     activeTasks: LabelTaskResponse[],
-): PillTone {
+): HeadState {
     if (activeRuns.some((r) => r.status === "running")) return "running";
     if (activeTasks.some((t) => t.status === "in_progress")) return "running";
     if (activeRuns.some((r) => r.status === "queued")) return "queued";
     if (activeTasks.some((t) => t.status === "pending")) return "queued";
     if (recentRun?.status === "failed") return "failed";
-    if (recentRun?.status === "completed") return "completed";
     return "completed";
 }
 
@@ -78,21 +59,20 @@ export function RunStatusPill(): JSX.Element | null {
     if (runs.length === 0 && labelTasks.length === 0) return null;
 
     const activeTotal = activeRuns.length + activeTasks.length;
-    const tone = pickTone(activeRuns, recentRuns[0], activeTasks);
-    const label =
-        activeTotal > 0
-            ? `${tone} · ${activeTotal}`
-            : recentRuns[0]?.status ?? tone;
+    const head = pickHead(activeRuns, recentRuns[0], activeTasks);
+    const tone: Tone = RUN_STATUS_TONE[head];
+    const label = activeTotal > 0 ? `${head} · ${activeTotal}` : head;
 
     return (
         <div className="relative" ref={ref}>
             <button
                 onClick={() => setOpen((v) => !v)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[0.72rem] font-medium transition-colors ${TONE_STYLES[tone]}`}
+                className="bg-transparent border-none p-0 cursor-pointer"
                 title="Ingestion runs & label queue"
             >
-                <span className={`w-1.5 h-1.5 rounded-full ${DOT_STYLES[tone]}`} />
-                <span className="uppercase tracking-wide">{label}</span>
+                <Pill tone={tone} dot dotPulse={head === "running"}>
+                    {label}
+                </Pill>
             </button>
 
             {open && (
@@ -109,7 +89,7 @@ export function RunStatusPill(): JSX.Element | null {
 
                     <div className="max-h-96 overflow-y-auto">
                         <section>
-                            <header className="px-4 py-2 bg-gray-50/70 border-b border-gray-100">
+                            <header className="px-4 py-2 border-b border-gray-100">
                                 <p className="text-[0.65rem] font-semibold tracking-widest text-gray-500 uppercase">
                                     Ingestion runs
                                 </p>
@@ -123,11 +103,9 @@ export function RunStatusPill(): JSX.Element | null {
                                                 <code className="text-[0.7rem] text-gray-600 font-mono truncate">
                                                     {run.run_id}
                                                 </code>
-                                                <span
-                                                    className={`text-[0.65rem] font-semibold uppercase px-1.5 py-0.5 rounded border ${TONE_STYLES[run.status]}`}
-                                                >
+                                                <Badge tone={RUN_STATUS_TONE[run.status]} size="sm">
                                                     {run.status}
-                                                </span>
+                                                </Badge>
                                             </div>
                                             <div className="text-[0.7rem] text-gray-500 mt-1 flex items-center gap-3">
                                                 <span>{run.data_source}</span>
@@ -136,7 +114,7 @@ export function RunStatusPill(): JSX.Element | null {
                                                 )}
                                             </div>
                                             {tag && (
-                                                <p className="text-[0.7rem] text-rose-600 mt-1.5">
+                                                <p className="text-[0.7rem] text-red-600 mt-1.5">
                                                     {ERROR_HELP[tag]}
                                                 </p>
                                             )}
@@ -150,7 +128,7 @@ export function RunStatusPill(): JSX.Element | null {
                         </section>
 
                         <section>
-                            <header className="px-4 py-2 bg-gray-50/70 border-b border-gray-100 border-t">
+                            <header className="px-4 py-2 border-b border-t border-gray-100">
                                 <p className="text-[0.65rem] font-semibold tracking-widest text-gray-500 uppercase">
                                     Label queue
                                 </p>
@@ -165,11 +143,9 @@ export function RunStatusPill(): JSX.Element | null {
                                             >
                                                 {formatAddress(task.entity_address)}
                                             </code>
-                                            <span
-                                                className={`text-[0.65rem] font-semibold uppercase px-1.5 py-0.5 rounded border ${TASK_STATUS_STYLES[task.status]}`}
-                                            >
+                                            <Badge tone={TASK_STATUS_TONE[task.status]} size="sm">
                                                 {task.status.replace("_", " ")}
-                                            </span>
+                                            </Badge>
                                         </div>
                                         {task.title && (
                                             <p className="text-[0.7rem] text-gray-500 mt-1 truncate">

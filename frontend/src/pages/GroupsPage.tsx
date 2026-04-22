@@ -451,7 +451,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                     return (
                                         <div key={m.address} className={isRemoved ? "opacity-40" : ""}>
                                             <div
-                                                className={`flex items-center gap-2 px-5 py-2.5 transition-colors ${isRemoved ? "bg-red-50 cursor-default" : "cursor-pointer " + (isExpanded ? "bg-gray-50" : "hover:bg-gray-50")}`}
+                                                className={`flex items-center gap-2 px-5 py-2.5 transition-colors ${isRemoved ? "opacity-50 line-through cursor-default" : "cursor-pointer " + (isExpanded ? "bg-gray-50" : "hover:bg-gray-50")}`}
                                                 onClick={() => !isRemoved && setSelectedMember(isExpanded ? null : m)}
                                             >
                                                 <div className="flex-1 min-w-0 flex flex-col gap-0.5">
@@ -493,7 +493,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                             </button>
                                                         ) : (
                                                             <button
-                                                                className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-gray-300 transition-colors hover:text-red-500 hover:bg-red-50"
+                                                                className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-gray-300 transition-colors hover:text-red-500"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     handleMarkRemove(m.address);
@@ -520,7 +520,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                     <div className="flex items-center justify-between gap-3">
                                                         <div className="flex flex-wrap gap-1.5">
                                                             {m.entity_type && (
-                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[0.65rem] font-semibold border border-violet-500 text-violet-600">
                                                                     {m.entity_type}
                                                                 </span>
                                                             )}
@@ -587,7 +587,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
 
                                 {/* Pending (staged) members */}
                                 {pendingMembers.map((addr) => (
-                                    <div key={addr} className="flex items-center gap-2 px-5 py-2.5 bg-green-50">
+                                    <div key={addr} className="flex items-center gap-2 px-5 py-2.5 border-l-2 border-green-500">
                                         <div className="flex-1 min-w-0">
                                             <span className="font-mono text-[0.68rem] text-green-700 break-all">
                                                 {addr}
@@ -597,7 +597,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                             </span>
                                         </div>
                                         <button
-                                            className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-green-300 transition-colors hover:text-red-500 hover:bg-red-50"
+                                            className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-green-300 transition-colors hover:text-red-500"
                                             onClick={() => handleUnstageMember(addr)}
                                             title="Remove staged member"
                                         >
