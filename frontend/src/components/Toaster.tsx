@@ -1,5 +1,5 @@
 /**
- * Toaster — fixed bottom-right stack of toast notifications.
+ * Toaster — fixed bottom-left stack of toast notifications.
  * Reads from ToastContext; render once at the App root.
  */
 import { createPortal } from "react-dom";
@@ -92,7 +92,7 @@ export function Toaster() {
     const { toasts, dismiss } = useToastContext();
     if (toasts.length === 0) return null;
     return createPortal(
-        <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
+        <div className="fixed bottom-6 left-6 z-[9999] flex flex-col gap-2 pointer-events-none">
             {toasts.map((t) => (
                 <ToastItem key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
             ))}

@@ -8,7 +8,7 @@ export default {
     extend: {
       keyframes: {
         'toast-slide-in': {
-          from: { opacity: '0', transform: 'translateX(16px)' },
+          from: { opacity: '0', transform: 'translateX(-16px)' },
           to:   { opacity: '1', transform: 'translateX(0)' },
         },
         'slide-in': {
