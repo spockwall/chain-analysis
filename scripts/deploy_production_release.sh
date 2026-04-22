@@ -11,9 +11,9 @@ REQUIRED_ENV_VARS=(
   POSTGRES_PASSWORD
   POSTGRES_DB
   REDIS_PASSWORD
-  MINIO_ROOT_USER
-  MINIO_ROOT_PASSWORD
-  MINIO_BUCKET
+  CLICKHOUSE_DB
+  CLICKHOUSE_USER
+  CLICKHOUSE_PASSWORD
   JWT_SECRET_KEY
   ALLIUM_API_KEY
   ETHERSCAN_API_KEY
@@ -85,9 +85,9 @@ wait_for_container_health() {
 release_branch="${1:-}"
 
 case "$release_branch" in
-  release/*) ;;
+  release-*) ;;
   "") fail "release branch argument is required" ;;
-  *) fail "branch must match release/*" ;;
+  *) fail "branch must match release-*" ;;
 esac
 
 require_command git
@@ -115,10 +115,10 @@ log "validating production compose"
 docker compose -f "$COMPOSE_FILE" config --quiet
 
 log "pulling image-based services"
-docker compose -f "$COMPOSE_FILE" pull neo4j postgres redis minio minio-init || true
+docker compose -f "$COMPOSE_FILE" pull neo4j postgres redis clickhouse prometheus grafana || true
 
 log "building application services"
-docker compose -f "$COMPOSE_FILE" build backend frontend
+docker compose -f "$COMPOSE_FILE" build backend frontend worker dagster-webserver dagster-daemon
 
 log "restarting services"
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans

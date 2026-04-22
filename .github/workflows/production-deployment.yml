@@ -3,7 +3,7 @@ name: Production Deployment
 on:
   push:
     branches:
-      - "release/**"
+      - "release-*"
   workflow_dispatch:
 
 concurrency:
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   predeploy-verify:
     name: Predeploy verification
-    if: startsWith(github.ref, 'refs/heads/release/')
+    if: startsWith(github.ref, 'refs/heads/release-')
     runs-on: ubuntu-latest
 
     steps:
@@ -63,7 +63,7 @@ jobs:
           exit 0
 
       - name: Start backend test infrastructure
-        run: docker compose up -d --wait --wait-timeout 180 neo4j postgres redis minio
+        run: docker compose up -d --wait --wait-timeout 180 neo4j postgres redis
 
       - name: Apply test database migrations
         working-directory: backend
@@ -107,9 +107,9 @@ jobs:
           POSTGRES_PASSWORD=ci-postgres-password
           POSTGRES_DB=chain_analysis
           REDIS_PASSWORD=ci-redis-password
-          MINIO_ROOT_USER=ci-minio
-          MINIO_ROOT_PASSWORD=ci-minio-password
-          MINIO_BUCKET=chain-analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=ci-clickhouse-password
           JWT_SECRET_KEY=ci-jwt-secret
           ALLIUM_API_KEY=ci-allium-key
           ETHERSCAN_API_KEY=ci-etherscan-key
@@ -122,22 +122,22 @@ jobs:
           docker build -f frontend/Dockerfile --target production -t chain-analysis-frontend:release-check frontend
           docker build -f backend/Dockerfile -t chain-analysis-backend:release-check .
           docker build -f etl-rs/Dockerfile --target ingest -t chain-analysis-ingest:release-check etl-rs
-          docker build -f etl-rs/Dockerfile --target process -t chain-analysis-process:release-check etl-rs
+          docker build -f etl-rs/Dockerfile --target worker -t chain-analysis-worker:release-check etl-rs
 
   reject-non-release-dispatch:
     name: Reject non-release manual dispatch
-    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/heads/release-')
     runs-on: ubuntu-latest
 
     steps:
       - name: Stop non-release deployment
         run: |
-          echo "Production deployment can only run from release/* branches."
+          echo "Production deployment can only run from release-* branches."
           exit 1
 
   deploy:
     name: Deploy production
-    if: startsWith(github.ref, 'refs/heads/release/')
+    if: startsWith(github.ref, 'refs/heads/release-')
     runs-on: ubuntu-latest
     needs:
       - predeploy-verify
@@ -149,9 +149,9 @@ jobs:
           set -euo pipefail
           release_branch="${GITHUB_REF#refs/heads/}"
           case "$release_branch" in
-            release/*) ;;
+            release-*) ;;
             *)
-              echo "Deployment can only run from release/* branches."
+              echo "Deployment can only run from release-* branches."
               exit 1
               ;;
           esac
@@ -193,9 +193,9 @@ jobs:
           release_branch="$2"
 
           case "$release_branch" in
-            release/*) ;;
+            release-*) ;;
             *)
-              echo "Deployment can only run from release/* branches."
+              echo "Deployment can only run from release-* branches."
               exit 1
               ;;
           esac
