@@ -14,32 +14,36 @@ columnar store.
                                │ HTTPS (reqwest + rate-limited client)
                                ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ Ingest tier — `ingest` binary (Rust, tokio)                                  │
+│ Ingest tier — `ingest` binary (Rust, tokio) — one-shot CLI                   │
 │  • Mode dispatch: block / address / targeted / reprocess                     │
 │  • `BlockSource` trait → Etherscan | Alchemy | Mock (factory per INGEST_SOURCE)│
 │  • Concurrent fetch: `futures::stream::buffered` over `Arc<dyn BlockSource>` │
 │  • `writer_pipeline`: fan-in → batched XADD MAXLEN ~ N                       │
-│  • Graceful shutdown (tokio watch), retry w/ backoff, failed-block DLQ list  │
+│  • Used for manual backfills and Dagster-scheduled reprocess jobs            │
 └──────────────────────────────┬───────────────────────────────────────────────┘
-                               │ XADD
-                               ▼
+                               │ XADD                   ▲ BRPOP ingest:targeted_queue
+                               ▼                        │
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ Message bus — Redis 7 Streams                                                │
-│  ingested_txs │ ingested_traces │ ingested_transfers                         │
-│  Two consumer groups read independently (no cross back-pressure):            │
-│   ─ `chain-analysis-process`     → graph + features sink                     │
-│   ─ `chain-analysis-clickhouse`  → OLAP sink                                 │
+│ Message bus — Redis 7 (streams + list)                                       │
+│  ingested_txs │ ingested_traces │ ingested_transfers  (streams)              │
+│  ingest:targeted_queue                                (list, BRPOP-drained)  │
 │  Poison batches → `{stream}_dlq` after PROCESS_DLQ_MAX_ATTEMPTS              │
 └───────────────┬──────────────────────────────────────┬───────────────────────┘
-                │ XREADGROUP                           │ XREADGROUP
+                │ XREADGROUP / BRPOP                   │ XREADGROUP
                 ▼                                      ▼
 ┌──────────────────────────────┐      ┌──────────────────────────────────────┐
-│ Graph consumer — `process`   │      │ OLAP consumer — `clickhouse-process` │
-│  Rust, tokio                 │      │  Rust, tokio                         │
-│  • Neo4j writer (bolt,neo4rs)│      │  • ClickHouse writer (clickhouse-rs) │
-│  • Postgres writer (sqlx)    │      │  • ethereum-etl column names         │
-│  • Feature derivation        │      │  • Batched INSERT, DDL auto-applied  │
-│  • Per-batch DLQ w/ TTL ctr  │      │  • Per-batch DLQ (separate env vars) │
+│ `worker` binary (long-lived) │      │ OLAP consumer — `clickhouse-process` │
+│  Rust, tokio — 3 tasks:      │      │  Rust, tokio                         │
+│  A) BRPOP targeted_queue →   │      │  • ClickHouse writer (clickhouse-rs) │
+│     Etherscan fetch →        │      │  • ethereum-etl column names         │
+│     flip label_tasks /       │      │  • Batched INSERT, DDL auto-applied  │
+│     ingestion_runs status    │      │  • Per-batch DLQ (separate env vars) │
+│  B) Periodic refresh:        │      │                                      │
+│     known_labels ∪ high-risk │      │                                      │
+│     entities → LPUSH targeted│      │                                      │
+│  C) XREADGROUP ingested_*    │      │                                      │
+│     → Neo4j + Postgres       │      │                                      │
+│     → bump last_synced_block │      │                                      │
 └──────────────┬───────────────┘      └─────────────────┬────────────────────┘
                ▼                                        ▼
 ┌──────────────────────────────┐      ┌──────────────────────────────────────┐
@@ -65,9 +69,10 @@ columnar store.
 └──────────────────────────────────────────────────────────────────────────────┘
 
 Cold tier (archive): MinIO (S3-compatible) — raw data, ML training, compliance.
-Orchestration: Dagster webserver + daemon wrap the `ingest` binary as
-subprocess-executed jobs (backfill, reprocess, targeted drain). See the
-Orchestration section below.
+Orchestration: Dagster stays dormant in Phase I — only `reprocess_job`
+(hourly schedules) and ad-hoc `backfill_job` remain. The targeted-queue
+sensor is gone; the `worker` binary consumes `ingest:targeted_queue`
+directly via BRPOP. See the Orchestration section below.
 Observability: Prometheus scrapes `/metrics` from every Rust worker; Grafana
 renders the `ETL Overview` dashboard; Alertmanager routes rule violations.
 See the Observability section below.
@@ -103,15 +108,17 @@ back-pressure graph ingest and vice versa.
 | `sources` | `BlockSource` trait + Etherscan V2, Alchemy JSON-RPC, and mock impls |
 | `sinks` | Redis Streams writer, Redis consumer, Neo4j + Postgres + ClickHouse writers |
 | `pipeline` | Retry policy, DLQ helpers, shutdown handle, progress reporters |
-| `ingest` | `ingest` binary — fetches from Etherscan and publishes to Redis Streams |
-| `process` | `process` binary (Neo4j + Postgres) and `clickhouse-process` binary (ClickHouse) |
+| `ingest` | `ingest` binary — one-shot CLI: fetches from Etherscan/Alchemy and publishes to Redis Streams |
+| `consumer` | Shared library — `read_batch` + `process_read_batch` used by `worker`'s stream task |
+| `worker` | `worker` binary — long-running three-task tokio process (targeted queue drain + refresh + stream consumer) |
+| `clickhouse` | `clickhouse-process` binary — independent OLAP consumer group |
 
 ## Build
 
 ```bash
 cargo build --release
 # → target/release/ingest
-# → target/release/process
+# → target/release/worker
 # → target/release/clickhouse-process
 ```
 
@@ -136,18 +143,43 @@ ingest reprocess-failed --source etherscan
 ingest targeted addresses --addrs 0xaaa...,0xbbb...
 ingest targeted hashes --hashes 0x111...,0x222...
 ingest targeted neighborhood 0xseed... --hops 1
-ingest targeted from-label-tasks --limit 50
 ```
 
-The `from-label-tasks` mode drains the Redis list `INGEST_TARGETED_QUEUE`
-populated by the backend's `POST /api/labels/fetch`.
+The targeted-queue drain is now handled by the long-running `worker`
+binary (see below), not the one-shot `ingest` CLI.
 
-## `process`
+## `worker`
 
 ```bash
-process             # continuous, Ctrl+C for graceful shutdown
-process --one-shot  # read one batch and exit
+worker             # continuous, Ctrl+C for graceful shutdown
 ```
+
+One process runs three independent tokio tasks:
+
+1. **Task A — targeted queue drain.** BRPOPs `INGEST_TARGETED_QUEUE`
+   (`ingest:targeted_queue` by default) with `TARGETED_BRPOP_TIMEOUT_SECS`
+   timeout. Each payload is `{task_id?, run_id?, spec}` where `spec` is
+   one of `{mode: addresses, addrs, from_block?}` / `{mode: hashes,
+   hashes}` / `{mode: neighborhood, seed, hops}`. On pickup the worker
+   flips `label_tasks.status → in_progress` and/or
+   `ingestion_runs.status → running` **before** calling Etherscan, then
+   writes the terminal status on completion (success counts,
+   `error_message = "{tag}: {err}"` on failure via `classify_error`).
+
+2. **Task B — background refresh.** Every `REFRESH_INTERVAL_SECS`
+   (default 300), the worker runs `SELECT address, last_synced_block
+   FROM entity_features WHERE risk_level IN ('high','critical')` unioned
+   with `known_labels` and LPUSHes one refresh job per address onto
+   `ingest:targeted_queue`. An in-memory `HashMap<String, Instant>`
+   cooldown (`REFRESH_COOLDOWN_SECS`, default 1800) dedups pushes.
+   Payloads carry no `task_id`/`run_id` so they're fire-and-forget.
+
+3. **Task C — stream consumer.** XREADGROUP on `ingested_txs`,
+   `ingested_traces`, `ingested_transfers` under consumer group
+   `chain-analysis-process` → Neo4j + Postgres writers. After a
+   successful batch, the worker bumps
+   `entity_features.last_synced_block = GREATEST(existing, max_block)`
+   per address touched in the batch.
 
 Poison batches are quarantined to `{stream}_dlq` after
 `PROCESS_DLQ_MAX_ATTEMPTS` failed attempts.
@@ -210,21 +242,26 @@ bits with a warn log — mirrors the ClickHouse writer's documented u128 caveat.
 | `ALCHEMY_API_KEY` | *(unset)* | ingest |
 | `ALCHEMY_BASE_URL` | `https://eth-mainnet.g.alchemy.com/v2/` | ingest |
 | `ALCHEMY_CHAIN` | `eth-mainnet` | ingest (informational) |
-| `REDIS_URL` | `redis://localhost:6379` | ingest, process |
+| `REDIS_URL` | `redis://localhost:6379` | ingest, worker |
 | `INGEST_BATCH_SIZE` | `1000` | ingest |
 | `INGEST_STREAM_MAXLEN` | `1000000` (`0` disables) | ingest |
-| `INGEST_TARGETED_QUEUE` | `ingest:targeted_queue` | ingest, backend |
-| `NEO4J_URI` | `bolt://localhost:7687` | process |
-| `NEO4J_USER` | `neo4j` | process |
-| `NEO4J_PASSWORD` | `password123` | process |
-| `NEO4J_DATABASE` | `neo4j` | process |
-| `DATABASE_URL` | `postgresql://postgres:postgres123@localhost:5432/chain_analysis` | process |
-| `PROCESS_BATCH_SIZE` | `500` | process |
-| `PROCESS_CONSUMER_GROUP` | `chain-analysis-process` | process |
-| `PROCESS_CONSUMER_NAME` | `consumer-{pid}` | process |
-| `PROCESS_DLQ_MAX_ATTEMPTS` | `5` | process |
-| `PROCESS_DLQ_SUFFIX` | `_dlq` | process |
-| `PROCESS_DLQ_ATTEMPT_TTL_SECS` | `86400` | process |
+| `INGEST_TARGETED_QUEUE` | `ingest:targeted_queue` | worker, backend |
+| `REFRESH_INTERVAL_SECS` | `300` | worker (task B) |
+| `REFRESH_COOLDOWN_SECS` | `1800` | worker (task B) |
+| `TARGETED_BRPOP_TIMEOUT_SECS` | `5` | worker (task A) |
+| `NEIGHBORHOOD_TX_LIMIT_PER_ADDR` | `500` | worker / ingest (`targeted neighborhood`) — cap txs fetched per peer |
+| `MAX_PEERS_PER_HOP` | `20` | worker / ingest (`targeted neighborhood`) — cap peers expanded per hop (top-N by counterparty frequency) |
+| `NEO4J_URI` | `bolt://localhost:7687` | worker |
+| `NEO4J_USER` | `neo4j` | worker |
+| `NEO4J_PASSWORD` | `password123` | worker |
+| `NEO4J_DATABASE` | `neo4j` | worker |
+| `DATABASE_URL` | `postgresql://postgres:postgres123@localhost:5432/chain_analysis` | worker |
+| `PROCESS_BATCH_SIZE` | `500` | worker |
+| `PROCESS_CONSUMER_GROUP` | `chain-analysis-process` | worker |
+| `PROCESS_CONSUMER_NAME` | `consumer-{pid}` | worker |
+| `PROCESS_DLQ_MAX_ATTEMPTS` | `5` | worker |
+| `PROCESS_DLQ_SUFFIX` | `_dlq` | worker |
+| `PROCESS_DLQ_ATTEMPT_TTL_SECS` | `86400` | worker |
 | `CLICKHOUSE_URL` | `http://localhost:8123` | clickhouse-process, backend |
 | `CLICKHOUSE_DATABASE` | `chain_analysis` | clickhouse-process, backend |
 | `CLICKHOUSE_USER` | `default` | clickhouse-process, backend |
@@ -268,7 +305,7 @@ Integration coverage:
 | `sinks::maxlen` | `E2E_REDIS_URL` | `MAXLEN ~ N` caps stream size; `None` leaves stream untrimmed |
 | `sinks::clickhouse` | `E2E_CLICKHOUSE_URL` | Per-run DB; insert 10 txs / 5 traces / 7 transfers; SELECT-back verifies counts, ethereum-etl column names, `trace_id` composition |
 | `ingest::reprocess` | `E2E_REDIS_URL` | `reprocess_failed_blocks` drains `ingest:failed_blocks:{source}` |
-| `ingest::e2e` | `E2E_REDIS_URL` | Mock ingest populates `ingested_txs`; `from-label-tasks` drains `INGEST_TARGETED_QUEUE` |
+| `ingest::e2e` | `E2E_REDIS_URL` | Mock ingest populates `ingested_txs` |
 
 CI (`.github/workflows/rust.yml`) runs `fmt`, `clippy`, `test-unit`, and
 `test-integration` (with Redis + ClickHouse service containers) on every
@@ -276,10 +313,13 @@ push/PR that touches `etl-rs/`.
 
 ## Orchestration (Dagster)
 
-Dagster wraps the `ingest` binary so analysts can schedule
-backfills, inspect runs, and auto-drain the targeted-fetch queue from a UI.
-The `process` and `clickhouse-process` consumers stay outside Dagster — they
-are always-on stream consumers, nothing to schedule.
+Dagster wraps the `ingest` binary so analysts can schedule backfills
+and inspect runs from a UI. **Phase I removed the targeted-queue
+sensor** — the `worker` binary now BRPOPs `ingest:targeted_queue`
+directly, which eliminates the 30s sensor-tick latency. Dagster remains
+as a cold harness for `backfill_job` and the hourly `reprocess_job`
+schedules only. The `worker` and `clickhouse-process` consumers stay
+outside Dagster — they are always-on, nothing to schedule.
 
 ```bash
 # Bring up everything, including Dagster webserver + daemon
@@ -292,20 +332,15 @@ docker compose up -d
 | --- | --- | --- |
 | `backfill_job` | Launchpad (manual) | `ingest block --start N --end M [--with-traces] [--with-transfers]` |
 | `reprocess_job` | Hourly schedules (etherscan :00, alchemy :15) | `ingest reprocess-failed --source {etherscan,alchemy}` |
-| `targeted_drain_job` | Redis sensor on `INGEST_TARGETED_QUEUE` (30s tick) | `ingest targeted from-label-tasks --limit N` |
 | `targeted_addresses_job` | Launchpad (ad-hoc) | `ingest targeted addresses --addrs 0x...,0x...` |
 | `targeted_neighborhood_job` | Launchpad (ad-hoc) | `ingest targeted neighborhood 0x... --hops N` |
 
-The `targeted_queue_sensor` is declared with `default_status=RUNNING` so
-`/labels` "Queue fetch" and `/api/pipeline/ingest-address` Just Work on a
-**fresh** deploy. Note Dagster persists sensor state once observed — if the
-sensor was ever registered with a different default (or manually stopped),
-changing the code default won't revive it. In that case start it once via
-Dagster UI (Automation → Sensors → toggle `targeted_queue_sensor`) or
-GraphQL (`mutation { startSensor(sensorSelector: {...}) }`). Hourly
-reprocess schedules default to **stopped** — enable them in the Dagster UI
-(Overview → Schedules) once you're confident the upstream source isn't
-persistently failing.
+Hourly reprocess schedules default to **stopped** — enable them in the
+Dagster UI (Overview → Schedules) once you're confident the upstream
+source isn't persistently failing. `/labels` "Queue fetch" and
+`/api/pipeline/ingest-address` bypass Dagster entirely — they LPUSH
+onto `ingest:targeted_queue` and the `worker` binary picks them up
+within one BRPOP cycle (~instant).
 
 **Dagster-specific env vars** (in addition to the standard `INGEST_*` /
 `ALCHEMY_*` / `REDIS_URL` knobs consumed by the Rust binary):
@@ -314,8 +349,6 @@ persistently failing.
 | --- | --- | --- |
 | `DAGSTER_HOME` | `/opt/dagster/home` | SQLite run storage, instance config |
 | `RUST_INGEST_BINARY` | `/opt/rust-bin/ingest` in container | Path Dagster subprocess-execs |
-| `DAGSTER_TARGETED_SENSOR_INTERVAL` | `30` | Seconds between `targeted_queue_sensor` ticks |
-| `DAGSTER_TARGETED_DRAIN_LIMIT` | `50` | `--limit` passed to `ingest targeted from-label-tasks` |
 
 The binary is built once by the `ingest-builder` compose service and staged
 into the shared `rust_bin` volume; `dagster-webserver` and `dagster-daemon`
@@ -345,7 +378,7 @@ Key metrics:
 | `dlq_moves_total` | counter | `stream` | process / clickhouse-process |
 | `dlq_messages_moved_total` | counter | `stream` | process / clickhouse-process |
 
-A global `service` label (`ingest`, `process`, `clickhouse-process`) is added
+A global `service` label (`ingest`, `worker`, `clickhouse-process`) is added
 by the exporter so dashboards can separate binaries running on the same host.
 
 ### Local stack
@@ -406,9 +439,9 @@ human-in-the-loop side of ingestion:
 1. **Queue targeted fetch** — operators submit `addresses`, transaction `hashes`,
    or a `neighborhood` seed. `POST /api/labels/fetch` LPUSHes jobs onto the
    Redis list `ingest:targeted_queue` and creates pending `label_tasks` rows.
-2. **Sensor drains the queue** — Dagster's `targeted_queue_sensor` (30s tick)
-   spawns `targeted_drain_job`, which shells out to the Rust `ingest targeted`
-   subcommand against those addresses.
+2. **Worker drains the queue** — the `worker` binary's task A BRPOPs the
+   list (sub-second latency), flips the `label_tasks` row to `in_progress`
+   before fetching from Etherscan, and to `completed` on success.
 3. **Analysts annotate** — pending tasks appear in the task table; submitting
    the annotation form (`POST /api/labels/annotations`) writes to the
    `annotations` table and flips the task's status to `completed`.
@@ -420,14 +453,14 @@ deep-links into `/labels?address=0x…` with the address prefilled.
 
 `POST /api/pipeline/ingest-address` is a thin wrapper that validates the
 address, inserts a `queued` row into `ingestion_runs`, and LPUSHes a job with
-the pre-assigned `run_id` onto `ingest:targeted_queue`. The Rust worker
-(`ingest targeted from-label-tasks`) drains the queue, transitions the run
-row `queued → running → completed|failed`, and records counts + error tags.
+the pre-assigned `run_id` onto `ingest:targeted_queue`. The `worker`
+binary (task A) drains the queue, transitions the run row
+`queued → running → completed|failed`, and records counts + error tags.
 The frontend polls `GET /api/ingestion-runs/{run_id}` every 2s through
 `useIngestionRun` and `RunStatusPill` in the top nav.
 
 Additional UI entry points that reuse `POST /api/labels/fetch` (no run pill —
-fire-and-forget, Dagster sensor drains within one tick):
+fire-and-forget, drained by the worker within one BRPOP cycle):
 
 - **NodePanel → Deep trace (2 hops)** — queues `{mode:"neighborhood"}` for
   the selected entity.
@@ -456,16 +489,16 @@ Verify the ETL cooperates end-to-end against a fresh deploy:
    search `0x742d35cc6634c0532925a3b844bc9e7595f0beb0`.
 3. Click **Fetch Transactions**. A toast appears immediately ("Queued —
    graph will refresh when run completes"). The **run pill** in the nav
-   flips `queued → running` within one sensor tick (~30s), then `completed`
-   within ~15s of pickup.
+   flips `queued → running` within ~1s (one BRPOP cycle), then
+   `completed` within seconds of pickup.
 4. The graph repopulates automatically on completion. Opening the pill
    shows the recent run with tx counts.
 5. On `/labels`, queue a fetch for the same address. A new `pending` task
-   appears; within 30s the sensor drains it and the row flips to
+   appears; the worker drains it within a second and the row flips to
    `in_progress`. The page auto-refreshes every 5s while any task is
    pending.
-6. **Auth failure path** — unset `ETHERSCAN_API_KEY`, restart `ingest` (or
-   the container running it), trigger a fetch. The run should end in
+6. **Auth failure path** — unset `ETHERSCAN_API_KEY`, restart the
+   `worker` container, trigger a fetch. The run should end in
    `status=failed`, `error_message` starting with `auth`, and the pill
    dropdown should render the ETHERSCAN_API_KEY help text.
 

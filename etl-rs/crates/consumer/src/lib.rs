@@ -141,6 +141,33 @@ pub async fn process_read_batch(
             .await?;
     }
 
+    // Advance the per-address delta cursor so the worker's refresh loop
+    // can skip already-ingested block ranges on the next tick.
+    let mut max_block: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    for tx in &txs {
+        let blk = tx.block_number;
+        for addr in [&tx.from_address, &tx.to_address] {
+            if addr.is_empty() {
+                continue;
+            }
+            let key = addr.to_lowercase();
+            max_block
+                .entry(key)
+                .and_modify(|b| {
+                    if blk > *b {
+                        *b = blk;
+                    }
+                })
+                .or_insert(blk);
+        }
+    }
+    if !max_block.is_empty() {
+        let updates: Vec<(String, u64)> = max_block.into_iter().collect();
+        if let Err(e) = pg_writer.bump_last_synced_block(&updates).await {
+            warn!(error = %e, "Failed to bump last_synced_block, continuing");
+        }
+    }
+
     consumer.ack_txs(&tx_msg_ids).await?;
     consumer.ack_traces(&trace_msg_ids).await?;
     consumer.ack_transfers(&transfer_msg_ids).await?;

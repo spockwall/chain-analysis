@@ -146,11 +146,16 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
 
         async function pollTasks() {
             try {
-                const [pending, inProgress] = await Promise.all([
+                // Use allSettled so a single failing status filter (e.g. a
+                // stale browser tab with an outdated enum value) doesn't
+                // preserve stale task state on the next merge.
+                const [pendingRes, runningRes] = await Promise.allSettled([
                     listLabelTasks({ status: "pending", limit: 25 }),
                     listLabelTasks({ status: "running", limit: 25 }),
                 ]);
                 if (cancelled) return;
+                const pending = pendingRes.status === "fulfilled" ? pendingRes.value : [];
+                const inProgress = runningRes.status === "fulfilled" ? runningRes.value : [];
                 const merged = [...pending, ...inProgress].sort(
                     (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""),
                 );

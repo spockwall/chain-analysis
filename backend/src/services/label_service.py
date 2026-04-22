@@ -159,7 +159,7 @@ class LabelService:
             """
             UPDATE label_tasks
             SET assignee_id = :user_id,
-                status = 'in_progress',
+                status = 'running',
                 assigned_at = NOW(),
                 updated_at = NOW()
             WHERE id = :task_id
@@ -168,7 +168,7 @@ class LabelService:
         )
 
         task["assignee_id"] = user_id
-        task["status"] = "in_progress"
+        task["status"] = "running"
 
         return task
 

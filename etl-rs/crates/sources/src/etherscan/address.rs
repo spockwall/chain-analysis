@@ -21,6 +21,17 @@ where
     F: Fn(u32, u32) -> Fut,
     Fut: Future<Output = Result<Vec<T>>>,
 {
+    fetch_pages_capped(fetcher, None).await
+}
+
+/// Same as `fetch_all_pages` but stops early once `max_items` have been
+/// collected. Used by neighborhood expansion to keep BFS bounded when a
+/// hop touches a very active address.
+pub async fn fetch_pages_capped<T, F, Fut>(fetcher: F, max_items: Option<usize>) -> Result<Vec<T>>
+where
+    F: Fn(u32, u32) -> Fut,
+    Fut: Future<Output = Result<Vec<T>>>,
+{
     let mut all = Vec::new();
     let mut page = 1u32;
 
@@ -31,6 +42,12 @@ where
 
         if count < PAGE_SIZE {
             break;
+        }
+        if let Some(cap) = max_items {
+            if all.len() >= cap {
+                all.truncate(cap);
+                break;
+            }
         }
 
         page += 1;

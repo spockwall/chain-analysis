@@ -156,6 +156,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "backon"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
+dependencies = [
+ "fastrand",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -352,6 +361,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickhouse-binary"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "config",
+ "eyre",
+ "metrics",
+ "observability",
+ "pipeline",
+ "sinks",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "clickhouse-derive"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -428,6 +454,25 @@ name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+
+[[package]]
+name = "consumer"
+version = "0.1.0"
+dependencies = [
+ "config",
+ "eyre",
+ "metrics",
+ "neo4rs",
+ "observability",
+ "pipeline",
+ "serde",
+ "serde_json",
+ "sinks",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "types",
+]
 
 [[package]]
 name = "core-foundation"
@@ -1900,30 +1945,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "process"
-version = "0.1.0"
-dependencies = [
- "clap",
- "color-eyre",
- "config",
- "eyre",
- "metrics",
- "neo4rs",
- "observability",
- "pipeline",
- "redis",
- "serde",
- "serde_json",
- "sinks",
- "sqlx",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "types",
- "uuid",
-]
-
-[[package]]
 name = "quanta"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2044,8 +2065,10 @@ checksum = "09d8f99a4090c89cc489a94833c901ead69bfbf3877b4867d5482e321ee875bc"
 dependencies = [
  "arc-swap",
  "async-trait",
+ "backon",
  "bytes",
  "combine",
+ "futures",
  "futures-util",
  "itertools",
  "itoa",
@@ -3743,6 +3766,32 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "worker"
+version = "0.1.0"
+dependencies = [
+ "color-eyre",
+ "config",
+ "consumer",
+ "eyre",
+ "ingest",
+ "metrics",
+ "neo4rs",
+ "observability",
+ "pipeline",
+ "redis",
+ "serde",
+ "serde_json",
+ "sinks",
+ "sources",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "types",
+ "uuid",
 ]
 
 [[package]]

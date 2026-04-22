@@ -175,15 +175,6 @@ enum TargetedMode {
         #[arg(long, default_value_t = false)]
         with_transfers: bool,
     },
-    /// Drain queued label-task fetches from `ingest:targeted_queue`.
-    FromLabelTasks {
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
-        #[arg(long, default_value_t = false)]
-        with_traces: bool,
-        #[arg(long, default_value_t = false)]
-        with_transfers: bool,
-    },
 }
 
 fn install_tracing() {
@@ -481,15 +472,14 @@ async fn run_targeted_mode(
     mode: TargetedMode,
 ) -> Result<()> {
     let (spec, with_traces, with_transfers) = match mode {
-        TargetedMode::Addresses { addrs, with_traces, with_transfers } => {
-            (TargetSpec::Addresses(addrs), with_traces, with_transfers)
-        }
+        TargetedMode::Addresses { addrs, with_traces, with_transfers } => (
+            TargetSpec::Addresses { addrs, from_block: None },
+            with_traces,
+            with_transfers,
+        ),
         TargetedMode::Hashes { hashes } => (TargetSpec::Hashes(hashes), false, false),
         TargetedMode::Neighborhood { seed, hops, with_traces, with_transfers } => {
             (TargetSpec::Neighborhood { seed, hops }, with_traces, with_transfers)
-        }
-        TargetedMode::FromLabelTasks { limit, with_traces, with_transfers } => {
-            (TargetSpec::FromLabelTasks { limit }, with_traces, with_transfers)
         }
     };
 
@@ -605,24 +595,6 @@ mod tests {
                 assert_eq!(seed, "0xseed");
                 assert_eq!(hops, 1);
             }
-            _ => panic!("wrong variant"),
-        }
-    }
-
-    #[test]
-    fn cli_parses_targeted_from_label_tasks() {
-        let cli = Cli::try_parse_from([
-            "ingest",
-            "targeted",
-            "from-label-tasks",
-            "--limit",
-            "100",
-        ])
-        .unwrap();
-        match cli.cmd {
-            Some(Cmd::Targeted {
-                mode: TargetedMode::FromLabelTasks { limit, .. },
-            }) => assert_eq!(limit, 100),
             _ => panic!("wrong variant"),
         }
     }
