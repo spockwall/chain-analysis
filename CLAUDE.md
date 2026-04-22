@@ -15,25 +15,38 @@ remaining Rust capabilities: NodePanel "Deep trace (2 hops)", ETLPage
 deep-link on `/etl`. Plan archived at
 `/Users/spockwall/.claude/plans/read-readme-md-now-glowing-toast.md`.
 
-### Phase I — AML Detections UI
+### Phase I — Pure-Rust worker + UI primitives (COMPLETE)
+Replaced the Dagster targeted-queue sensor with a long-running Rust
+`worker` binary that holds three tokio tasks: (A) BRPOPs
+`ingest:targeted_queue` for user-triggered fetches (sub-second latency
+vs 30s sensor tick), (B) periodic refresh of known_labels ∪ high-risk
+entities, (C) XREADGROUP drain of `ingested_*` streams into Neo4j +
+Postgres (absorbs the former `process` binary). Added
+`entity_features.last_synced_block` for delta-refresh semantics.
+Deleted the `process` crate, `targeted_queue_sensor`,
+`targeted_drain_job`, and `ingest targeted from-label-tasks`. UI sweep
+replaced pastel-fill badges with `<Badge>`/`<Pill>` primitives.
+Dagster now dormant (only `reprocess_job` schedules remain).
+
+### Phase J — AML Detections UI
 The Cypher queries in `backend/src/graph/queries.py` (peel chain, structuring,
 round trip, fan-out/fan-in, mixer interaction) exist but have no API route
 and no UI. Build `/api/detections/{pattern}?address=…` endpoints and a
 Detections tab that highlights matching subgraphs on the Cytoscape canvas.
-Highest analyst-facing value after Phase H.
+Highest analyst-facing value after Phase I.
 
-### Phase J — Parquet cold-tier export
+### Phase K — Parquet cold-tier export
 `etl-rs/README.md` advertises Parquet exports to MinIO but no code exists.
 Add a Rust binary or Dagster asset that reads from ClickHouse, partitions by
 date, and writes to `chain-analysis-raw/year=YYYY/month=MM/day=DD/…`.
 Unlocks ML training and compliance retention.
 
-### Phase K — E2E test coverage
+### Phase L — E2E test coverage
 No Playwright/Cypress suite. Add a smoke journey: login → ingest address →
 explore → queue label → annotate. Wire into CI alongside existing
 `backend/pytest` and `etl-rs/cargo test`.
 
-### Phase L — Dagster hardening
+### Phase M — Dagster hardening
 Deferred items from the original Phase D plan:
 (a) migrate Dagster run storage from SQLite to the shared Postgres,
 (b) scrape Dagster's `/metrics` endpoint into Prometheus,
@@ -46,7 +59,7 @@ Chain-Analysis is a blockchain transaction analysis platform for detecting and i
 ## Technology Stack
 
 **Backend (Python):**
-- FastAPI (REST API), Dagster (ETL orchestration, optional profile)
+- FastAPI (REST API), Dagster (dormant — only `reprocess_job` + `backfill_job`; targeted ingestion goes through the Rust `worker`)
 - Neo4j 5.x + GDS plugin: Graph database with Cypher queries
 - PostgreSQL 17: Entity features, ingestion run history, labeling workflows
 - Redis Streams: Message queue for decoupling ingestion
@@ -70,11 +83,9 @@ Chain-Analysis is a blockchain transaction analysis platform for detecting and i
 chain-analysis/
 ├── docker-compose.yml          # Neo4j, Postgres, Redis, MinIO, Backend, Frontend + optional profiles
 ├── .env.example                # Environment variables template
-├── etl-rs/                     # Rust ETL workers
+├── etl-rs/                     # Rust ETL workspace (see Rust section below for crate list)
 │   ├── Cargo.toml              # Workspace manifest
-│   ├── chain-analysis-common/  # Shared types: Transaction, Trace, Transfer, Config
-│   ├── chain-analysis-ingest/  # `ingest` binary: Etherscan → Redis Streams
-│   └── chain-analysis-process/ # `process` binary: Redis consumer → Neo4j + PostgreSQL
+│   └── crates/                 # types, config, sources, sinks, pipeline, consumer, ingest, worker, clickhouse
 ├── scripts/                    # Utility scripts (run by backend entrypoint on startup)
 │   ├── init_neo4j.py           # Creates Neo4j constraints + indexes (idempotent)
 │   ├── seed_neo4j.py           # Seeds sample Transaction nodes and entities
@@ -320,14 +331,15 @@ All queries use the Transaction-as-Node pattern:
 
 ### Rust ETL Workers (`etl-rs/`)
 
-Two binaries communicate via Redis Streams:
+Two long-running binaries plus one CLI, communicating via Redis:
 
 ```
 [Etherscan API]
-      │   ← ingest binary
+      │   ← ingest binary (one-shot CLI) / worker task A (continuous)
       ▼
-[Redis Streams]  (ingested_txs, ingested_traces, ingested_transfers)
-      │   ← process binary
+[Redis]  streams: ingested_txs / ingested_traces / ingested_transfers
+         list:    ingest:targeted_queue  (BRPOPped by worker task A)
+      │   ← worker task C (stream consumer)
       ▼
 [Neo4j + PostgreSQL]
 ```
@@ -336,44 +348,44 @@ Two binaries communicate via Redis Streams:
 
 | Crate | Role |
 |---|---|
-| `chain-analysis-common` | Shared types: `Transaction`, `Trace`, `Transfer`, `Config`, `ProcessConfig` |
-| `chain-analysis-ingest` | `ingest` binary — Etherscan → Redis Streams (address mode + block mode) |
-| `chain-analysis-process` | `process` binary — Redis consumer → Neo4j + PostgreSQL |
+| `types` | Shared value types (`Transaction`, `Trace`, `Transfer`) |
+| `config` | Env-based `Config` + `ProcessConfig` |
+| `sources` | `BlockSource` trait + Etherscan / Alchemy / Mock impls |
+| `sinks` | Redis Streams writer/consumer, Neo4j/Postgres/ClickHouse writers |
+| `pipeline` | Retry, DLQ, shutdown handle, progress reporters |
+| `consumer` | `read_batch` + `process_read_batch` (used by `worker` task C) |
+| `ingest` | `ingest` binary — one-shot CLI for backfills / ad-hoc targeted fetches |
+| `worker` | `worker` binary — long-running, three tokio tasks (targeted queue + refresh + stream consumer) |
+| `clickhouse` | `clickhouse-process` binary — independent OLAP consumer group |
 
 **`ingest` CLI:**
 ```
-# Address mode (all txs for one address, requires ETHERSCAN_API_KEY)
-ingest --address 0x... [--with-traces] [--with-transfers]
-
-# Block mode (block range, falls back to mock data without API key)
-ingest --start-block N --end-block M [--follow] [--with-traces] [--with-transfers]
-
-# Dry run (print to stdout, no Redis writes)
-ingest --address 0x... --dry-run
+ingest block --start N --end M [--with-traces] [--with-transfers]
+ingest address 0x... [--with-traces] [--with-transfers]
+ingest reprocess-failed --source {etherscan,alchemy}
+ingest targeted addresses --addrs 0xaaa,0xbbb
+ingest targeted neighborhood 0xseed --hops 1
 ```
 
-**`process` CLI:**
+**`worker` binary:**
 ```
-process               # continuous mode (Ctrl+C to stop)
-process --one-shot    # read one batch (default 500 msgs) then exit
+worker               # continuous — task A (BRPOP targeted_queue),
+                     #              task B (refresh known_labels + high-risk),
+                     #              task C (stream consumer → Neo4j + Postgres)
 ```
 
 **Build:**
 ```bash
 cd etl-rs
-cargo build --release   # produces target/release/ingest and target/release/process
-```
-
-**Docker Compose usage:**
-```bash
-docker compose --profile ingest run --rm ingest --address 0x... --with-traces
-docker compose --profile etl    run --rm process
+cargo build --release   # produces target/release/{ingest, worker, clickhouse-process}
 ```
 
 **Reset stuck consumer group:**
 ```bash
 docker exec chain-analysis-redis redis-cli XGROUP SETID ingested_txs chain-analysis-process 0
 ```
+(The consumer group name is still `chain-analysis-process` for
+backwards compatibility — only the binary name changed.)
 
 ## Environment Variables
 
