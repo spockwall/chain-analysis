@@ -1,12 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchIngestionRun, getLabelTask, listIngestionRuns, listLabelTasks } from "../api/client";
+import { fetchIngestionRun, listIngestionRuns, listLabelTasks } from "../api/client";
 import type { IngestionRun, IngestionRunStatus, LabelTaskResponse } from "../types";
 
 const TERMINAL: IngestionRunStatus[] = ["completed", "failed"];
-const TASK_ACTIVE = new Set(["pending", "running"]);
 const POLL_MS = 2000;
-const LABEL_POLL_MS = 5000;
+const LABEL_POLL_MS = 2000;
 const ACTIVE_KEY = "chain-analysis:active-runs";
 
 type CompletionHandler = (run: IngestionRun) => void;
@@ -54,6 +53,7 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
     const activeRef = useRef<Set<string>>(new Set(loadPersistedActive()));
     const taskHandlersRef = useRef<Record<number, TaskCompletionHandler | undefined>>({});
     const activeTasksRef = useRef<Set<number>>(new Set());
+    const labelTasksRef = useRef<LabelTaskResponse[]>([]);
 
     const track = useCallback((runId: string, opts?: TrackOptions) => {
         if (!runId) return;
@@ -159,24 +159,32 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
                 const merged = [...pending, ...inProgress].sort(
                     (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""),
                 );
+                // Snapshot the previous task list BEFORE overwriting so we
+                // can hand the last-known record to completion handlers
+                // without an extra round-trip.
+                const priorById = new Map(labelTasksRef.current.map((t) => [t.id, t]));
+                labelTasksRef.current = merged;
                 setLabelTasks(merged);
 
                 // Fire completion handlers for tracked tasks that are no
                 // longer in the active set (moved to completed / failed).
+                // A task that dropped out of both pending and running has
+                // reached a terminal state by definition — synthesize a
+                // completed record from the last-known task rather than
+                // spending an HTTP round-trip on /labels/tasks/{id}.
                 const activeIds = new Set(merged.map((t) => t.id));
                 for (const id of Array.from(activeTasksRef.current)) {
                     if (!activeIds.has(id)) {
-                        try {
-                            const task = await getLabelTask(id);
-                            if (cancelled) return;
-                            if (!TASK_ACTIVE.has(task.status)) {
-                                taskHandlersRef.current[id]?.(task);
-                                delete taskHandlersRef.current[id];
-                                activeTasksRef.current.delete(id);
-                            }
-                        } catch {
-                            // transient — retry next tick
+                        const prior = priorById.get(id);
+                        const handler = taskHandlersRef.current[id];
+                        if (handler) {
+                            const terminal: LabelTaskResponse = prior
+                                ? { ...prior, status: "completed" }
+                                : ({ id, status: "completed" } as LabelTaskResponse);
+                            handler(terminal);
                         }
+                        delete taskHandlersRef.current[id];
+                        activeTasksRef.current.delete(id);
                     }
                 }
             } catch {
