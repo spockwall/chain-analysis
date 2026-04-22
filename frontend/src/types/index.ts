@@ -249,7 +249,7 @@ export interface IngestionRun {
 
 export type LabelTaskStatus =
     | "pending"
-    | "in_progress"
+    | "running"
     | "completed"
     | "cancelled";
 

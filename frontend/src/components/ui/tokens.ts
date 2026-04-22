@@ -83,7 +83,7 @@ export const RUN_STATUS_TONE = {
 
 export const TASK_STATUS_TONE = {
     pending: "warning",
-    in_progress: "info",
+    running: "info",
     completed: "success",
     cancelled: "neutral",
 } as const;

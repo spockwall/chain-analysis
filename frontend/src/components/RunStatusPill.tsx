@@ -27,7 +27,7 @@ function pickHead(
     activeTasks: LabelTaskResponse[],
 ): HeadState {
     if (activeRuns.some((r) => r.status === "running")) return "running";
-    if (activeTasks.some((t) => t.status === "in_progress")) return "running";
+    if (activeTasks.some((t) => t.status === "running")) return "running";
     if (activeRuns.some((r) => r.status === "queued")) return "queued";
     if (activeTasks.some((t) => t.status === "pending")) return "queued";
     if (recentRun?.status === "failed") return "failed";
@@ -44,7 +44,7 @@ export function RunStatusPill(): JSX.Element | null {
         .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))
         .slice(0, 10);
     const activeTasks = labelTasks.filter(
-        (t) => t.status === "pending" || t.status === "in_progress",
+        (t) => t.status === "pending" || t.status === "running",
     );
     const recentTasks = labelTasks.slice(0, 10);
 

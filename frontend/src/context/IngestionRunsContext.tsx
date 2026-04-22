@@ -1,23 +1,30 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchIngestionRun, listIngestionRuns, listLabelTasks } from "../api/client";
+import { fetchIngestionRun, getLabelTask, listIngestionRuns, listLabelTasks } from "../api/client";
 import type { IngestionRun, IngestionRunStatus, LabelTaskResponse } from "../types";
 
 const TERMINAL: IngestionRunStatus[] = ["completed", "failed"];
+const TASK_ACTIVE = new Set(["pending", "running"]);
 const POLL_MS = 2000;
 const LABEL_POLL_MS = 5000;
 const ACTIVE_KEY = "chain-analysis:active-runs";
 
 type CompletionHandler = (run: IngestionRun) => void;
+type TaskCompletionHandler = (task: LabelTaskResponse) => void;
 
 interface TrackOptions {
     onComplete?: CompletionHandler;
+}
+
+interface TrackTaskOptions {
+    onComplete?: TaskCompletionHandler;
 }
 
 interface IngestionRunsContextValue {
     runs: IngestionRun[];
     labelTasks: LabelTaskResponse[];
     track: (runId: string, opts?: TrackOptions) => void;
+    trackTask: (taskId: number, opts?: TrackTaskOptions) => void;
     get: (runId: string) => IngestionRun | undefined;
 }
 
@@ -45,12 +52,20 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
     const [labelTasks, setLabelTasks] = useState<LabelTaskResponse[]>([]);
     const handlersRef = useRef<Record<string, CompletionHandler | undefined>>({});
     const activeRef = useRef<Set<string>>(new Set(loadPersistedActive()));
+    const taskHandlersRef = useRef<Record<number, TaskCompletionHandler | undefined>>({});
+    const activeTasksRef = useRef<Set<number>>(new Set());
 
     const track = useCallback((runId: string, opts?: TrackOptions) => {
         if (!runId) return;
         handlersRef.current[runId] = opts?.onComplete;
         activeRef.current.add(runId);
         persistActive(activeRef.current);
+    }, []);
+
+    const trackTask = useCallback((taskId: number, opts?: TrackTaskOptions) => {
+        if (!taskId) return;
+        taskHandlersRef.current[taskId] = opts?.onComplete;
+        activeTasksRef.current.add(taskId);
     }, []);
 
     const get = useCallback((runId: string) => runs[runId], [runs]);
@@ -62,15 +77,14 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
         listIngestionRuns(10)
             .then((history) => {
                 if (cancelled) return;
-                const userRuns = history.filter((r) => r.data_source !== "rust-process");
                 setRuns((prev) => {
                     const next = { ...prev };
-                    for (const run of userRuns) next[run.run_id] = run;
+                    for (const run of history) next[run.run_id] = run;
                     return next;
                 });
                 // Resume polling for any historically-active runs that never
                 // reached a terminal state (e.g. the tab was closed mid-run).
-                for (const run of userRuns) {
+                for (const run of history) {
                     if (!TERMINAL.includes(run.status)) activeRef.current.add(run.run_id);
                 }
                 persistActive(activeRef.current);
@@ -102,15 +116,6 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
                 const next = { ...prev };
                 for (const { id, run } of results) {
                     if (run) {
-                        // rust-process rows are consumer lifetime markers, not
-                        // user ingests — evict from tracking so they don't sit
-                        // "running" forever in the pill.
-                        if (run.data_source === "rust-process") {
-                            delete handlersRef.current[id];
-                            delete next[id];
-                            activeRef.current.delete(id);
-                            continue;
-                        }
                         next[id] = run;
                         if (TERMINAL.includes(run.status)) {
                             const handler = handlersRef.current[id];
@@ -134,8 +139,8 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
     }, []);
 
     // Poll label_tasks. These are created by deep-trace / hash-list / address
-    // fetches from Labels + NodePanel and drained by the Dagster sensor — no
-    // run_id to track individually, so just list pending + in_progress.
+    // fetches from Labels + NodePanel and drained by the Rust worker — no
+    // run_id to track individually, so just list pending + running.
     useEffect(() => {
         let cancelled = false;
 
@@ -143,13 +148,32 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
             try {
                 const [pending, inProgress] = await Promise.all([
                     listLabelTasks({ status: "pending", limit: 25 }),
-                    listLabelTasks({ status: "in_progress", limit: 25 }),
+                    listLabelTasks({ status: "running", limit: 25 }),
                 ]);
                 if (cancelled) return;
                 const merged = [...pending, ...inProgress].sort(
                     (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""),
                 );
                 setLabelTasks(merged);
+
+                // Fire completion handlers for tracked tasks that are no
+                // longer in the active set (moved to completed / failed).
+                const activeIds = new Set(merged.map((t) => t.id));
+                for (const id of Array.from(activeTasksRef.current)) {
+                    if (!activeIds.has(id)) {
+                        try {
+                            const task = await getLabelTask(id);
+                            if (cancelled) return;
+                            if (!TASK_ACTIVE.has(task.status)) {
+                                taskHandlersRef.current[id]?.(task);
+                                delete taskHandlersRef.current[id];
+                                activeTasksRef.current.delete(id);
+                            }
+                        } catch {
+                            // transient — retry next tick
+                        }
+                    }
+                }
             } catch {
                 // non-fatal — keep last-known tasks
             }
@@ -164,8 +188,8 @@ export function IngestionRunsProvider({ children }: { children: ReactNode }): JS
     }, []);
 
     const value = useMemo<IngestionRunsContextValue>(
-        () => ({ runs: Object.values(runs), labelTasks, track, get }),
-        [runs, labelTasks, track, get],
+        () => ({ runs: Object.values(runs), labelTasks, track, trackTask, get }),
+        [runs, labelTasks, track, trackTask, get],
     );
 
     return <IngestionRunsContext.Provider value={value}>{children}</IngestionRunsContext.Provider>;
