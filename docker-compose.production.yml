@@ -9,6 +9,7 @@ services:
       - NEO4J_PLUGINS=["graph-data-science"]
       - NEO4J_dbms_memory_heap_initial__size=${NEO4J_HEAP_SIZE:-1G}
       - NEO4J_dbms_memory_heap_max__size=${NEO4J_MAX_HEAP:-2G}
+      - NEO4J_dbms_memory_pagecache_size=${NEO4J_PAGECACHE_SIZE:-1G}
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -18,6 +19,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     networks:
       - chain-analysis-net
 
@@ -43,7 +45,7 @@ services:
     image: redis:7-alpine
     container_name: chain-analysis-redis
     restart: always
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
@@ -54,38 +56,31 @@ services:
     networks:
       - chain-analysis-net
 
-  minio:
-    image: minio/minio:latest
-    container_name: chain-analysis-minio
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: chain-analysis-clickhouse
     restart: always
+    ports:
+      - "8123:8123"
+      - "9002:9000"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-    command: server /data --console-address ":9001"
+      - CLICKHOUSE_DB=${CLICKHOUSE_DB:-chain_analysis}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse123}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     volumes:
-      - minio_data:/data
+      - clickhouse_data:/var/lib/clickhouse
+      - ./etl-rs/crates/etl/migrations/clickhouse:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - chain-analysis-net
-
-  minio-init:
-    image: minio/mc:latest
-    container_name: chain-analysis-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
-      mc mb local/${MINIO_BUCKET} --ignore-existing;
-      mc mb local/${MINIO_BUCKET}-raw --ignore-existing;
-      mc mb local/${MINIO_BUCKET}-processed --ignore-existing;
-      exit 0;
-      "
+      start_period: 15s
     networks:
       - chain-analysis-net
 
@@ -108,23 +103,22 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
-      - MINIO_BUCKET=${MINIO_BUCKET}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - ALLIUM_API_KEY=${ALLIUM_API_KEY}
       - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
     depends_on:
-      neo4j: { condition: service_healthy }
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-      minio: { condition: service_healthy }
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s
     networks:
       - chain-analysis-net
 
@@ -141,12 +135,157 @@ services:
       - /home/mars/chain-analysis/certs/selfsigned.crt:/etc/nginx/certs/selfsigned.crt:ro
       - /home/mars/chain-analysis/certs/selfsigned.key:/etc/nginx/certs/selfsigned.key:ro
     depends_on:
-      backend: { condition: service_healthy }
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--no-check-certificate", "--tries=1", "--spider", "https://127.0.0.1/"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
+    networks:
+      - chain-analysis-net
+
+  worker:
+    build:
+      context: ./etl-rs
+      dockerfile: Dockerfile
+      target: worker
+    image: chain-analysis/worker:production
+    container_name: chain-analysis-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      - REFRESH_INTERVAL_SECS=${REFRESH_INTERVAL_SECS:-300}
+      - REFRESH_COOLDOWN_SECS=${REFRESH_COOLDOWN_SECS:-1800}
+      - TARGETED_BRPOP_TIMEOUT_SECS=${TARGETED_BRPOP_TIMEOUT_SECS:-5}
+      - NEIGHBORHOOD_TX_LIMIT_PER_ADDR=${NEIGHBORHOOD_TX_LIMIT_PER_ADDR:-500}
+      - MAX_PEERS_PER_HOP=${MAX_PEERS_PER_HOP:-20}
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - chain-analysis-net
+
+  dagster-webserver:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: chain-analysis-dagster-webserver
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-m", "etl.definitions"]
+    entrypoint: []
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - DAGSTER_HOME=/opt/dagster/home
+      - RUST_INGEST_BINARY=/opt/rust-bin/ingest
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - INGEST_TARGETED_QUEUE=${INGEST_TARGETED_QUEUE:-ingest:targeted_queue}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
+      - INGEST_SOURCE=${INGEST_SOURCE:-}
+    volumes:
+      - dagster_home:/opt/dagster/home
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - chain-analysis-net
+
+  dagster-daemon:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: chain-analysis-dagster-daemon
+    command: ["dagster-daemon", "run", "-m", "etl.definitions"]
+    entrypoint: []
+    restart: unless-stopped
+    environment:
+      - DAGSTER_HOME=/opt/dagster/home
+      - RUST_INGEST_BINARY=/opt/rust-bin/ingest
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - INGEST_TARGETED_QUEUE=${INGEST_TARGETED_QUEUE:-ingest:targeted_queue}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
+      - INGEST_SOURCE=${INGEST_SOURCE:-}
+    volumes:
+      - dagster_home:/opt/dagster/home
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - chain-analysis-net
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: chain-analysis-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./compose/prometheus.config.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - chain-analysis-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: chain-analysis-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./compose/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./compose/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       start_period: 10s
     networks:
       - chain-analysis-net
@@ -157,7 +296,10 @@ volumes:
   neo4j_plugins:
   postgres_data:
   redis_data:
-  minio_data:
+  clickhouse_data:
+  dagster_home:
+  prometheus_data:
+  grafana_data:
 
 networks:
   chain-analysis-net:
