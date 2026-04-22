@@ -50,7 +50,7 @@ A labeling task representing one entity address that needs to be reviewed and an
 |---|---|---|
 | `id` | `INTEGER PK` | Auto-increment primary key |
 | `entity_address` | `VARCHAR(42)` | Ethereum address to label |
-| `status` | `taskstatus` | `pending`, `in_progress`, `completed`, `skipped` |
+| `status` | `taskstatus` | `pending`, `running`, `completed`, `skipped` |
 | `priority` | `INTEGER` | Higher value = more urgent |
 | `title` | `VARCHAR(255)` | Optional task title |
 | `description` | `TEXT` | Optional task description |
@@ -209,7 +209,7 @@ Hash-partitioned table for dumping bulk raw transactions during the ETL process 
 
 | Enum | Values |
 |---|---|
-| `taskstatus` | `pending`, `in_progress`, `completed`, `skipped` |
+| `taskstatus` | `pending`, `running`, `completed`, `skipped` |
 | `risklevel` | `unknown`, `low`, `medium`, `high`, `critical` |
 | `entitytype` | `EOA`, `Contract`, `Mixer`, `LendingPool`, `Bridge`, `DEX`, `CEXHotWallet`, `Application`, `Unknown` |
 | `ingestionstatus` | `running`, `completed`, `failed` |
