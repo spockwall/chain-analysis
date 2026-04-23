@@ -6,11 +6,12 @@ services:
   neo4j:
     image: neo4j:5.26.0-enterprise
     container_name: chain-analysis-neo4j
+    env_file:
+      - ./secrets.dev.env
     ports:
       - "7474:7474" # HTTP
       - "7687:7687" # Bolt
     environment:
-      - NEO4J_AUTH=neo4j/password123
       - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
       - NEO4J_PLUGINS=["graph-data-science"]
       - NEO4J_dbms_memory_heap_initial__size=512m
@@ -40,11 +41,12 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: chain-analysis-postgres
+    env_file:
+      - ./secrets.dev.env
     ports:
       - "5432:5432"
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres123
       - POSTGRES_DB=chain_analysis
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -81,13 +83,14 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8-alpine
     container_name: chain-analysis-clickhouse
+    env_file:
+      - ./secrets.dev.env
     ports:
       - "8123:8123" # HTTP
       - "9002:9000" # Native TCP (remapped off host port 9000 to leave room for future cold-tier)
     environment:
       - CLICKHOUSE_DB=chain_analysis
       - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=clickhouse123
       - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     ulimits:
       nofile:

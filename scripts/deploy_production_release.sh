@@ -31,10 +31,10 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
-require_env_file_value() {
+get_env_file_value() {
   local name="$1"
 
-  if ! awk -F= -v key="$name" '
+  awk -F= -v key="$name" '
     /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
     {
       line = $0
@@ -46,13 +46,44 @@ require_env_file_value() {
         value = substr(line, index(line, "=") + 1)
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
         gsub(/^["'\'']|["'\'']$/, "", value)
-        if (value != "") found = 1
+        print value
+        found = 1
+        exit
       }
     }
     END { exit found ? 0 : 1 }
-  ' .env; then
+  ' .env
+}
+
+require_env_file_value() {
+  local name="$1"
+
+  if ! value="$(get_env_file_value "$name")"; then
     fail "missing required variable in .env: $name"
   fi
+
+  if [ -z "$value" ]; then
+    fail "required variable is empty in .env: $name"
+  fi
+}
+
+require_env_not_default() {
+  local name="$1"
+  local value=""
+
+  value="$(get_env_file_value "$name")" || fail "missing required variable in .env: $name"
+
+  case "$value" in
+    "password123"|"postgres123"|"redis123"|"clickhouse123"|"change-me-in-production"|"change-me-in-production-use-a-long-random-secret"|"your_etherscan_api_key_here"|"<required-in-prod>")
+      fail "unsafe default value detected for $name in .env"
+      ;;
+  esac
+
+  case "$value" in
+    "<"*">")
+      fail "placeholder value detected for $name in .env"
+      ;;
+  esac
 }
 
 wait_for_container_health() {
@@ -97,6 +128,7 @@ require_command docker
 
 for name in "${REQUIRED_ENV_VARS[@]}"; do
   require_env_file_value "$name"
+  require_env_not_default "$name"
 done
 
 previous_commit="$(git rev-parse --short HEAD)"

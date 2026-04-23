@@ -146,6 +146,9 @@ env.bak/
 venv.bak/
 .claude/ 
 
+# Local compose-only secrets
+compose/secrets.dev.env
+
 # Spyder project settings
 .spyderproject
 .spyproject
