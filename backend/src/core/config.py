@@ -26,7 +26,7 @@ def _find_env_file() -> str | None:
 
 
 class Settings(BaseSettings):
-    """Application settings with support for local, AWS, and GCP environments."""
+    """Application settings with support for local, cloud, and production environments."""
 
     model_config = SettingsConfigDict(
         env_file=_find_env_file(),
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     )
 
     # Environment
-    environment: Literal["local", "aws", "gcp"] = "local"
+    environment: Literal["local", "aws", "gcp", "production"] = "local"
 
     # =========================================================================
     # Graph Database
