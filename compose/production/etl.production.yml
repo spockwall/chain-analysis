@@ -2,7 +2,7 @@
 services:
   worker:
     build:
-      context: ../etl-rs
+      context: ../../etl-rs
       dockerfile: Dockerfile
       target: worker
     image: chain-analysis/worker:production
