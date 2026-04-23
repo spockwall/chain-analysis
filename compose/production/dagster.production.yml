@@ -2,7 +2,7 @@
 services:
   dagster-webserver:
     build:
-      context: ..
+      context: ../..
       dockerfile: backend/Dockerfile
     container_name: chain-analysis-dagster-webserver
     command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-m", "etl.definitions"]

@@ -2,7 +2,7 @@
 services:
   backend:
     build:
-      context: ..
+      context: ../..
       dockerfile: backend/Dockerfile
     container_name: chain-analysis-backend
     restart: always
