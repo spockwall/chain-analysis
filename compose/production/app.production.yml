@@ -20,7 +20,6 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - ALLIUM_API_KEY=${ALLIUM_API_KEY}
       - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
     depends_on:
       neo4j:
