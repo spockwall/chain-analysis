@@ -12,7 +12,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.config.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus.config.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:9090/-/ready"]

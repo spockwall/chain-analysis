@@ -75,7 +75,7 @@ services:
         hard: 262144
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ../etl-rs/crates/etl/migrations/clickhouse:/docker-entrypoint-initdb.d:ro
+      - ../../etl-rs/crates/etl/migrations/clickhouse:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
       interval: 10s

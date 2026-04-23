@@ -34,7 +34,7 @@ services:
 
   dagster-daemon:
     build:
-      context: ..
+      context: ../..
       dockerfile: backend/Dockerfile
     container_name: chain-analysis-dagster-daemon
     command: ["dagster-daemon", "run", "-m", "etl.definitions"]
