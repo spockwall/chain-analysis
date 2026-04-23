@@ -71,7 +71,6 @@ The production machine must have a `.env` file in `DEPLOY_PATH`. The deploy scri
 - `CLICKHOUSE_USER`
 - `CLICKHOUSE_PASSWORD`
 - `JWT_SECRET_KEY`
-- `ALLIUM_API_KEY`
 - `ETHERSCAN_API_KEY`
 
 ## Rollback

@@ -94,7 +94,6 @@ jobs:
           CLICKHOUSE_USER=default
           CLICKHOUSE_PASSWORD=ci-clickhouse-password
           JWT_SECRET_KEY=ci-jwt-secret
-          ALLIUM_API_KEY=ci-allium-key
           ETHERSCAN_API_KEY=ci-etherscan-key
           EOF
           docker compose -f docker-compose.yml config --quiet
