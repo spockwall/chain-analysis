@@ -1,0 +1,36 @@
+# Rust ETL worker for production.
+services:
+  worker:
+    build:
+      context: ../etl-rs
+      dockerfile: Dockerfile
+      target: worker
+    image: chain-analysis/worker:production
+    container_name: chain-analysis-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      - REFRESH_INTERVAL_SECS=${REFRESH_INTERVAL_SECS:-300}
+      - REFRESH_COOLDOWN_SECS=${REFRESH_COOLDOWN_SECS:-1800}
+      - TARGETED_BRPOP_TIMEOUT_SECS=${TARGETED_BRPOP_TIMEOUT_SECS:-5}
+      - NEIGHBORHOOD_TX_LIMIT_PER_ADDR=${NEIGHBORHOOD_TX_LIMIT_PER_ADDR:-500}
+      - MAX_PEERS_PER_HOP=${MAX_PEERS_PER_HOP:-20}
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - chain-analysis-net
+
+networks:
+  chain-analysis-net:
+    driver: bridge
