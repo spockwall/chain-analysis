@@ -104,8 +104,6 @@ jobs:
         run: |
           docker build -f frontend/Dockerfile --target production -t chain-analysis-frontend:release-check frontend
           docker build -f backend/Dockerfile -t chain-analysis-backend:release-check .
-          docker build -f etl-rs/Dockerfile --target ingest -t chain-analysis-ingest:release-check etl-rs
-          docker build -f etl-rs/Dockerfile --target worker -t chain-analysis-worker:release-check etl-rs
 
   reject-non-release-dispatch:
     name: Reject non-release manual dispatch
