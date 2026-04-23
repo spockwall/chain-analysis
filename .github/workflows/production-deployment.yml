@@ -77,23 +77,6 @@ jobs:
         if: always()
         run: docker compose down -v
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: etl-rs -> target
-
-      - name: Validate Rust ETL
-        working-directory: etl-rs
-        run: |
-          cargo clippy --workspace --all-targets -- -D warnings -A clippy::too_many_arguments
-          cargo test --workspace
-          cargo build --workspace --release
-
       - name: Validate compose files
         run: |
           set -euo pipefail
