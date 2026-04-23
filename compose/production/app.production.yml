@@ -39,7 +39,7 @@ services:
 
   frontend:
     build:
-      context: ../frontend
+      context: ../../frontend
       dockerfile: Dockerfile
       target: production
     container_name: chain-analysis-frontend
