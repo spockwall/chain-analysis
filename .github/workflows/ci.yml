@@ -61,6 +61,7 @@ jobs:
           ENVIRONMENT=local
           NEO4J_USER=neo4j
           NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
           POSTGRES_HOST=postgres
           POSTGRES_PORT=5432
           POSTGRES_DB=chain_analysis
@@ -181,6 +182,7 @@ jobs:
           ENVIRONMENT=local
           NEO4J_USER=neo4j
           NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
           POSTGRES_HOST=postgres
           POSTGRES_PORT=5432
           POSTGRES_DB=chain_analysis
