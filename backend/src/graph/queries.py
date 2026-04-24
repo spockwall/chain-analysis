@@ -234,6 +234,7 @@ class AMLPatternQueries:
               collect(DISTINCT t1) + collect(DISTINCT t2) AS txs
         WHERE size(dsts) >= $min_receivers
         RETURN src.address        AS source,
+               size(mids)         AS intermediaries,
              size(mids)         AS intermediary_count,
              size(dsts)         AS final_receivers,
              [m IN mids | m.address] + [d IN dsts | d.address] AS matched_addresses,
