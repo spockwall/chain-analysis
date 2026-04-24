@@ -132,6 +132,24 @@ export interface PathData {
     total_value?: string | null;
 }
 
+export type DetectionPattern =
+    | "peel-chain"
+    | "structuring"
+    | "round-trip"
+    | "fan-out-fan-in"
+    | "mixer-interaction";
+
+export interface DetectionsResponse {
+    pattern: DetectionPattern;
+    address: string;
+    matches: number;
+    nodes: EntityResponse[];
+    transactions: TransactionResponse[];
+    highlighted_node_ids: string[];
+    highlighted_edge_ids: string[];
+    truncated: boolean;
+}
+
 export interface HealthResponse {
     status: "healthy" | "degraded";
     services: Record<string, boolean>;

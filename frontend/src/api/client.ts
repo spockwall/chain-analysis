@@ -3,6 +3,8 @@
  */
 
 import type {
+    DetectionPattern,
+    DetectionsResponse,
     AdminUserCreateRequest,
     AdminUserListResponse,
     AdminUserUpdateRequest,
@@ -173,6 +175,23 @@ export async function fetchPaths(source: string, target: string, options: PathOp
     const endpoint = `/entities/${source}/paths/${target}${query ? `?${query}` : ""}`;
 
     return request<PathResponse>(endpoint);
+}
+
+export interface DetectionOptions {
+    limit?: number;
+}
+
+export async function fetchDetection(
+    pattern: DetectionPattern,
+    address: string,
+    options: DetectionOptions = {},
+): Promise<DetectionsResponse> {
+    const params = new URLSearchParams({ address });
+    if (options.limit !== undefined) {
+        params.set("limit", options.limit.toString());
+    }
+
+    return request<DetectionsResponse>(`/detections/${pattern}?${params.toString()}`);
 }
 
 // Transaction endpoints

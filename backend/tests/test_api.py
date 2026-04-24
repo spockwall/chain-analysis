@@ -75,6 +75,20 @@ class TestPipelineEndpoints:
         assert response.status_code == 422
 
 
+class TestDetectionsEndpoints:
+    """Tests for AML detections endpoint registration."""
+
+    def test_detections_route_is_registered(self, client: TestClient):
+        """Endpoint exists and validates required query params."""
+        response = client.get("/api/detections/peel-chain")
+        assert response.status_code == 422
+
+    def test_detections_invalid_address_format(self, client: TestClient):
+        """Invalid address should return 400."""
+        response = client.get("/api/detections/peel-chain?address=invalid")
+        assert response.status_code == 400
+
+
 class TestValidation:
     """Tests for input validation."""
 

@@ -8,8 +8,15 @@ import { NodePanel } from "../components/NodePanel";
 import { TxPanel } from "../components/TxPanel";
 import { useToastContext } from "../context/ToastContext";
 import { useIngestionRuns } from "../context/IngestionRunsContext";
-import type { EntityResponse, NeighborsResponse, PathResponse, TransactionResponse } from "../types";
-import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
+import type {
+    DetectionPattern,
+    DetectionsResponse,
+    EntityResponse,
+    NeighborsResponse,
+    PathResponse,
+    TransactionResponse,
+} from "../types";
+import { fetchDetection, fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
 import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
 import { Background } from "../components/Background";
 
@@ -27,6 +34,14 @@ const DEFAULT_FILTERS: GraphFilters = {
 // shared input style used in path-finder and filter panel
 const monoInput =
     "w-60 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none transition-colors focus:border-blue-400";
+
+const DETECTION_PATTERNS: Array<{ value: DetectionPattern; label: string }> = [
+    { value: "peel-chain", label: "Peel Chain" },
+    { value: "structuring", label: "Structuring" },
+    { value: "round-trip", label: "Round Trip" },
+    { value: "fan-out-fan-in", label: "Fan-Out / Fan-In" },
+    { value: "mixer-interaction", label: "Mixer Interaction" },
+];
 
 export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplorerPageProps) {
     const toast = useToastContext();
@@ -50,6 +65,10 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
     const [pathTarget, setPathTarget] = useState("");
     const [pathResult, setPathResult] = useState<PathResponse | null>(null);
     const [pathLoading, setPathLoading] = useState(false);
+    const [detectionPattern, setDetectionPattern] = useState<DetectionPattern>("peel-chain");
+    const [detectionAddress, setDetectionAddress] = useState("");
+    const [detectionLoading, setDetectionLoading] = useState(false);
+    const [detectionResult, setDetectionResult] = useState<DetectionsResponse | null>(null);
 
     useEffect(() => {
         if (initialAddress) handleSearch(initialAddress);
@@ -60,6 +79,12 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
         if (initialTxHash) handleTxSearch(initialTxHash);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialTxHash]);
+
+    useEffect(() => {
+        if (graphData?.center_address && !detectionAddress) {
+            setDetectionAddress(graphData.center_address);
+        }
+    }, [graphData?.center_address, detectionAddress]);
 
     const handleSearch = async (address: string, opts?: { waitForGraph?: boolean }) => {
         // Keep URL in sync so a refresh restores this view.
@@ -505,19 +530,65 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
         }
     };
 
+    const handleRunDetection = async () => {
+        const address = detectionAddress.trim() || graphData?.center_address || "";
+        if (!address) {
+            toast.error("Enter an address for detection");
+            return;
+        }
+
+        setDetectionLoading(true);
+        const loadId = toast.loading("Running AML detection…");
+        try {
+            const result = await fetchDetection(detectionPattern, address, { limit: 20 });
+            setDetectionResult(result);
+
+            if (graphData) {
+                const existingAddresses = new Set(graphData.nodes.map((n) => n.address));
+                const existingTxHashes = new Set(graphData.transactions.map((t) => t.hash));
+                const addNodes = result.nodes.filter((n) => !existingAddresses.has(n.address));
+                const addTxs = result.transactions.filter((t) => !existingTxHashes.has(t.hash));
+
+                if (addNodes.length > 0 || addTxs.length > 0) {
+                    setGraphData({
+                        ...graphData,
+                        nodes: [...graphData.nodes, ...addNodes],
+                        transactions: [...graphData.transactions, ...addTxs],
+                        total_nodes: graphData.nodes.length + addNodes.length,
+                        total_transactions: graphData.transactions.length + addTxs.length,
+                    });
+                }
+            }
+
+            toast.dismiss(loadId);
+            toast.success(`Detection finished: ${result.matches} match(es)`);
+        } catch (err) {
+            toast.dismiss(loadId);
+            toast.error(err instanceof Error ? err.message : "Detection failed");
+        } finally {
+            setDetectionLoading(false);
+        }
+    };
+
+    const clearDetection = () => setDetectionResult(null);
+
     const highlightedNodeIds = useMemo(() => {
-        if (!pathResult) return new Set<string>();
         const ids = new Set<string>();
-        pathResult.paths.forEach((p) => p.nodes.forEach((n) => ids.add(n.address)));
+        if (pathResult) {
+            pathResult.paths.forEach((p) => p.nodes.forEach((n) => ids.add(n.address)));
+        }
+        detectionResult?.highlighted_node_ids.forEach((id) => ids.add(id));
         return ids;
-    }, [pathResult]);
+    }, [pathResult, detectionResult]);
 
     const highlightedEdgeIds = useMemo(() => {
-        if (!pathResult) return new Set<string>();
         const ids = new Set<string>();
-        pathResult.paths.forEach((p) => p.transactions.forEach((tx) => ids.add(`tx-${tx.hash}`)));
+        if (pathResult) {
+            pathResult.paths.forEach((p) => p.transactions.forEach((tx) => ids.add(`tx-${tx.hash}`)));
+        }
+        detectionResult?.highlighted_edge_ids.forEach((id) => ids.add(id));
         return ids;
-    }, [pathResult]);
+    }, [pathResult, detectionResult]);
 
     const toggleEntityType = (type: string) => {
         setFilters((prev) => {
@@ -583,6 +654,53 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                         >
                             Clear
                         </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Detections bar */}
+            <div className="shrink-0 border-b border-gray-100 bg-white/80">
+                <div className="flex items-center gap-2.5 px-5 py-2.5">
+                    <span className="text-[0.68rem] font-semibold tracking-widest uppercase text-gray-400">
+                        Detections
+                    </span>
+                    <select
+                        className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] bg-white text-gray-900"
+                        value={detectionPattern}
+                        onChange={(e) => setDetectionPattern(e.target.value as DetectionPattern)}
+                    >
+                        {DETECTION_PATTERNS.map((p) => (
+                            <option key={p.value} value={p.value}>
+                                {p.label}
+                            </option>
+                        ))}
+                    </select>
+                    <input
+                        className="w-72 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none transition-colors focus:border-blue-400"
+                        placeholder="Address (0x...)"
+                        value={detectionAddress}
+                        onChange={(e) => setDetectionAddress(e.target.value)}
+                    />
+                    <button
+                        className="px-3.5 py-1.5 bg-gray-900 text-white text-[0.75rem] font-semibold rounded-lg border-none cursor-pointer transition-colors hover:bg-[#1e293b] disabled:opacity-45"
+                        onClick={handleRunDetection}
+                        disabled={detectionLoading}
+                    >
+                        {detectionLoading ? "Running..." : "Run"}
+                    </button>
+                    {detectionResult && (
+                        <button
+                            className="px-3 py-1.5 bg-white text-gray-900 text-[0.75rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50"
+                            onClick={clearDetection}
+                        >
+                            Clear
+                        </button>
+                    )}
+                    {detectionResult && (
+                        <span className="text-[0.72rem] text-gray-500">
+                            {detectionResult.matches} matches, {detectionResult.highlighted_node_ids.length} nodes, {detectionResult.highlighted_edge_ids.length} txs
+                            {detectionResult.truncated ? " (truncated)" : ""}
+                        </span>
                     )}
                 </div>
             </div>

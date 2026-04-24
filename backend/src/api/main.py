@@ -14,6 +14,7 @@ from api.deps import close_adapters, init_adapters
 from api.routes import (
     admin_router,
     auth_router,
+    detections_router,
     entities_router,
     entities_write_router,
     features_router,
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(groups_router, prefix="/api")
     app.include_router(pipeline_router, prefix="/api")
     app.include_router(ingestion_router, prefix="/api")
+    app.include_router(detections_router, prefix="/api")
 
     return app
 
