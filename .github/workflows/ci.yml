@@ -53,6 +53,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare local compose secrets
+        run: |
+          set -euo pipefail
+          mkdir -p compose
+          cat > .env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://:changeme@redis:6379
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+          cp .env compose/secrets.dev.env
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -96,6 +121,10 @@ jobs:
       - name: Stop backend test infrastructure
         if: always()
         run: docker compose down -v
+
+      - name: Remove local compose secrets
+        if: always()
+        run: rm -f .env compose/secrets.dev.env
 
       - name: Build production image
         run: docker build -f backend/Dockerfile -t chain-analysis-backend:ci .
@@ -144,6 +173,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare local compose secrets
+        run: |
+          set -euo pipefail
+          mkdir -p compose
+          cat > .env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://:changeme@redis:6379
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+          cp .env compose/secrets.dev.env
+
       - name: Validate local compose file
         run: docker compose -f docker-compose.yml config --quiet
 
@@ -167,3 +221,7 @@ jobs:
           ETHERSCAN_API_KEY=ci-etherscan-key
           EOF
           docker compose --env-file "$env_file" -f docker-compose.production.yml config --quiet
+
+      - name: Remove local compose secrets
+        if: always()
+        run: rm -f .env compose/secrets.dev.env

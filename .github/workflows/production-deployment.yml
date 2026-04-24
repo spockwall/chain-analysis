@@ -20,6 +20,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare local compose secrets
+        run: |
+          set -euo pipefail
+          mkdir -p compose
+          cat > .env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://:changeme@redis:6379
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+          cp .env compose/secrets.dev.env
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -98,6 +123,10 @@ jobs:
           EOF
           docker compose -f docker-compose.yml config --quiet
           docker compose --env-file "$env_file" -f docker-compose.production.yml config --quiet
+
+      - name: Remove local compose secrets
+        if: always()
+        run: rm -f .env compose/secrets.dev.env
 
       - name: Build deployment images
         run: |
