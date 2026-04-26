@@ -16,6 +16,7 @@
 
 pub mod config;
 pub mod consumer;
+pub mod dlq;
 pub mod ingest;
 pub mod observability;
 pub mod pipeline;
