@@ -342,7 +342,7 @@ async def update_entity(
     )
 
 
-@write_router.delete("/{address}", status_code=204)
+@write_router.delete("/{address}", status_code=204, response_model=None)
 async def delete_entity(
     address: str,
     graph_db: GraphDBDep,
@@ -449,7 +449,11 @@ async def add_group_member(
     )
 
 
-@write_router.delete("/{address}/members/{member_address}", status_code=204)
+@write_router.delete(
+    "/{address}/members/{member_address}",
+    status_code=204,
+    response_model=None,
+)
 async def remove_group_member(
     address: str,
     member_address: str,
@@ -541,7 +545,7 @@ async def upsert_transaction(
     )
 
 
-@transactions_router.delete("/{hash}", status_code=204)
+@transactions_router.delete("/{hash}", status_code=204, response_model=None)
 async def delete_transaction(
     hash: str,
     graph_db: GraphDBDep,
