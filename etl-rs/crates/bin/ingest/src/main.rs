@@ -147,6 +147,52 @@ enum Cmd {
         #[command(subcommand)]
         mode: TargetedMode,
     },
+    /// Inspect, replay, or drop messages stuck in a DLQ stream.
+    Dlq {
+        #[command(subcommand)]
+        action: DlqAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum DlqAction {
+    /// Print up to `--limit` entries from `{stream}{suffix}`.
+    List {
+        /// Original stream name; the DLQ name is `{stream}{suffix}`.
+        #[arg(long)]
+        stream: String,
+        #[arg(long, default_value = "_dlq")]
+        suffix: String,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Re-`XADD` DLQ entries onto their original stream, then `XDEL` from DLQ.
+    Replay {
+        #[arg(long)]
+        stream: String,
+        #[arg(long, default_value = "_dlq")]
+        suffix: String,
+        /// Replay only this DLQ entry id (e.g. `1700000000000-0`).
+        #[arg(long, conflicts_with = "all")]
+        id: Option<String>,
+        /// Replay every entry in the DLQ.
+        #[arg(long, default_value_t = false)]
+        all: bool,
+        /// Cap the number of entries replayed when `--all` is set.
+        #[arg(long)]
+        max: Option<usize>,
+    },
+    /// Permanently delete DLQ entries (the original is already ACKed and gone).
+    Drop {
+        #[arg(long)]
+        stream: String,
+        #[arg(long, default_value = "_dlq")]
+        suffix: String,
+        #[arg(long, conflicts_with = "all")]
+        id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -306,6 +352,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Some(Cmd::Targeted { mode }) => run_targeted_mode(&config, &run_id, mode).await,
+        Some(Cmd::Dlq { action }) => run_dlq_action(&config, action).await,
         None => run_legacy(cli.legacy, &config).await,
     }
 }
@@ -513,6 +560,97 @@ async fn run_targeted_mode(
     Ok(())
 }
 
+async fn redis_conn(redis_url: &str) -> Result<redis::aio::MultiplexedConnection> {
+    let client = redis::Client::open(redis_url)?;
+    Ok(client.get_multiplexed_async_connection().await?)
+}
+
+fn truncate_for_display(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…(+{}B)", &s[..max], s.len() - max)
+    }
+}
+
+async fn run_dlq_action(
+    config: &etl::config::Config,
+    action: DlqAction,
+) -> Result<()> {
+    use etl::dlq::{
+        dlq_len, dlq_stream_name, drop_all, drop_entry, list_dlq, replay_all, replay_entry,
+    };
+
+    let mut conn = redis_conn(&config.redis_url).await?;
+
+    match action {
+        DlqAction::List { stream, suffix, limit } => {
+            let dlq = dlq_stream_name(&stream, &suffix);
+            let total = dlq_len(&mut conn, &dlq).await?;
+            let entries = list_dlq(&mut conn, &dlq, Some(limit)).await?;
+            println!("DLQ {} (XLEN={}, showing {})", dlq, total, entries.len());
+            for e in &entries {
+                let orig = e.original_id().unwrap_or("-");
+                let summary: Vec<String> = e
+                    .fields
+                    .iter()
+                    .filter(|(k, _)| k != "original_id")
+                    .map(|(k, v)| format!("{}={}", k, truncate_for_display(v, 80)))
+                    .collect();
+                println!("  {}\torig={}\t{}", e.id, orig, summary.join(" "));
+            }
+            Ok(())
+        }
+        DlqAction::Replay { stream, suffix, id, all, max } => {
+            let dlq = dlq_stream_name(&stream, &suffix);
+            match (id, all) {
+                (Some(target), false) => {
+                    let entries = list_dlq(&mut conn, &dlq, None).await?;
+                    let entry = entries
+                        .into_iter()
+                        .find(|e| e.id == target)
+                        .ok_or_else(|| eyre::eyre!("DLQ entry {} not found in {}", target, dlq))?;
+                    let new_id = replay_entry(&mut conn, &dlq, &stream, &entry).await?;
+                    info!(dlq = %dlq, original = %stream, replayed_as = %new_id, "replayed 1 entry");
+                    println!("replayed {} → {} as {}", entry.id, stream, new_id);
+                    Ok(())
+                }
+                (None, true) => {
+                    let n = replay_all(&mut conn, &dlq, &stream, max).await?;
+                    println!("replayed {} entries from {} → {}", n, dlq, stream);
+                    Ok(())
+                }
+                _ => Err(eyre::eyre!(
+                    "replay: pass exactly one of --id <ID> or --all"
+                )),
+            }
+        }
+        DlqAction::Drop { stream, suffix, id, all } => {
+            let dlq = dlq_stream_name(&stream, &suffix);
+            match (id, all) {
+                (Some(target), false) => {
+                    let removed = drop_entry(&mut conn, &dlq, &target).await?;
+                    println!(
+                        "{} {} from {}",
+                        if removed { "dropped" } else { "no-op (not found):" },
+                        target,
+                        dlq
+                    );
+                    Ok(())
+                }
+                (None, true) => {
+                    let n = drop_all(&mut conn, &dlq).await?;
+                    println!("dropped {} entries from {}", n, dlq);
+                    Ok(())
+                }
+                _ => Err(eyre::eyre!(
+                    "drop: pass exactly one of --id <ID> or --all"
+                )),
+            }
+        }
+    }
+}
+
 /// Legacy flat-arg path: if no subcommand is given, dispatch exactly as the
 /// pre-subcommand binary did (address vs block mode).
 async fn run_legacy(args: LegacyArgs, config: &etl::config::Config) -> Result<()> {
@@ -606,6 +744,49 @@ mod tests {
             Some(Cmd::ReprocessFailed { source, .. }) => assert_eq!(source, "etherscan"),
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn cli_parses_dlq_list() {
+        let cli = Cli::try_parse_from([
+            "ingest", "dlq", "list", "--stream", "ingested_txs", "--limit", "10",
+        ])
+        .unwrap();
+        match cli.cmd {
+            Some(Cmd::Dlq {
+                action: DlqAction::List { stream, suffix, limit },
+            }) => {
+                assert_eq!(stream, "ingested_txs");
+                assert_eq!(suffix, "_dlq");
+                assert_eq!(limit, 10);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_dlq_replay_all() {
+        let cli = Cli::try_parse_from([
+            "ingest", "dlq", "replay", "--stream", "ingested_txs", "--all",
+        ])
+        .unwrap();
+        match cli.cmd {
+            Some(Cmd::Dlq {
+                action: DlqAction::Replay { all, id, .. },
+            }) => {
+                assert!(all);
+                assert!(id.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cli_dlq_replay_id_and_all_conflict() {
+        let res = Cli::try_parse_from([
+            "ingest", "dlq", "replay", "--stream", "s", "--id", "1-0", "--all",
+        ]);
+        assert!(res.is_err(), "id and all should conflict");
     }
 
     #[test]
