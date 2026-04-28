@@ -29,6 +29,7 @@ jobs:
           NEO4J_USER=neo4j
           NEO4J_PASSWORD=changeme
           NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
           POSTGRES_HOST=postgres
           POSTGRES_PORT=5432
           POSTGRES_DB=chain_analysis
@@ -89,7 +90,41 @@ jobs:
           exit 0
 
       - name: Start backend test infrastructure
-        run: docker compose up -d --wait --wait-timeout 180 neo4j postgres redis
+        run: |
+          set -euo pipefail
+
+          docker compose up -d neo4j postgres redis
+
+          deadline=$((SECONDS + 240))
+          while true; do
+            neo_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-neo4j 2>/dev/null || true)"
+            pg_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-postgres 2>/dev/null || true)"
+            redis_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-redis 2>/dev/null || true)"
+
+            echo "neo4j=${neo_state:-missing} postgres=${pg_state:-missing} redis=${redis_state:-missing}"
+
+            if echo "$neo_state" | grep -q '^exited'; then
+              echo "::error::Neo4j exited during startup."
+              docker compose ps
+              docker compose logs --no-color --tail=200 neo4j postgres redis
+              exit 1
+            fi
+
+            if echo "$neo_state" | grep -q 'healthy' \
+              && echo "$pg_state" | grep -q 'healthy' \
+              && echo "$redis_state" | grep -q 'healthy'; then
+              break
+            fi
+
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for backend infrastructure to become healthy."
+              docker compose ps
+              docker compose logs --no-color --tail=200 neo4j postgres redis
+              exit 1
+            fi
+
+            sleep 5
+          done
 
       - name: Apply test database migrations
         working-directory: backend
