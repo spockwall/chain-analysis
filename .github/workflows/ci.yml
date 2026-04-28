@@ -57,8 +57,40 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p compose
+
+          # Root .env is consumed by host-side commands in this workflow
+          # (Alembic, pytest, and docker compose interpolation). Keep hostnames
+          # reachable from the GitHub runner.
           cat > .env <<'EOF'
           ENVIRONMENT=local
+          NEO4J_URI=bolt://localhost:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://localhost:6379
+          DATABASE_URL=postgresql://postgres:changeme@localhost:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+          # compose/*.yml files load this path from within the compose/
+          # directory. These values are injected into containers, where service
+          # names such as postgres/redis/neo4j are valid.
+          cat > compose/secrets.dev.env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_URI=bolt://neo4j:7687
           NEO4J_USER=neo4j
           NEO4J_PASSWORD=changeme
           NEO4J_AUTH=neo4j/changeme
@@ -69,7 +101,8 @@ jobs:
           POSTGRES_USER=postgres
           POSTGRES_PASSWORD=changeme
           REDIS_PASSWORD=changeme
-          REDIS_URL=redis://:changeme@redis:6379
+          REDIS_URL=redis://redis:6379
+          DATABASE_URL=postgresql://postgres:changeme@postgres:5432/chain_analysis
           CLICKHOUSE_DB=chain_analysis
           CLICKHOUSE_USER=default
           CLICKHOUSE_PASSWORD=changeme
@@ -78,7 +111,6 @@ jobs:
           ALCHEMY_API_KEY=
           INGEST_SOURCE=
           EOF
-          cp .env compose/secrets.dev.env
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -213,8 +245,36 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p compose
+
+          # Root .env is used by docker compose interpolation. Values are also
+          # safe for any host-side validation command that reads the app config.
           cat > .env <<'EOF'
           ENVIRONMENT=local
+          NEO4J_URI=bolt://localhost:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://localhost:6379
+          DATABASE_URL=postgresql://postgres:changeme@localhost:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+          cat > compose/secrets.dev.env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_URI=bolt://neo4j:7687
           NEO4J_USER=neo4j
           NEO4J_PASSWORD=changeme
           NEO4J_AUTH=neo4j/changeme
@@ -225,7 +285,8 @@ jobs:
           POSTGRES_USER=postgres
           POSTGRES_PASSWORD=changeme
           REDIS_PASSWORD=changeme
-          REDIS_URL=redis://:changeme@redis:6379
+          REDIS_URL=redis://redis:6379
+          DATABASE_URL=postgresql://postgres:changeme@postgres:5432/chain_analysis
           CLICKHOUSE_DB=chain_analysis
           CLICKHOUSE_USER=default
           CLICKHOUSE_PASSWORD=changeme
@@ -234,7 +295,6 @@ jobs:
           ALCHEMY_API_KEY=
           INGEST_SOURCE=
           EOF
-          cp .env compose/secrets.dev.env
 
       - name: Validate local compose file
         run: docker compose -f docker-compose.yml config --quiet
