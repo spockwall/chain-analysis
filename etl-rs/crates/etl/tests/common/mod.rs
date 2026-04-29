@@ -168,6 +168,67 @@ pub async fn wait_neo4j_ready(uri: &str, user: &str, password: &str, deadline: D
     }
 }
 
+/// `docker pause` freezes the container's processes via cgroup freezer.
+/// Unlike `stop()`, the container stays alive and the host port mapping
+/// is preserved — so reconnect URLs remain valid. This is what real chaos
+/// engineering tools (Toxiproxy, etc.) use to inject brief outages.
+pub async fn freeze_container(container_id: &str) {
+    let out = tokio::process::Command::new("docker")
+        .args(["pause", container_id])
+        .output()
+        .await
+        .expect("docker pause spawn");
+    assert!(
+        out.status.success(),
+        "docker pause failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+pub async fn thaw_container(container_id: &str) {
+    let out = tokio::process::Command::new("docker")
+        .args(["unpause", container_id])
+        .output()
+        .await
+        .expect("docker unpause spawn");
+    assert!(
+        out.status.success(),
+        "docker unpause failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Returns the number of messages currently in this consumer's pending
+/// list across all three ingest streams. After a clean drain this should
+/// be zero — non-zero means messages got stuck.
+pub async fn xpending_total(
+    redis_url: &str,
+    group: &str,
+) -> u64 {
+    let client = redis::Client::open(redis_url).expect("redis client");
+    let mut conn = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("redis conn");
+    let mut total = 0u64;
+    for stream in ["ingested_txs", "ingested_traces", "ingested_transfers"] {
+        // XPENDING <stream> <group> returns [count, min_id, max_id, consumers]
+        // when there are no consumers it returns [0, nil, nil, nil].
+        let res: redis::Value = redis::cmd("XPENDING")
+            .arg(stream)
+            .arg(group)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(redis::Value::Nil);
+        if let redis::Value::Array(items) = res {
+            if let Some(redis::Value::Int(n)) = items.first() {
+                total += *n as u64;
+            }
+        }
+    }
+    total
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LoopStats {
     pub batches_ok: usize,
