@@ -1,6 +1,7 @@
 """Tests for API endpoints."""
 
 from fastapi.testclient import TestClient
+from fastapi.routing import APIRoute
 
 
 class TestHealthEndpoints:
@@ -112,3 +113,29 @@ class TestValidation:
             },
         )
         assert response.status_code == 422
+
+
+class TestRouteResponseModels:
+    """Ensure API routes declare explicit response models."""
+
+    def test_api_routes_have_response_models_or_no_content(self, client: TestClient):
+        routes = [
+            route
+            for route in client.app.routes
+            if isinstance(route, APIRoute)
+            and route.path.startswith(("/api", "/health"))
+        ]
+
+        assert routes, "Expected API routes to inspect"
+
+        missing = []
+        for route in routes:
+            if route.status_code == 204:
+                if route.response_model is not None:
+                    missing.append(f"{route.path} should not declare a response model")
+                continue
+
+            if route.response_model is None:
+                missing.append(f"{route.path} is missing response_model")
+
+        assert not missing, "\n".join(missing)

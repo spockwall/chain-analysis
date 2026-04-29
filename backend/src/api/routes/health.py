@@ -22,6 +22,12 @@ class ServiceStatus(BaseModel):
     message: str | None = None
 
 
+class HealthStatusResponse(BaseModel):
+    """Simple health status response for probes."""
+
+    status: str
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check(
     graph_db: GraphDBDep,
@@ -63,21 +69,21 @@ async def health_check(
     return HealthResponse(status=status, services=services)
 
 
-@router.get("/health/live")
-async def liveness_probe() -> dict[str, str]:
+@router.get("/health/live", response_model=HealthStatusResponse)
+async def liveness_probe() -> HealthStatusResponse:
     """
     Kubernetes liveness probe.
 
     Simply returns OK to indicate the service is running.
     """
-    return {"status": "ok"}
+    return HealthStatusResponse(status="ok")
 
 
-@router.get("/health/ready")
+@router.get("/health/ready", response_model=HealthStatusResponse)
 async def readiness_probe(
     graph_db: GraphDBDep,
     relational_db: RelationalDBDep,
-) -> dict[str, str]:
+) -> HealthStatusResponse:
     """
     Kubernetes readiness probe.
 
@@ -97,4 +103,4 @@ async def readiness_probe(
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"PostgreSQL error: {e}")
 
-    return {"status": "ready"}
+    return HealthStatusResponse(status="ready")

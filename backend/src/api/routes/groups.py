@@ -157,7 +157,7 @@ async def update_group(
     return _build_group_detail(refreshed, members)
 
 
-@router.delete("/{address}", status_code=204)
+@router.delete("/{address}", status_code=204, response_model=None)
 async def delete_group(address: str, graph_db: GraphDBDep) -> None:
     """Delete a group entity. Fails with 409 if the group still has members."""
     address = _validate_address(address)
