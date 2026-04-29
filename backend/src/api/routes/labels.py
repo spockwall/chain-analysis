@@ -5,7 +5,6 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
 
 from api.deps import MessageQueueDep, RelationalDBDep, SettingsDep
 from api.models.entity import (
@@ -14,7 +13,6 @@ from api.models.entity import (
     LabelTaskCreate,
     LabelTaskResponse,
 )
-from db.models import Annotation, LabelTask, TaskStatus
 
 router = APIRouter(prefix="/labels", tags=["labels"])
 

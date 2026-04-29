@@ -44,9 +44,6 @@ class LabelService:
         """
         address = entity_address.lower()
 
-        # Get entity data
-        node = await self._graph_db.get_node(address)
-
         # Get neighborhood if requested
         context: dict[str, Any] = {}
         if include_neighbors:
