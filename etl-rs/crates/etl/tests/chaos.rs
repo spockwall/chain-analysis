@@ -137,6 +137,7 @@ async fn chaos_redis_restart_mid_loop_no_data_loss() {
     // INJECT: restart Redis while the loop may be mid-batch.
     stack.redis.stop().await.expect("redis stop");
     stack.redis.start().await.expect("redis start");
+    common::wait_redis_ready(&stack.redis_url, Duration::from_secs(15)).await;
 
     // Pump more blocks after restart so the loop has a clear post-failure
     // workload to drain.
@@ -215,11 +216,11 @@ async fn chaos_pg_kill_mid_transaction_recovers_via_retry() {
         .await
     });
 
-    // Pump 10 blocks (~30 messages).
-    let total = ingest_n_blocks(&stack.redis_url, 100, 109).await;
+    // Pump 200 blocks (~600 messages, ≥ 6 batches at batch_size=100). A
+    // small workload would finish before the kill lands; we need enough
+    // in-flight work that pg_terminate_backend hits a live transaction.
+    let total = ingest_n_blocks(&stack.redis_url, 100, 299).await;
 
-    // Wait for the loop to have processed something so we know the pool has
-    // a live connection to terminate.
     let mut got_messages = false;
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(30) {
@@ -232,33 +233,45 @@ async fn chaos_pg_kill_mid_transaction_recovers_via_retry() {
     }
     assert!(got_messages, "loop never processed before kill window");
 
-    // INJECT: kill all worker connections via sidecar admin pool.
+    // INJECT: kill all worker connections via sidecar admin pool. Retry
+    // until at least one connection is hit — we need to land DURING active
+    // processing, not in the brief gap between batches.
     let admin = PgPool::connect(&stack.pg_url).await.expect("admin pool");
-    let killed: Vec<(bool,)> = sqlx::query_as(
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-         WHERE application_name = $1 AND pid <> pg_backend_pid()",
+    let mut killed_total = 0;
+    let kill_started = Instant::now();
+    while kill_started.elapsed() < Duration::from_secs(20) && killed_total == 0 {
+        let killed: Vec<(bool,)> = sqlx::query_as(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+             WHERE application_name = $1 AND pid <> pg_backend_pid()",
+        )
+        .bind(app_name)
+        .fetch_all(&admin)
+        .await
+        .expect("kill");
+        killed_total = killed.len();
+        if killed_total == 0 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    assert!(killed_total > 0, "no worker connections to kill within window");
+
+    // Total expected: pre-kill batch + everything that was queued but not
+    // yet processed when the kill landed.
+    let _ = wait_messages_ok(
+        &mut progress_rx,
+        total as usize,
+        Duration::from_secs(120),
     )
-    .bind(app_name)
-    .fetch_all(&admin)
-    .await
-    .expect("kill");
-    assert!(!killed.is_empty(), "no worker connections to kill");
-
-    // Pump more so the loop has fresh work after the kill.
-    let total_post = ingest_n_blocks(&stack.redis_url, 200, 209).await;
-
-    let _ =
-        wait_messages_ok(&mut progress_rx, (total + total_post) as usize, Duration::from_secs(90))
-            .await;
+    .await;
 
     let _ = shutdown_tx.send(true);
     let final_stats = loop_handle.await.expect("loop join").expect("loop ok");
 
     assert!(
-        final_stats.messages_ok >= (total + total_post) as usize,
+        final_stats.messages_ok >= total as usize,
         "post-kill messages_ok={} expected>={}",
         final_stats.messages_ok,
-        total + total_post
+        total
     );
     assert!(
         final_stats.batches_err > 0,
@@ -324,13 +337,20 @@ async fn chaos_neo4j_transient_outage_retries_succeed() {
     stack.neo4j.stop().await.expect("neo4j stop");
     tokio::time::sleep(Duration::from_secs(2)).await;
     stack.neo4j.start().await.expect("neo4j start");
+    common::wait_neo4j_ready(
+        &stack.neo4j_uri,
+        &stack.neo4j_user,
+        &stack.neo4j_password,
+        Duration::from_secs(45),
+    )
+    .await;
 
     let total_post = ingest_n_blocks(&stack.redis_url, 200, 204).await;
 
     let _ = wait_messages_ok(
         &mut progress_rx,
         (total + total_post) as usize,
-        Duration::from_secs(120),
+        Duration::from_secs(180),
     )
     .await;
 

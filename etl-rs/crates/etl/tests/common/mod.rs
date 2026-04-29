@@ -76,7 +76,12 @@ pub async fn start_stack() -> Stack {
     let redis_port = redis.get_host_port_ipv4(6379).await.expect("redis port");
     let redis_url = format!("redis://127.0.0.1:{}", redis_port);
 
-    let pg = PgImage::default().start().await.expect("postgres start");
+    // Pin to the major version production runs (compose/infra.yml ships 17).
+    let pg = PgImage::default()
+        .with_tag("17-alpine")
+        .start()
+        .await
+        .expect("postgres start");
     let pg_port = pg.get_host_port_ipv4(5432).await.expect("pg port");
     let pg_url = format!("postgres://postgres:postgres@127.0.0.1:{}/postgres", pg_port);
 
@@ -93,7 +98,7 @@ pub async fn start_stack() -> Stack {
     let bolt = neo4j.get_host_port_ipv4(7687).await.expect("bolt port");
     let neo4j_uri = format!("bolt://127.0.0.1:{}", bolt);
 
-    Stack {
+    let stack = Stack {
         redis,
         pg,
         neo4j,
@@ -102,7 +107,19 @@ pub async fn start_stack() -> Stack {
         neo4j_uri,
         neo4j_user: "neo4j".to_string(),
         neo4j_password: "password123".to_string(),
-    }
+    };
+
+    // Belt-and-suspenders: real handshake, not just a stdout match.
+    wait_redis_ready(&stack.redis_url, Duration::from_secs(15)).await;
+    wait_neo4j_ready(
+        &stack.neo4j_uri,
+        &stack.neo4j_user,
+        &stack.neo4j_password,
+        Duration::from_secs(45),
+    )
+    .await;
+
+    stack
 }
 
 pub async fn apply_pg_schema(pool: &PgPool) {
@@ -110,6 +127,45 @@ pub async fn apply_pg_schema(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("apply PG schema");
+}
+
+/// `WaitFor::message_on_stdout` only proves the line was logged, not that the
+/// listener is bound. Race windows show up as `Connection refused` on the
+/// first connect after a fresh start (or restart). Retry until a real PING
+/// succeeds or `deadline` elapses.
+pub async fn wait_redis_ready(redis_url: &str, deadline: Duration) {
+    let started = std::time::Instant::now();
+    loop {
+        if started.elapsed() > deadline {
+            panic!("redis never became ready at {}", redis_url);
+        }
+        if let Ok(client) = redis::Client::open(redis_url) {
+            if let Ok(mut conn) = client.get_multiplexed_async_connection().await {
+                let pong: redis::RedisResult<String> =
+                    redis::cmd("PING").query_async(&mut conn).await;
+                if pong.is_ok() {
+                    return;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+pub async fn wait_neo4j_ready(uri: &str, user: &str, password: &str, deadline: Duration) {
+    let started = std::time::Instant::now();
+    loop {
+        if started.elapsed() > deadline {
+            panic!("neo4j never became ready at {}", uri);
+        }
+        if Neo4jWriter::connect(uri, user, password, "neo4j")
+            .await
+            .is_ok()
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
