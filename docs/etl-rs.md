@@ -26,6 +26,7 @@ This document pairs with:
 10. [Cooperation with the rest of the stack](#10-cooperation-with-the-rest-of-the-stack)
 11. [Operational recipes](#11-operational-recipes)
 12. [Troubleshooting](#12-troubleshooting)
+13. [Tests & benchmarks](#13-tests--benchmarks)
 
 ---
 
@@ -202,6 +203,25 @@ ingest targeted     addresses      --addrs 0xa,0xb,0xc
                     hashes         --hashes 0x1,0x2
                     neighborhood   0xseed --hops 2
 ingest reprocess-failed  --source {etherscan|alchemy}
+ingest dlq          list           --stream <name> [--limit 50] [--suffix _dlq]
+                    replay         --stream <name> {--id <stream-id> | --all} [--max N]
+                    drop           --stream <name> {--id <stream-id> | --all}
+```
+
+**`dlq` operator workflow** — when the worker exhausts retries on a poison
+batch it lands in `{stream}_dlq`. Triage looks like:
+
+```
+# What's in the queue?
+ingest dlq list --stream ingested_txs --limit 20
+
+# Send the survivors back to the head of the original stream. Replay is
+# safe: it XADDs to the original BEFORE XDELing from the DLQ, so a crash
+# mid-op produces a duplicate (worker MERGE is idempotent), never a loss.
+ingest dlq replay --stream ingested_txs --all --max 100
+
+# Permanently drop entries that are known-bad (logged, captured elsewhere).
+ingest dlq drop --stream ingested_txs --all
 ```
 
 Legacy flat args (`--address 0x… --start-block N …`) still parse when no
@@ -1103,3 +1123,85 @@ Symptom of a pre-Phase-I enum (`in_progress` instead of `running`) —
 ensure the `label_tasks.status` enum values are
 `{queued, running, completed, failed}` and that the frontend
 `RunStatusPill` maps them 1:1.
+
+---
+
+## 13. Tests & benchmarks
+
+### 13.1 Test layout
+
+```
+etl-rs/crates/etl/tests/
+├── common/mod.rs       # shared testcontainers harness + worker-loop test helper
+├── e2e_pipeline.rs     # ingest → stream → consumer → Neo4j+PG happy path
+├── chaos.rs            # mid-loop failure injection (Redis/PG/Neo4j)
+├── pipeline_dlq.rs     # DLQ primitives (env-var gated)
+├── ingest_reprocess.rs
+├── sinks_clickhouse.rs
+├── sinks_maxlen.rs
+└── sources_alchemy_live.rs
+```
+
+**Run unit tests** (always-on, no Docker):
+
+```bash
+cd etl-rs
+cargo test --workspace --lib
+```
+
+**Run e2e + chaos** (requires Docker; ~2-3 min):
+
+```bash
+cd etl-rs
+cargo test --test e2e_pipeline -- --ignored --nocapture
+cargo test --test chaos -- --ignored --nocapture --test-threads=1
+```
+
+`--test-threads=1` for chaos because each test spins up its own
+Redis/PG/Neo4j stack — running them in parallel fights for ports and
+Docker daemon resources.
+
+For diagnostic logs:
+
+```bash
+RUST_LOG=info,etl=debug,common=debug,chaos=debug \
+  cargo test --test chaos -- --ignored --nocapture --test-threads=1
+```
+
+### 13.2 What chaos tests verify
+
+Each chaos test injects a failure *while* the worker loop is processing.
+The end-state assertion is "no data loss":
+
+- `XPENDING == 0` for the consumer group across all three streams
+- Postgres `entity_features` has rows (data persisted)
+- `dlq_moves == 0` (didn't escalate beyond retry budget)
+
+Note on `batches_err`: the chaos mechanism (`docker pause` /
+`pg_terminate_backend`) hangs operations or is silently handled by sqlx's
+`test_before_acquire`, so we cannot reliably observe error counts. To
+exercise the retry/DLQ path with observable errors, a network-level
+proxy (Toxiproxy) would be needed — that's a separate effort. The current
+tests prove the system *survives* chaos and converges to a clean state.
+
+### 13.3 Throughput bench
+
+```bash
+cd etl-rs
+cargo bench -p etl --bench ingest_throughput
+```
+
+Ingests 10,000 mock blocks at `fetch_concurrency = 16` against a real
+Redis container. Reports:
+
+- Total wall time
+- Throughput (blocks/sec)
+- Per-100-block-chunk latency (p50, p95, p99, max)
+
+Per-block latency isn't reported because the writer actor batches —
+single-block timing is meaningless. Per-chunk = 100 blocks of pipelined
+work is the smallest meaningful unit.
+
+Reference numbers live in `etl-rs/bench/baseline.md`. Treat them as
+indicative — GitHub-hosted runners vary by ±30%. CI doesn't gate on
+absolute numbers; the bench is opt-in via the `run-bench` PR label.
