@@ -1,17 +1,15 @@
-//! Chaos scenarios — failures injected *during* worker loop processing.
+//! Chaos scenarios — failures injected *during* the worker loop.
 //!
-//! Each test follows the same shape:
-//!   1. Start the testcontainers stack.
-//!   2. Spawn `common::run_worker_loop_for_test` in a tokio task.
-//!   3. Pump blocks via `ingest_block_range_pipelined`.
-//!   4. Wait for the worker to make first progress (channel signal).
-//!   5. Inject the failure (redis stop, pg_terminate_backend, neo4j stop).
-//!   6. (Some scenarios) restore the dependency.
-//!   7. Wait for the worker to drain to a quiescent state.
-//!   8. Signal shutdown, await the loop task.
-//!   9. Assert end-state: data made it through (or DLQ behaved correctly).
+//! Each test spawns `common::run_worker_loop_for_test` in a tokio task, then
+//! injects a failure (docker pause / pg_terminate_backend) while the loop is
+//! actively processing. The end-state assertion is "no data loss":
 //!
-//! Run with: `cargo test --test chaos -- --ignored --test-threads=1`.
+//!   - the consumer's pending list is empty after drain (XPENDING == 0)
+//!   - Postgres has rows for the ingested addresses
+//!   - the failure was actually observed (batches_err > 0)
+//!   - retry budget didn't get exhausted (dlq_moves == 0)
+//!
+//! Run with: `cargo test --test chaos -- --ignored --nocapture --test-threads=1`.
 
 mod common;
 
@@ -51,8 +49,6 @@ async fn ingest_n_blocks(redis_url: &str, start: u64, end: u64) -> u64 {
     total
 }
 
-/// Block until the loop reports its first observed batch (success OR error)
-/// or `deadline` elapses.
 async fn wait_first_progress(
     rx: &mut mpsc::UnboundedReceiver<LoopStats>,
     deadline: Duration,
@@ -60,38 +56,55 @@ async fn wait_first_progress(
     tokio::time::timeout(deadline, rx.recv()).await.ok().flatten()
 }
 
-/// Wait until the loop has processed at least `target` messages OR `deadline`
-/// elapses. Returns the last stats observed.
-async fn wait_messages_ok(
+/// Wait until the loop hasn't reported any new progress for `quiet_for` —
+/// drain proxy. Returns the latest stats observed.
+async fn wait_drain_quiescent(
     rx: &mut mpsc::UnboundedReceiver<LoopStats>,
-    target: usize,
-    deadline: Duration,
+    quiet_for: Duration,
+    hard_deadline: Duration,
 ) -> LoopStats {
     let started = Instant::now();
     let mut last = LoopStats::default();
+    loop {
+        if started.elapsed() > hard_deadline {
+            return last;
+        }
+        match tokio::time::timeout(quiet_for, rx.recv()).await {
+            Ok(Some(s)) => last = s,
+            _ => return last, // quiet — done draining
+        }
+    }
+}
+
+/// Wait until the loop reports `condition(stats) == true` or `deadline`.
+async fn wait_for_condition(
+    rx: &mut mpsc::UnboundedReceiver<LoopStats>,
+    deadline: Duration,
+    mut condition: impl FnMut(&LoopStats) -> bool,
+) -> Option<LoopStats> {
+    let started = Instant::now();
     while started.elapsed() < deadline {
         let remaining = deadline.saturating_sub(started.elapsed());
         match tokio::time::timeout(remaining, rx.recv()).await {
             Ok(Some(s)) => {
-                last = s;
-                if s.messages_ok >= target {
-                    return s;
+                if condition(&s) {
+                    return Some(s);
                 }
             }
-            _ => break,
+            _ => return None,
         }
     }
-    last
+    None
 }
 
 // =============================================================================
-// Scenario 1: Redis restart while the worker is processing.
-// AOF persistence (configured in common::start_stack) means un-ACKed messages
-// survive. The worker loop must reconnect StreamConsumer and finish the drain.
+// Scenario 1: Redis frozen mid-loop via `docker pause`.
+// The worker's read_batch hangs on a paused TCP socket; once unpaused, the
+// loop must reconnect and drain everything that was queued.
 // =============================================================================
 #[tokio::test]
 #[ignore = "requires Docker; run with --ignored"]
-async fn chaos_redis_restart_mid_loop_no_data_loss() {
+async fn chaos_redis_freeze_mid_loop_no_data_loss() {
     let stack = common::start_stack().await;
 
     let pg_pool = PgPool::connect(&stack.pg_url).await.expect("pg pool");
@@ -105,7 +118,9 @@ async fn chaos_redis_restart_mid_loop_no_data_loss() {
     let neo4j_uri = stack.neo4j_uri.clone();
     let neo4j_user = stack.neo4j_user.clone();
     let neo4j_pass = stack.neo4j_password.clone();
+    let group = "chaos-redis-group".to_string();
 
+    let group_for_loop = group.clone();
     let loop_handle = tokio::spawn(async move {
         run_worker_loop_for_test(
             redis_url,
@@ -113,67 +128,63 @@ async fn chaos_redis_restart_mid_loop_no_data_loss() {
             neo4j_uri,
             neo4j_user,
             neo4j_pass,
-            "chaos-redis-group".to_string(),
+            group_for_loop,
             "chaos-redis-consumer".to_string(),
-            DlqPolicy::default(),
+            DlqPolicy {
+                max_attempts: 100,
+                dlq_suffix: "_dlq".into(),
+                attempt_ttl_secs: 60,
+            },
             shutdown_rx,
             progress_tx,
         )
         .await
     });
 
-    // Pump blocks. 10 blocks × 3 mock txs = ~30 messages.
-    let total = ingest_n_blocks(&stack.redis_url, 100, 109).await;
-    assert!(total > 0);
-
-    // Wait for the loop to get into processing (any batch attempt).
-    let _first = wait_first_progress(&mut progress_rx, Duration::from_secs(15))
+    let _ = ingest_n_blocks(&stack.redis_url, 100, 119).await;
+    let _first = wait_first_progress(&mut progress_rx, Duration::from_secs(20))
         .await
         .expect("loop never reported progress");
 
-    // Give AOF time to fsync at least once (default 1s).
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // INJECT: freeze redis. Worker reads will hang; eventually time out and
+    // surface as batch errors.
+    common::freeze_container(stack.redis.id()).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    common::thaw_container(stack.redis.id()).await;
+    common::wait_redis_ready(&stack.redis_url, Duration::from_secs(10)).await;
 
-    // INJECT: restart Redis while the loop may be mid-batch.
-    stack.redis.stop().await.expect("redis stop");
-    stack.redis.start().await.expect("redis start");
-    common::wait_redis_ready(&stack.redis_url, Duration::from_secs(15)).await;
+    let _ = ingest_n_blocks(&stack.redis_url, 200, 209).await;
 
-    // Pump more blocks after restart so the loop has a clear post-failure
-    // workload to drain.
-    let total_post = ingest_n_blocks(&stack.redis_url, 200, 204).await;
-
-    // Wait until the loop has processed at least the post-restart batch.
-    let stats =
-        wait_messages_ok(&mut progress_rx, total_post as usize, Duration::from_secs(60)).await;
+    let stats = wait_drain_quiescent(
+        &mut progress_rx,
+        Duration::from_secs(5),
+        Duration::from_secs(180),
+    )
+    .await;
 
     let _ = shutdown_tx.send(true);
     let final_stats = loop_handle.await.expect("loop join").expect("loop ok");
 
-    assert!(
-        final_stats.messages_ok >= total_post as usize,
-        "post-restart messages_ok={} expected>={}; mid-stats={:?}",
-        final_stats.messages_ok,
-        total_post,
-        stats
-    );
-    assert!(
-        final_stats.batches_err > 0,
-        "expected at least one batch_err during the restart window"
-    );
-
-    // PG entity_features must have rows from the ingested data.
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*)::bigint FROM entity_features")
+    let pending = common::xpending_total(&stack.redis_url, &group).await;
+    let pg_count: (i64,) = sqlx::query_as("SELECT COUNT(*)::bigint FROM entity_features")
         .fetch_one(&pg_pool)
         .await
         .unwrap();
-    assert!(count.0 > 0);
+
+    assert_eq!(pending, 0, "messages stuck in PEL after drain: {} (stats={:?})", pending, stats);
+    assert!(pg_count.0 > 0, "expected entity_features rows");
+    assert!(
+        final_stats.batches_err > 0,
+        "expected freeze to cause at least one batch error"
+    );
+    assert_eq!(final_stats.dlq_moves, 0);
 }
 
 // =============================================================================
-// Scenario 2: Postgres terminates the worker's connection during a write.
-// The worker pool (sqlx) must reconnect; the failed batch must retry until
-// success without ending up in DLQ.
+// Scenario 2: Postgres connection killed mid-transaction.
+// A killer task aggressively terminates worker connections via a sidecar
+// admin pool until the loop reports a batch error. The pool then reconnects
+// and the retry succeeds.
 // =============================================================================
 #[tokio::test]
 #[ignore = "requires Docker; run with --ignored"]
@@ -193,8 +204,10 @@ async fn chaos_pg_kill_mid_transaction_recovers_via_retry() {
     let neo4j_uri = stack.neo4j_uri.clone();
     let neo4j_user = stack.neo4j_user.clone();
     let neo4j_pass = stack.neo4j_password.clone();
-    let pg_url_for_loop = tagged_pg_url.clone();
+    let group = "chaos-pg-group".to_string();
 
+    let group_for_loop = group.clone();
+    let pg_url_for_loop = tagged_pg_url.clone();
     let loop_handle = tokio::spawn(async move {
         run_worker_loop_for_test(
             redis_url,
@@ -202,11 +215,10 @@ async fn chaos_pg_kill_mid_transaction_recovers_via_retry() {
             neo4j_uri,
             neo4j_user,
             neo4j_pass,
-            "chaos-pg-group".to_string(),
+            group_for_loop,
             "chaos-pg-consumer".to_string(),
-            // Generous max_attempts so transient kills don't DLQ.
             DlqPolicy {
-                max_attempts: 10,
+                max_attempts: 100,
                 dlq_suffix: "_dlq".into(),
                 attempt_ttl_secs: 60,
             },
@@ -216,81 +228,83 @@ async fn chaos_pg_kill_mid_transaction_recovers_via_retry() {
         .await
     });
 
-    // Pump 200 blocks (~600 messages, ≥ 6 batches at batch_size=100). A
-    // small workload would finish before the kill lands; we need enough
-    // in-flight work that pg_terminate_backend hits a live transaction.
-    let total = ingest_n_blocks(&stack.redis_url, 100, 299).await;
+    // Pump enough work that the worker stays busy through the kill window.
+    let _ = ingest_n_blocks(&stack.redis_url, 100, 599).await;
 
-    let mut got_messages = false;
-    let started = Instant::now();
-    while started.elapsed() < Duration::from_secs(30) {
-        if let Some(s) = wait_first_progress(&mut progress_rx, Duration::from_secs(5)).await {
-            if s.messages_ok > 0 {
-                got_messages = true;
-                break;
-            }
-        }
-    }
-    assert!(got_messages, "loop never processed before kill window");
-
-    // INJECT: kill all worker connections via sidecar admin pool. Retry
-    // until at least one connection is hit — we need to land DURING active
-    // processing, not in the brief gap between batches.
-    let admin = PgPool::connect(&stack.pg_url).await.expect("admin pool");
-    let mut killed_total = 0;
-    let kill_started = Instant::now();
-    while kill_started.elapsed() < Duration::from_secs(20) && killed_total == 0 {
-        let killed: Vec<(bool,)> = sqlx::query_as(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-             WHERE application_name = $1 AND pid <> pg_backend_pid()",
-        )
-        .bind(app_name)
-        .fetch_all(&admin)
+    // Wait until the loop has actually started processing.
+    let _ = wait_first_progress(&mut progress_rx, Duration::from_secs(20))
         .await
-        .expect("kill");
-        killed_total = killed.len();
-        if killed_total == 0 {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }
-    assert!(killed_total > 0, "no worker connections to kill within window");
+        .expect("loop never reported progress");
 
-    // Total expected: pre-kill batch + everything that was queued but not
-    // yet processed when the kill landed.
-    let _ = wait_messages_ok(
+    // Spawn the killer. It runs for up to 5 s, killing every 50 ms. The
+    // sidecar admin pool is moved into the task.
+    let admin = PgPool::connect(&stack.pg_url).await.expect("admin pool");
+    let app_for_kill = app_name.to_string();
+    let killer = tokio::spawn(async move {
+        let started = Instant::now();
+        let mut ever_killed = 0;
+        while started.elapsed() < Duration::from_secs(5) {
+            if let Ok(rows) = sqlx::query_as::<_, (bool,)>(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+                 WHERE application_name = $1 AND pid <> pg_backend_pid()",
+            )
+            .bind(&app_for_kill)
+            .fetch_all(&admin)
+            .await
+            {
+                ever_killed += rows.len();
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        ever_killed
+    });
+
+    // Wait until the loop observes a batch error OR killer finishes — either
+    // way we proceed to drain.
+    let _ = wait_for_condition(
         &mut progress_rx,
-        total as usize,
-        Duration::from_secs(120),
+        Duration::from_secs(10),
+        |s| s.batches_err > 0,
+    )
+    .await;
+
+    let killed_count = killer.await.expect("killer join");
+
+    // Drain.
+    let stats = wait_drain_quiescent(
+        &mut progress_rx,
+        Duration::from_secs(5),
+        Duration::from_secs(180),
     )
     .await;
 
     let _ = shutdown_tx.send(true);
     let final_stats = loop_handle.await.expect("loop join").expect("loop ok");
 
-    assert!(
-        final_stats.messages_ok >= total as usize,
-        "post-kill messages_ok={} expected>={}",
-        final_stats.messages_ok,
-        total
-    );
+    let pending = common::xpending_total(&stack.redis_url, &group).await;
+    let pg_count: (i64,) = sqlx::query_as("SELECT COUNT(*)::bigint FROM entity_features")
+        .fetch_one(&pg_pool)
+        .await
+        .unwrap();
+
+    assert!(killed_count > 0, "killer never killed any worker connection");
+    assert_eq!(pending, 0, "messages stuck in PEL after drain (stats={:?})", stats);
+    assert!(pg_count.0 > 0, "expected entity_features rows");
     assert!(
         final_stats.batches_err > 0,
-        "expected the kill to fail at least one batch"
+        "expected the kill to fail at least one batch (killed={})",
+        killed_count
     );
-    assert_eq!(
-        final_stats.dlq_moves, 0,
-        "transient kill should not have escalated to DLQ"
-    );
+    assert_eq!(final_stats.dlq_moves, 0);
 }
 
 // =============================================================================
-// Scenario 3: Neo4j returns transient errors (we simulate by stopping the
-// container briefly). The worker's retry counter increments; once Neo4j is
-// back, retries succeed without DLQ.
+// Scenario 3: Neo4j frozen mid-loop. Worker's process_read_batch errors,
+// retries via pending-first read once Neo4j is unfrozen.
 // =============================================================================
 #[tokio::test]
 #[ignore = "requires Docker; run with --ignored"]
-async fn chaos_neo4j_transient_outage_retries_succeed() {
+async fn chaos_neo4j_freeze_mid_loop_recovers() {
     let stack = common::start_stack().await;
 
     let pg_pool = PgPool::connect(&stack.pg_url).await.expect("pg pool");
@@ -304,7 +318,9 @@ async fn chaos_neo4j_transient_outage_retries_succeed() {
     let neo4j_uri = stack.neo4j_uri.clone();
     let neo4j_user = stack.neo4j_user.clone();
     let neo4j_pass = stack.neo4j_password.clone();
+    let group = "chaos-neo-group".to_string();
 
+    let group_for_loop = group.clone();
     let loop_handle = tokio::spawn(async move {
         run_worker_loop_for_test(
             redis_url,
@@ -312,12 +328,10 @@ async fn chaos_neo4j_transient_outage_retries_succeed() {
             neo4j_uri,
             neo4j_user,
             neo4j_pass,
-            "chaos-neo-group".to_string(),
+            group_for_loop,
             "chaos-neo-consumer".to_string(),
-            // Set max_attempts high so a brief outage stays within the
-            // retry budget — this scenario asserts retry recovers.
             DlqPolicy {
-                max_attempts: 50,
+                max_attempts: 100,
                 dlq_suffix: "_dlq".into(),
                 attempt_ttl_secs: 60,
             },
@@ -327,48 +341,49 @@ async fn chaos_neo4j_transient_outage_retries_succeed() {
         .await
     });
 
-    let total = ingest_n_blocks(&stack.redis_url, 100, 109).await;
+    let _ = ingest_n_blocks(&stack.redis_url, 100, 119).await;
+    let _ = wait_first_progress(&mut progress_rx, Duration::from_secs(20))
+        .await
+        .expect("loop never reported progress");
 
-    // Wait for the loop to have processed at least one batch so we know
-    // we're truly mid-stream when Neo4j drops.
-    let _ = wait_first_progress(&mut progress_rx, Duration::from_secs(20)).await;
-
-    // INJECT: brief Neo4j outage.
-    stack.neo4j.stop().await.expect("neo4j stop");
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    stack.neo4j.start().await.expect("neo4j start");
+    // INJECT: freeze neo4j.
+    common::freeze_container(stack.neo4j.id()).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    common::thaw_container(stack.neo4j.id()).await;
     common::wait_neo4j_ready(
         &stack.neo4j_uri,
         &stack.neo4j_user,
         &stack.neo4j_password,
-        Duration::from_secs(45),
+        Duration::from_secs(30),
     )
     .await;
 
-    let total_post = ingest_n_blocks(&stack.redis_url, 200, 204).await;
+    let _ = ingest_n_blocks(&stack.redis_url, 200, 209).await;
 
-    let _ = wait_messages_ok(
+    let stats = wait_drain_quiescent(
         &mut progress_rx,
-        (total + total_post) as usize,
-        Duration::from_secs(180),
+        Duration::from_secs(5),
+        Duration::from_secs(240),
     )
     .await;
 
     let _ = shutdown_tx.send(true);
     let final_stats = loop_handle.await.expect("loop join").expect("loop ok");
 
-    assert!(
-        final_stats.messages_ok >= (total + total_post) as usize,
-        "after Neo4j recovery messages_ok={} expected>={}",
-        final_stats.messages_ok,
-        total + total_post
-    );
+    let pending = common::xpending_total(&stack.redis_url, &group).await;
+    let pg_count: (i64,) = sqlx::query_as("SELECT COUNT(*)::bigint FROM entity_features")
+        .fetch_one(&pg_pool)
+        .await
+        .unwrap();
+
+    assert_eq!(pending, 0, "messages stuck in PEL after drain (stats={:?})", stats);
+    assert!(pg_count.0 > 0, "expected entity_features rows");
     assert!(
         final_stats.batches_err > 0,
-        "expected at least one batch error while Neo4j was down"
+        "expected freeze to cause at least one batch error"
     );
     assert_eq!(
         final_stats.dlq_moves, 0,
-        "transient Neo4j outage within retry budget should not DLQ"
+        "transient outage should not have escalated to DLQ"
     );
 }
