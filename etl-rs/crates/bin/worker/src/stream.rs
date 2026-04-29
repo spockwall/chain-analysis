@@ -13,7 +13,8 @@ use etl::sinks::postgres_reader::PostgresReader;
 use etl::sinks::postgres_writer::PostgresWriter;
 use etl::sinks::redis_consumer::StreamConsumer;
 use sqlx::PgPool;
-use tracing::{error, info, warn};
+use std::time::Instant;
+use tracing::{debug, error, info, warn};
 
 pub async fn run(
     cfg: std::sync::Arc<etl::config::ProcessConfig>,
@@ -52,16 +53,19 @@ pub async fn run(
         "Task C: stream consumer starting"
     );
 
+    let mut iter = 0u64;
     loop {
+        iter += 1;
         if shutdown.is_shutdown() {
             break;
         }
 
+        let read_started = Instant::now();
         let batch = tokio::select! {
             r = read_batch(&mut consumer) => match r {
                 Ok(b) => b,
                 Err(e) => {
-                    error!(error = %e, "Failed to read batch, backing off");
+                    error!(iter, error = %e, elapsed_ms = read_started.elapsed().as_millis() as u64, "Failed to read batch, backing off");
                     reporter.report_error(&e.to_string()).await.ok();
                     tokio::select! {
                         _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {},
@@ -74,7 +78,19 @@ pub async fn run(
         };
 
         let raw_snapshot = batch.raw_by_stream.clone();
+        let msg_total = batch.txs.len() + batch.traces.len() + batch.transfers.len();
+        if msg_total > 0 {
+            debug!(
+                iter,
+                txs = batch.txs.len(),
+                traces = batch.traces.len(),
+                transfers = batch.transfers.len(),
+                read_ms = read_started.elapsed().as_millis() as u64,
+                "stream: batch read"
+            );
+        }
 
+        let process_started = Instant::now();
         let result = process_read_batch(
             &mut consumer,
             &pg_reader,
@@ -85,8 +101,20 @@ pub async fn run(
         )
         .await;
 
+        match &result {
+            Ok(_) if msg_total > 0 => {
+                debug!(
+                    iter,
+                    msg_total,
+                    process_ms = process_started.elapsed().as_millis() as u64,
+                    "stream: batch processed"
+                );
+            }
+            _ => {}
+        }
+
         if let Err(e) = result {
-            error!(error = %e, "Batch processing failed");
+            error!(iter, error = %e, process_ms = process_started.elapsed().as_millis() as u64, "Batch processing failed");
             reporter.report_error(&e.to_string()).await.ok();
 
             let group = consumer.group().to_string();
@@ -113,12 +141,13 @@ pub async fn run(
                     match pipeline_mod::incr_attempt(conn, &key, dlq_policy.attempt_ttl_secs).await {
                         Ok(n) => n,
                         Err(e) => {
-                            warn!(stream, error = %e, "Failed to increment DLQ attempt counter");
+                            warn!(iter, stream, error = %e, "Failed to increment DLQ attempt counter");
                             continue;
                         }
                     };
                 if attempts >= dlq_policy.max_attempts {
                     warn!(
+                        iter,
                         stream,
                         attempts,
                         count = msgs.len(),
@@ -132,11 +161,11 @@ pub async fn run(
                                 .increment(msgs.len() as u64);
                         }
                         Err(e) => {
-                            error!(stream, error = %e, "DLQ relocation failed");
+                            error!(iter, stream, error = %e, "DLQ relocation failed");
                         }
                     }
                 } else {
-                    info!(stream, attempts, "Will retry batch");
+                    info!(iter, stream, attempts, "Will retry batch");
                 }
             }
 

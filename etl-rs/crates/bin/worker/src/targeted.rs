@@ -9,7 +9,8 @@ use etl::sinks::redis_stream::{RedisStreamWriter, TransactionWriter};
 use eyre::Result;
 use redis::{aio::ConnectionManager, AsyncCommands};
 use sqlx::PgPool;
-use tracing::{info, warn};
+use std::time::Instant;
+use tracing::{debug, info, warn};
 
 pub async fn run(
     cfg: std::sync::Arc<etl::config::Config>,
@@ -25,7 +26,9 @@ pub async fn run(
 
     info!(queue = %cfg.targeted_queue_key, brpop_timeout_secs, "Task A: targeted queue consumer starting");
 
+    let mut iter = 0u64;
     loop {
+        iter += 1;
         if shutdown.is_shutdown() {
             break;
         }
@@ -34,7 +37,7 @@ pub async fn run(
             r = redis.brpop(&cfg.targeted_queue_key, brpop_timeout_secs as f64) => match r {
                 Ok(v) => v,
                 Err(e) => {
-                    warn!(error = %e, "BRPOP failed, backing off 1s");
+                    warn!(iter, error = %e, "BRPOP failed, backing off 1s");
                     tokio::select! {
                         _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {},
                         _ = shutdown.wait() => break,
@@ -50,10 +53,13 @@ pub async fn run(
         let task: QueuedTask = match serde_json::from_str(&json) {
             Ok(t) => t,
             Err(e) => {
-                warn!(error = %e, payload = %json, "Skipping malformed queued task");
+                warn!(iter, error = %e, payload = %json, "Skipping malformed queued task");
                 continue;
             }
         };
+        let task_id = task.task_id;
+        let run_id_for_log = task.run_id.clone();
+        debug!(iter, task_id, run_id = ?run_id_for_log, "task A: dispatching queued task");
 
         let mut reporter = match task.run_id.as_deref() {
             Some(rid) => match ProgressReporter::new_redis(&cfg.redis_url, rid).await {
@@ -75,7 +81,24 @@ pub async fn run(
             with_traces: true,
             with_transfers: true,
         };
-        let _ = job.execute(task).await;
+        let job_started = Instant::now();
+        match job.execute(task).await {
+            Ok(_) => debug!(
+                iter,
+                ?task_id,
+                run_id = ?run_id_for_log,
+                ms = job_started.elapsed().as_millis() as u64,
+                "task A: job completed"
+            ),
+            Err(e) => warn!(
+                iter,
+                ?task_id,
+                run_id = ?run_id_for_log,
+                error = %e,
+                ms = job_started.elapsed().as_millis() as u64,
+                "task A: job failed"
+            ),
+        }
     }
 
     info!("Task A: targeted queue consumer shutting down");
