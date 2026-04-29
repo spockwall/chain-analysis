@@ -50,6 +50,7 @@ async fn drain_consumer(
 #[tokio::test]
 #[ignore = "requires Docker; run with --ignored"]
 async fn e2e_block_ingest_to_stores() {
+    common::init_test_tracing();
     let stack = common::start_stack().await;
 
     let pg_pool = PgPool::connect(&stack.pg_url)
