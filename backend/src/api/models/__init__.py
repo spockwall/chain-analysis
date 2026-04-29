@@ -2,6 +2,8 @@
 
 from .auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
 from .entity import (
+    DetectionPattern,
+    DetectionsResponse,
     EntityResponse,
     EntityType,
     NeighborsResponse,
@@ -21,4 +23,6 @@ __all__ = [
     "RiskLevel",
     "NeighborsResponse",
     "PathResponse",
+    "DetectionPattern",
+    "DetectionsResponse",
 ]

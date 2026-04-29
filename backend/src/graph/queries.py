@@ -156,13 +156,25 @@ class AMLPatternQueries:
         """
         query = """
         MATCH (src:Entity {address: $address})-[:SENT]->(tx:Transaction)-[:RECEIVED]->(dst:Entity)
-        WITH src, collect(DISTINCT dst) AS receivers, collect(tx.block_number) AS blocks
+                WITH src,
+                         collect(DISTINCT dst) AS receivers,
+                         collect(tx.block_number) AS blocks,
+                         collect(tx) AS txs
         WHERE size(receivers) >= $min_receivers
           AND (max(blocks) - min(blocks)) < $block_window
         RETURN src.address        AS source,
                size(receivers)    AS fan_out,
                min(blocks)        AS first_block,
-               max(blocks)        AS last_block
+                             max(blocks)        AS last_block,
+                             [r IN receivers | r.address] AS matched_addresses,
+                             [t IN txs | {
+                                     hash: t.hash,
+                                     from_address: t.from_address,
+                                     to_address: t.to_address,
+                                     value: t.value,
+                                     block_number: t.block_number,
+                                     timestamp: t.timestamp
+                             }] AS transactions
         ORDER BY fan_out DESC
         """
         return QueryResult(
@@ -216,11 +228,24 @@ class AMLPatternQueries:
         MATCH (src:Entity {address: $address})-[:SENT]->(t1:Transaction)-[:RECEIVED]->(mid:Entity)
         MATCH (mid)-[:SENT]->(t2:Transaction)-[:RECEIVED]->(dst:Entity)
         WHERE src <> dst AND src <> mid AND mid <> dst
-        WITH src, collect(DISTINCT dst) AS dsts, count(DISTINCT mid) AS intermediaries
+         WITH src,
+              collect(DISTINCT dst) AS dsts,
+              collect(DISTINCT mid) AS mids,
+              collect(DISTINCT t1) + collect(DISTINCT t2) AS txs
         WHERE size(dsts) >= $min_receivers
         RETURN src.address        AS source,
-               intermediaries     AS intermediary_count,
-               size(dsts)         AS final_receivers
+               size(mids)         AS intermediaries,
+             size(mids)         AS intermediary_count,
+             size(dsts)         AS final_receivers,
+             [m IN mids | m.address] + [d IN dsts | d.address] AS matched_addresses,
+             [t IN txs | {
+                 hash: t.hash,
+                 from_address: t.from_address,
+                 to_address: t.to_address,
+                 value: t.value,
+                 block_number: t.block_number,
+                 timestamp: t.timestamp
+             }] AS transactions
         """
         return QueryResult(
             query=query,
