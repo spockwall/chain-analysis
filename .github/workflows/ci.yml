@@ -100,41 +100,66 @@ jobs:
       - name: Build production image
         run: docker build -f backend/Dockerfile -t chain-analysis-backend:ci .
 
-  # rust-etl:
-  #   name: Rust ETL validation
-  #   runs-on: ubuntu-latest
+  rust-etl:
+    name: Rust ETL validation
+    runs-on: ubuntu-latest
 
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  #     # - name: Setup Rust
-  #     #   uses: dtolnay/rust-toolchain@stable
-  #     #   with:
-  #     #     components: rustfmt, clippy
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
-  #     - name: Cache Cargo
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         workspaces: etl-rs -> target
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: etl-rs -> target
 
-  #     # - name: Clippy
-  #     #   working-directory: etl-rs
-  #     #   run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::too_many_arguments
+      - name: Unit tests
+        working-directory: etl-rs
+        run: cargo test --workspace --lib
 
-  #     - name: Test
-  #       working-directory: etl-rs
-  #       run: cargo test --workspace
+      - name: Integration tests (testcontainers e2e + chaos)
+        working-directory: etl-rs
+        # `--test-threads=1` because each test starts its own Redis/PG/Neo4j
+        # stack and they shouldn't fight for ports / Docker resources.
+        env:
+          RUST_LOG: info
+        run: cargo test --workspace --tests -- --ignored --test-threads=1
 
-  #     - name: Release build
-  #       working-directory: etl-rs
-  #       run: cargo build --workspace --release
+      - name: Release build
+        working-directory: etl-rs
+        run: cargo build --workspace --release
 
-  #     - name: Build ingest image
-  #       run: docker build -f etl-rs/Dockerfile --target ingest -t chain-analysis-ingest:ci etl-rs
+      - name: Build ingest image
+        run: docker build -f etl-rs/Dockerfile --target ingest -t chain-analysis-ingest:ci etl-rs
 
-  #     - name: Build worker image
-  #       run: docker build -f etl-rs/Dockerfile --target worker -t chain-analysis-worker:ci etl-rs
+      - name: Build worker image
+        run: docker build -f etl-rs/Dockerfile --target worker -t chain-analysis-worker:ci etl-rs
+
+  rust-etl-bench:
+    name: Rust ETL bench (label-gated)
+    runs-on: ubuntu-latest
+    # Opt-in: only runs when the `run-bench` label is on the PR. CI numbers
+    # are noisy on shared runners; gating prevents per-PR overhead.
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-bench')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: etl-rs -> target
+
+      - name: Run ingest_throughput bench
+        working-directory: etl-rs
+        run: cargo bench -p etl --bench ingest_throughput
 
   compose:
     name: Compose validation
