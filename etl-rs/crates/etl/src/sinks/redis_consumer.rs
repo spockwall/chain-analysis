@@ -75,28 +75,57 @@ impl StreamConsumer {
         Ok(())
     }
 
-    /// Read all three streams in a single XREADGROUP call. Saves 2x BLOCK timeouts
-    /// when streams are partially or fully empty.
+    /// Read all three streams in a single XREADGROUP call.
+    ///
+    /// To make the worker recover from transient downstream errors, we first
+    /// drain this consumer's pending list (entries we previously read but
+    /// never ACKed because processing failed). Only when nothing is pending
+    /// do we fall back to BLOCKing on `>` for new entries. Without the
+    /// pending-first read, a single failed batch would stay stuck in PEL
+    /// forever — `XREADGROUP >` skips the consumer's own pending entries.
     pub async fn read_all_batches(&mut self) -> Result<CombinedBatch> {
-        let result: redis::Value = redis::cmd("XREADGROUP")
+        let pending: redis::Value = redis::cmd("XREADGROUP")
             .arg("GROUP")
             .arg(&self.group)
             .arg(&self.consumer)
             .arg("COUNT")
             .arg(self.batch_size)
-            .arg("BLOCK")
-            .arg(self.block_ms)
             .arg("STREAMS")
             .arg(STREAM_TXS)
             .arg(STREAM_TRACES)
             .arg(STREAM_TRANSFERS)
-            .arg(">")
-            .arg(">")
-            .arg(">")
+            .arg("0")
+            .arg("0")
+            .arg("0")
             .query_async(&mut self.conn)
             .await?;
 
-        let by_stream = parse_xreadgroup_multi(result);
+        let pending_streams = parse_xreadgroup_multi(pending);
+        let pending_total: usize = pending_streams.values().map(|v| v.len()).sum();
+
+        let by_stream = if pending_total > 0 {
+            pending_streams
+        } else {
+            let result: redis::Value = redis::cmd("XREADGROUP")
+                .arg("GROUP")
+                .arg(&self.group)
+                .arg(&self.consumer)
+                .arg("COUNT")
+                .arg(self.batch_size)
+                .arg("BLOCK")
+                .arg(self.block_ms)
+                .arg("STREAMS")
+                .arg(STREAM_TXS)
+                .arg(STREAM_TRACES)
+                .arg(STREAM_TRANSFERS)
+                .arg(">")
+                .arg(">")
+                .arg(">")
+                .query_async(&mut self.conn)
+                .await?;
+            parse_xreadgroup_multi(result)
+        };
+
         let mut batch = CombinedBatch::default();
 
         for (stream, msgs) in by_stream {
