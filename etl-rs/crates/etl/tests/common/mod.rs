@@ -14,12 +14,30 @@ use etl::sinks::postgres_reader::PostgresReader;
 use etl::sinks::postgres_writer::PostgresWriter;
 use etl::sinks::redis_consumer::StreamConsumer;
 use sqlx::PgPool;
+use std::sync::Once;
 use std::time::Duration;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 use testcontainers_modules::postgres::Postgres as PgImage;
 use tokio::sync::{mpsc, watch};
+use tracing::{debug, info, warn};
+
+static TRACING_INIT: Once = Once::new();
+
+/// Idempotent tracing subscriber for tests. Call from each `#[tokio::test]`.
+/// Honors `RUST_LOG` (default: `info,etl=debug,common=debug,chaos=debug`).
+pub fn init_test_tracing() {
+    TRACING_INIT.call_once(|| {
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            tracing_subscriber::EnvFilter::new("info,etl=debug,common=debug,chaos=debug")
+        });
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .try_init();
+    });
+}
 
 /// Minimal Postgres schema covering the columns the worker stream consumer
 /// reads/writes. Hand-written rather than running Alembic — schema drift
@@ -173,6 +191,7 @@ pub async fn wait_neo4j_ready(uri: &str, user: &str, password: &str, deadline: D
 /// is preserved — so reconnect URLs remain valid. This is what real chaos
 /// engineering tools (Toxiproxy, etc.) use to inject brief outages.
 pub async fn freeze_container(container_id: &str) {
+    info!(container_id, "chaos: docker pause");
     let out = tokio::process::Command::new("docker")
         .args(["pause", container_id])
         .output()
@@ -186,6 +205,7 @@ pub async fn freeze_container(container_id: &str) {
 }
 
 pub async fn thaw_container(container_id: &str) {
+    info!(container_id, "chaos: docker unpause");
     let out = tokio::process::Command::new("docker")
         .args(["unpause", container_id])
         .output()
@@ -259,6 +279,7 @@ pub async fn run_worker_loop_for_test(
     mut shutdown_rx: watch::Receiver<bool>,
     progress_tx: mpsc::UnboundedSender<LoopStats>,
 ) -> eyre::Result<LoopStats> {
+    info!(group = %consumer_group, consumer = %consumer_name, "loop: starting");
     let mut consumer =
         StreamConsumer::connect(&redis_url, &consumer_group, &consumer_name, 100, 200).await?;
     consumer.ensure_groups().await?;
@@ -269,15 +290,19 @@ pub async fn run_worker_loop_for_test(
 
     let mut reporter = ProcessProgressReporter::new(&redis_url, "test-worker").await?;
 
-    // Attempt initial Neo4j connect; on failure we'll lazily retry below.
     let mut neo4j_opt =
         Neo4jWriter::connect(&neo4j_uri, &neo4j_user, &neo4j_password, "neo4j")
             .await
             .ok();
+    if neo4j_opt.is_none() {
+        warn!("loop: initial Neo4j connect failed, will retry lazily");
+    }
 
     let mut stats = LoopStats::default();
+    let mut iter = 0u64;
 
     loop {
+        iter += 1;
         if *shutdown_rx.borrow() {
             break;
         }
@@ -299,23 +324,22 @@ pub async fn run_worker_loop_for_test(
         }
         let neo4j = neo4j_opt.as_ref().unwrap();
 
+        let read_started = std::time::Instant::now();
         let batch = tokio::select! {
             r = etl::consumer::read_batch(&mut consumer) => match r {
                 Ok(b) => b,
-                Err(_) => {
+                Err(e) => {
                     stats.batches_err += 1;
+                    warn!(iter, error = %e, elapsed_ms = read_started.elapsed().as_millis() as u64, "loop: read_batch failed; reconnecting consumer");
                     let _ = progress_tx.send(stats);
-                    // Multiplexed connections don't auto-reconnect on TCP
-                    // death; reopen so a subsequent Redis restart is
-                    // recoverable. (Production worker has the same gap —
-                    // tracked separately.)
                     consumer = match StreamConsumer::connect(
                         &redis_url, &consumer_group, &consumer_name, 100, 200,
                     )
                     .await
                     {
                         Ok(c) => c,
-                        Err(_) => {
+                        Err(e2) => {
+                            warn!(iter, error = %e2, "loop: consumer reconnect failed");
                             tokio::select! {
                                 _ = tokio::time::sleep(Duration::from_millis(200)) => {}
                                 _ = shutdown_rx.changed() => break,
@@ -345,7 +369,16 @@ pub async fn run_worker_loop_for_test(
 
         let raw_snapshot = batch.raw_by_stream.clone();
         let msg_total = batch.txs.len() + batch.traces.len() + batch.transfers.len();
+        debug!(
+            iter,
+            txs = batch.txs.len(),
+            traces = batch.traces.len(),
+            transfers = batch.transfers.len(),
+            read_ms = read_started.elapsed().as_millis() as u64,
+            "loop: read batch"
+        );
 
+        let process_started = std::time::Instant::now();
         let result = etl::consumer::process_read_batch(
             &mut consumer,
             &pg_reader,
@@ -360,11 +393,23 @@ pub async fn run_worker_loop_for_test(
             Ok(_) => {
                 stats.batches_ok += 1;
                 stats.messages_ok += msg_total;
+                debug!(
+                    iter,
+                    msg_total,
+                    process_ms = process_started.elapsed().as_millis() as u64,
+                    total_messages_ok = stats.messages_ok,
+                    "loop: batch ok"
+                );
             }
-            Err(_) => {
+            Err(e) => {
                 stats.batches_err += 1;
-                // Drop the live Neo4j handle if processing failed — next
-                // iteration will reconnect. (sqlx PgPool reconnects itself.)
+                warn!(
+                    iter,
+                    error = %e,
+                    process_ms = process_started.elapsed().as_millis() as u64,
+                    "loop: process_read_batch failed"
+                );
+                // Drop the live Neo4j handle so next iteration reconnects.
                 neo4j_opt = None;
 
                 let group = consumer.group().to_string();
@@ -383,12 +428,14 @@ pub async fn run_worker_loop_for_test(
                             Ok(n) => n,
                             Err(_) => continue,
                         };
+                    debug!(stream, attempts, "loop: incr_attempt");
                     if attempts >= dlq_policy.max_attempts {
                         if move_batch_to_dlq(conn, stream, &group, msgs, &dlq_policy)
                             .await
                             .is_ok()
                         {
                             stats.dlq_moves += 1;
+                            warn!(stream, count = msgs.len(), "loop: moved batch to DLQ");
                         }
                     }
                 }
@@ -402,6 +449,7 @@ pub async fn run_worker_loop_for_test(
 
         let _ = progress_tx.send(stats);
     }
+    info!(?stats, "loop: shutdown");
 
     Ok(stats)
 }
