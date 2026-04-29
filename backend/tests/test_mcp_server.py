@@ -41,6 +41,51 @@ class FakeGraphDB:
         return len(nodes)
 
 
+class FakeRelationalDB:
+    """Minimal relational adapter for ingestion and MCP tests."""
+
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, dict[str, Any] | None]] = []
+
+    async def execute(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        self.executed.append((query, params))
+        if "SELECT * FROM ingestion_runs WHERE run_id" in query:
+            return [
+                {
+                    "id": 1,
+                    "run_id": params["run_id"] if params else "test-run",
+                    "chain_id": 1,
+                    "start_block": 0,
+                    "end_block": 0,
+                    "data_source": "etherscan-web",
+                    "status": "queued",
+                }
+            ]
+        return []
+
+
+class FakeRedis:
+    """Capture LPUSH payloads written by queueing tools."""
+
+    def __init__(self) -> None:
+        self.items: list[tuple[str, str]] = []
+
+    async def lpush(self, key: str, value: str) -> int:
+        self.items.append((key, value))
+        return len(self.items)
+
+
+class FakeMessageQueue:
+    """Minimal message queue adapter exposing the underlying Redis client."""
+
+    def __init__(self) -> None:
+        self.redis = FakeRedis()
+
+
 def _structured_result(result: Any) -> Any:
     """Extract the structured payload returned by FastMCP `call_tool()`."""
     if isinstance(result, tuple) and len(result) == 2:
@@ -52,9 +97,11 @@ def _structured_result(result: Any) -> Any:
 def fake_adapters(monkeypatch: pytest.MonkeyPatch) -> FakeGraphDB:
     """Install fake adapters so MCP tools can run without real services."""
     graph_db = FakeGraphDB()
+    graph_db.relational_db = FakeRelationalDB()  # type: ignore[attr-defined]
+    graph_db.message_queue = FakeMessageQueue()  # type: ignore[attr-defined]
     monkeypatch.setattr(deps, "_neo4j_adapter", graph_db)
-    monkeypatch.setattr(deps, "_postgres_adapter", object())
-    monkeypatch.setattr(deps, "_redis_adapter", object())
+    monkeypatch.setattr(deps, "_postgres_adapter", graph_db.relational_db)
+    monkeypatch.setattr(deps, "_redis_adapter", graph_db.message_queue)
     return graph_db
 
 
@@ -66,6 +113,8 @@ async def test_mcp_lists_expected_tools(fake_adapters: FakeGraphDB) -> None:
 
     assert "get_entity" in tool_names
     assert "get_graph_stats" in tool_names
+    assert "ingest_address" in tool_names
+    assert "start_address_investigation" in tool_names
     assert "upsert_entity" in tool_names
 
 
@@ -109,6 +158,25 @@ async def test_mcp_upsert_entity_tool_writes_graph_node(
     assert payload["entity_type"] == "Mixer"
     assert fake_adapters.upserted_nodes[0].address == new_address
     assert fake_adapters.upserted_nodes[0].properties["risk_level"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_mcp_ingest_address_queues_targeted_fetch(
+    fake_adapters: FakeGraphDB,
+) -> None:
+    """`ingest_address` should create an ingestion run and push queue work."""
+    result = await chain_analysis_mcp.call_tool(
+        "ingest_address",
+        {"address": fake_adapters.node.address},
+    )
+    payload = _structured_result(result)
+
+    assert payload["address"] == fake_adapters.node.address
+    assert payload["status"] == "queued"
+    assert payload["run_id"]
+    redis_items = fake_adapters.message_queue.redis.items  # type: ignore[attr-defined]
+    assert redis_items[0][0] == "ingest:targeted_queue"
+    assert payload["run_id"] in redis_items[0][1]
 
 
 def test_fastapi_app_mounts_mcp_route() -> None:

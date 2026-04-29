@@ -21,6 +21,7 @@ from api.deps import (
 )
 from api.models.entity import (
     AnnotationCreate,
+    DetectionPattern,
     EntityFeaturesUpsertRequest,
     EntityType,
     GroupCreateRequest,
@@ -35,7 +36,10 @@ from api.routes import entities as entity_routes
 from api.routes import features as feature_routes
 from api.routes import groups as group_routes
 from api.routes import health as health_routes
+from api.routes import ingestion as ingestion_routes
 from api.routes import labels as label_routes
+from api.routes import pipeline as pipeline_routes
+from api.routes import detections as detection_routes
 from api.routes import stats as stats_routes
 from core.config import get_settings
 from libs import logger
@@ -64,6 +68,21 @@ async def _invoke(func: Any, /, *args: Any, **kwargs: Any) -> Any:
         logger.error("mcp_tool_failed", tool=getattr(func, "__name__", "unknown"), error=str(exc))
         raise RuntimeError(str(exc)) from exc
     return _jsonify(result)
+
+
+async def _try_invoke(func: Any, /, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Return either normalized data or a compact error payload."""
+    try:
+        return {"ok": True, "data": await _invoke(func, *args, **kwargs)}
+    except (RuntimeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _normalize_address(address: str) -> str:
+    normalized = address.strip().lower()
+    if not normalized.startswith("0x") or len(normalized) != 42:
+        raise ValueError("Invalid address format; expected 0x + 40 hex chars")
+    return normalized
 
 
 def _entity_service() -> EntityService:
@@ -118,6 +137,8 @@ def get_server_guide() -> str:
         "- Transaction hashes must be 0x-prefixed 66-character hashes.\n"
         "- `get_entity_neighbors` currently reflects the backend neighbor implementation, "
         "which is most reliable for 1-hop traversal.\n"
+        "- Use `start_address_investigation` or `ingest_address` first when the graph may not "
+        "contain the address yet; then poll `get_ingestion_run` before deeper graph analysis.\n"
         "- Write tools mutate Neo4j or PostgreSQL state; use read tools first when exploring.\n"
         "- Risk levels are: unknown, low, medium, high, critical.\n"
     )
@@ -152,6 +173,150 @@ async def get_health() -> dict[str, Any]:
 )
 async def get_graph_stats() -> dict[str, Any]:
     return await _invoke(stats_routes.get_graph_stats, get_graph_db())
+
+
+@chain_analysis_mcp.tool(
+    name="ingest_address",
+    description=(
+        "Queue an Ethereum address for targeted transaction ingestion. "
+        "Returns a run_id that can be polled with get_ingestion_run."
+    ),
+    structured_output=True,
+)
+async def ingest_address(address: str, chain_id: int = 1) -> dict[str, Any]:
+    body = pipeline_routes.IngestAddressRequest(address=address, chain_id=chain_id)
+    return await _invoke(
+        pipeline_routes.ingest_address,
+        body,
+        get_settings(),
+        get_relational_db(),
+        get_message_queue(),
+    )
+
+
+@chain_analysis_mcp.tool(
+    name="get_ingestion_run",
+    description="Fetch the current status and counters for a queued ingestion run.",
+    structured_output=True,
+)
+async def get_ingestion_run(run_id: str) -> dict[str, Any]:
+    return await _invoke(ingestion_routes.get_ingestion_run, run_id, get_relational_db())
+
+
+@chain_analysis_mcp.tool(
+    name="list_ingestion_runs",
+    description="List recent ingestion runs, newest first.",
+    structured_output=True,
+)
+async def list_ingestion_runs(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+    return await _invoke(
+        ingestion_routes.list_ingestion_runs,
+        get_relational_db(),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@chain_analysis_mcp.tool(
+    name="queue_targeted_fetch",
+    description=(
+        "Queue targeted ingestion work for addresses, transaction hashes, "
+        "or a neighborhood seed through the labeling fetch workflow."
+    ),
+    structured_output=True,
+)
+async def queue_targeted_fetch(
+    mode: str = "addresses",
+    addresses: list[str] | None = None,
+    hashes: list[str] | None = None,
+    seed: str | None = None,
+    hops: int = 1,
+) -> dict[str, Any]:
+    body = label_routes.LabelFetchRequest(
+        mode=mode,
+        addresses=addresses or [],
+        hashes=hashes or [],
+        seed=seed,
+        hops=hops,
+    )
+    return await _invoke(
+        label_routes.enqueue_label_fetch,
+        body,
+        get_relational_db(),
+        get_message_queue(),
+        get_settings(),
+    )
+
+
+@chain_analysis_mcp.tool(
+    name="detect_aml_pattern",
+    description="Run one AML detection pattern for a target address.",
+    structured_output=True,
+)
+async def detect_aml_pattern(
+    pattern: DetectionPattern,
+    address: str,
+    limit: int = 20,
+) -> dict[str, Any]:
+    return await _invoke(
+        detection_routes.detect_pattern,
+        pattern,
+        address,
+        get_graph_db(),
+        limit=limit,
+    )
+
+
+@chain_analysis_mcp.tool(
+    name="start_address_investigation",
+    description=(
+        "Start an address investigation by optionally queueing transaction ingestion "
+        "and returning currently available graph, label, and neighborhood context."
+    ),
+    structured_output=True,
+)
+async def start_address_investigation(
+    address: str,
+    chain_id: int = 1,
+    queue_fetch: bool = True,
+    depth: int = 1,
+    limit: int = 100,
+) -> dict[str, Any]:
+    target = _normalize_address(address)
+
+    ingestion: dict[str, Any] | None = None
+    if queue_fetch:
+        body = pipeline_routes.IngestAddressRequest(address=target, chain_id=chain_id)
+        ingestion = await _try_invoke(
+            pipeline_routes.ingest_address,
+            body,
+            get_settings(),
+            get_relational_db(),
+            get_message_queue(),
+        )
+
+    return {
+        "address": target,
+        "ingestion": ingestion,
+        "entity": await _try_invoke(entity_routes.get_entity, target, get_graph_db()),
+        "known_label": await _try_invoke(
+            _entity_service().get_entity_with_known_label,
+            target,
+        ),
+        "neighbors": await _try_invoke(
+            entity_routes.get_neighbors,
+            target,
+            get_graph_db(),
+            depth=depth,
+            direction="both",
+            limit=limit,
+        ),
+        "next_steps": [
+            "If ingestion.status is queued, poll get_ingestion_run with the returned run_id until completed.",
+            "After ingestion completes, call get_entity_neighbors, find_entity_paths, and detect_aml_pattern.",
+            "Use create_contextual_label_task when analyst review is needed.",
+        ],
+    }
 
 
 @chain_analysis_mcp.tool(
