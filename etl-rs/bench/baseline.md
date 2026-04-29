@@ -16,18 +16,18 @@ hardware-sensitive; treat them as indicative, not contractual.
 
 ## Latest baseline
 
-| Metric           | Value     |
-|------------------|-----------|
-| Throughput       | _TBD_     |
-| Per-chunk p50    | _TBD_     |
-| Per-chunk p95    | _TBD_     |
-| Per-chunk p99    | _TBD_     |
-| Per-chunk max    | _TBD_     |
+| Metric           | Value             |
+|------------------|-------------------|
+| Throughput       | 2,275 blocks/sec  |
+| Per-chunk p50    | 43.23 ms          |
+| Per-chunk p95    | 45.82 ms          |
+| Per-chunk p99    | 46.24 ms          |
+| Per-chunk max    | 46.62 ms          |
 
 Captured on:
-- Date: _TBD_
-- Host: _TBD_ (CPU, RAM, OS, Docker version)
-- Rust: _TBD_
+- Date: 2026-04-29
+- Host: WSL2 on Windows 11, Docker Desktop (developer workstation; not a CI runner)
+- Rust: 1.95.0 stable
 
 To refresh, run from `etl-rs/`:
 
