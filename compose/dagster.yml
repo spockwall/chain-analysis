@@ -29,8 +29,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=password123
-      - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/chain_analysis
+      - NEO4J_PASSWORD=changeme
+      - DATABASE_URL=postgresql://postgres:changeme@postgres:5432/chain_analysis
       - INGEST_TARGETED_QUEUE=ingest:targeted_queue
       - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
@@ -59,8 +59,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=password123
-      - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/chain_analysis
+      - NEO4J_PASSWORD=changeme
+      - DATABASE_URL=postgresql://postgres:changeme@postgres:5432/chain_analysis
       - INGEST_TARGETED_QUEUE=ingest:targeted_queue
       - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
