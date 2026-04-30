@@ -9,7 +9,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 
 
 @pytest.mark.asyncio
@@ -33,7 +33,8 @@ async def test_ingest_rate_limit_memory_storage():
     async def _test_ingest(request: Request):
         return JSONResponse({"ok": True}, status_code=202)
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         r1 = await client.post("/test-ingest")
         assert r1.status_code == 202
 
@@ -60,7 +61,8 @@ async def test_labels_rate_limit_memory_storage():
     async def _test_labels(request: Request):
         return JSONResponse({"ok": True}, status_code=201)
 
-    async with AsyncClient(app=app, base_url="http://test") as client:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         r1 = await client.post("/test-labels")
         assert r1.status_code == 201
         r2 = await client.post("/test-labels")
