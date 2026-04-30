@@ -3,7 +3,7 @@
 import json
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
@@ -128,6 +128,7 @@ async def enqueue_label_fetch(
 @router.post("/tasks", response_model=LabelTaskResponse, status_code=201)
 @limiter.limit(get_settings().rate_limit_labels)
 async def create_label_task(
+    request: Request,
     task: LabelTaskCreate,
     db: RelationalDBDep,
 ) -> LabelTaskResponse:

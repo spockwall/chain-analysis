@@ -13,7 +13,7 @@ Clients poll `GET /api/ingestion-runs/{run_id}` to observe progress.
 import json
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from api.deps import MessageQueueDep, RelationalDBDep, SettingsDep
@@ -44,6 +44,7 @@ def _validate_address(address: str) -> str:
 @router.post("/ingest-address", response_model=IngestAddressResponse, status_code=202)
 @limiter.limit(get_settings().rate_limit_ingest)
 async def ingest_address(
+    request: Request,
     body: IngestAddressRequest,
     settings: SettingsDep,
     db: RelationalDBDep,
