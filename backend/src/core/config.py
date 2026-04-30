@@ -110,6 +110,10 @@ class Settings(BaseSettings):
         default=["http://localhost:3000", "http://localhost:5173"]
     )
 
+    # Rate limiting (slowapi style strings, e.g. "5/minute", "100/hour")
+    rate_limit_ingest: str = "5/minute"
+    rate_limit_labels: str = "30/minute"
+
     # =========================================================================
     # Dagster
     # =========================================================================

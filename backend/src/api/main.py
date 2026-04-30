@@ -9,6 +9,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from api.deps import close_adapters, init_adapters
 from api.routes import (
@@ -28,6 +31,7 @@ from api.routes import (
 )
 from core.config import get_settings
 from libs import logger
+from libs.rate_limiter import limiter
 
 
 @asynccontextmanager
@@ -65,6 +69,11 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
     )
+
+    # Attach limiter to app state and register middleware / handler
+    app.state.limiter = limiter
+    app.add_middleware(SlowAPIMiddleware)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # CORS middleware
     app.add_middleware(
