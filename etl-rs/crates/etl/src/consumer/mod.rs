@@ -34,6 +34,18 @@ pub async fn process_read_batch(
     batch: CombinedBatch,
 ) -> Result<(u64, u64, u64)> {
     if batch.txs.is_empty() && batch.traces.is_empty() && batch.transfers.is_empty() {
+        // Differentiate "nothing to do" from "everything was unparseable".
+        // The latter must surface as Err so the worker's retry/DLQ ladder
+        // can route the poison batch — otherwise a pending-first read keeps
+        // pulling the same orphans every iteration (hot loop).
+        let raw_total: usize = batch.raw_by_stream.values().map(|v| v.len()).sum();
+        if raw_total > 0 {
+            return Err(eyre::eyre!(
+                "batch contained {} unparseable messages across {} streams",
+                raw_total,
+                batch.raw_by_stream.len()
+            ));
+        }
         return Ok((0, 0, 0));
     }
 
