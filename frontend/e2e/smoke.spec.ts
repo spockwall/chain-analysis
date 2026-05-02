@@ -44,7 +44,12 @@ test("analyst smoke journey: login, ingest, explore, queue label, annotate", asy
   await page.getByTestId("annotation-labels").fill("smoke-test");
   await page.getByTestId("annotation-notes").fill("Smoke journey annotation");
   await page.getByTestId("annotation-confidence").fill("0.8");
+  const annotationResponsePromise = page.waitForResponse((response) =>
+    response.url().includes("/api/labels/annotations") && response.request().method() === "POST",
+  );
   await page.getByTestId("annotation-submit").click();
+  const annotationResponse = await annotationResponsePromise;
+  expect(annotationResponse.ok()).toBeTruthy();
 
   await expect(page.getByText("Annotation submitted")).toBeVisible();
 });
