@@ -16,12 +16,8 @@ use tracing::{error, info};
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Hold guard until main() returns so buffered logs flush on shutdown.
+    let _tracing_guard = etl::observability::init_tracing("worker");
 
     let metrics_port = std::env::var("METRICS_PORT")
         .ok()

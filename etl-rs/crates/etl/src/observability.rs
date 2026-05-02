@@ -125,3 +125,36 @@ fn describe_metrics() {
         "Individual messages moved to DLQ streams (labels: stream)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tracing
+// ---------------------------------------------------------------------------
+
+/// Initialise async, non-blocking tracing for a binary.
+///
+/// Wraps stdout in `tracing_appender::non_blocking` so log writes don't block
+/// the calling tokio task on slow log shippers. Honors `RUST_LOG` (default
+/// `info`).
+///
+/// **The returned guard MUST be held for the lifetime of `main()`** — bind it
+/// to a named variable (`let _guard = ...`), never to bare `_`. When the
+/// guard drops, the worker thread flushes any buffered lines. Dropping it
+/// early (or with `let _ = ...`) discards in-flight logs silently.
+///
+/// Default mode is **lossy**: when the buffer fills, lines are dropped and
+/// `NonBlocking::error_counter()` increments. For an ETL pipeline writing to
+/// container stdout this is the right trade-off (we trust metrics over logs
+/// at saturation). Switch to `lossy(false)` via a custom builder if you need
+/// strict guarantees, at the cost of producer back-pressure.
+pub fn init_tracing(service: &str) -> tracing_appender::non_blocking::WorkerGuard {
+    let (writer, guard) = tracing_appender::non_blocking(std::io::stdout());
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_writer(writer)
+        .init();
+    info!(service, "tracing initialised (async, non-blocking)");
+    guard
+}

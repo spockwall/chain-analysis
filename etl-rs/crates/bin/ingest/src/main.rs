@@ -223,14 +223,6 @@ enum TargetedMode {
     },
 }
 
-fn install_tracing() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-}
 
 async fn make_writer(
     dry_run: bool,
@@ -262,7 +254,7 @@ async fn make_reporter(
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    install_tracing();
+    let _tracing_guard = etl::observability::init_tracing("ingest");
 
     let metrics_port = std::env::var("METRICS_PORT")
         .ok()
