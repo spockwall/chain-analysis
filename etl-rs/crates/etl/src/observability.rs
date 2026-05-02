@@ -130,31 +130,102 @@ fn describe_metrics() {
 // Tracing
 // ---------------------------------------------------------------------------
 
-/// Initialise async, non-blocking tracing for a binary.
+/// Hold-onto-this handle returned by [`init_tracing`]. Drops the underlying
+/// `WorkerGuard`s when it goes out of scope, which flushes any buffered log
+/// lines.
 ///
-/// Wraps stdout in `tracing_appender::non_blocking` so log writes don't block
-/// the calling tokio task on slow log shippers. Honors `RUST_LOG` (default
-/// `info`).
+/// **Bind to a named variable in `main()`**, never bare `_`:
 ///
-/// **The returned guard MUST be held for the lifetime of `main()`** — bind it
-/// to a named variable (`let _guard = ...`), never to bare `_`. When the
-/// guard drops, the worker thread flushes any buffered lines. Dropping it
-/// early (or with `let _ = ...`) discards in-flight logs silently.
+/// ```ignore
+/// let _logging = etl::observability::init_tracing("worker");   // ✅ flushes on shutdown
+/// let _ = etl::observability::init_tracing("worker");          // ❌ drops immediately, logs lost
+/// ```
+pub struct LoggingHandle {
+    _guards: Vec<tracing_appender::non_blocking::WorkerGuard>,
+}
+
+/// Initialise tracing with three sinks layered together:
 ///
-/// Default mode is **lossy**: when the buffer fills, lines are dropped and
-/// `NonBlocking::error_counter()` increments. For an ETL pipeline writing to
-/// container stdout this is the right trade-off (we trust metrics over logs
-/// at saturation). Switch to `lossy(false)` via a custom builder if you need
-/// strict guarantees, at the cost of producer back-pressure.
-pub fn init_tracing(service: &str) -> tracing_appender::non_blocking::WorkerGuard {
-    let (writer, guard) = tracing_appender::non_blocking(std::io::stdout());
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(writer)
-        .init();
-    info!(service, "tracing initialised (async, non-blocking)");
-    guard
+/// 1. **stdout** (always on) — for `docker logs` / `kubectl logs` / local dev.
+///    Wrapped in `tracing_appender::non_blocking` so the call site doesn't
+///    block on stdout I/O.
+/// 2. **`{LOG_DIR}/{service}.log`** (when `LOG_DIR` env var is set) — daily
+///    rotated full log, all levels honoured by `RUST_LOG`.
+/// 3. **`{LOG_DIR}/{service}.error.log`** (when `LOG_DIR` env var is set) —
+///    daily rotated, `WARN` and above only. Convenient for alerting / triage.
+///
+/// `LOG_DIR` must already exist and be writable; the rolling appender creates
+/// only the per-day file, not the parent directory. In Docker, mount a host
+/// directory or named volume at this path. Set `RUST_LOG=info,etl=debug` (or
+/// similar) to control verbosity; the per-layer filter on the error file is
+/// always at least `WARN`.
+///
+/// All three sinks use the **lossy** non-blocking mode by default — when the
+/// channel fills, lines are dropped silently and `NonBlocking::error_counter()`
+/// increments. For an ETL pipeline writing to container stdout this is the
+/// right trade-off (we trust metrics over logs at saturation).
+pub fn init_tracing(service: &str) -> LoggingHandle {
+    use tracing_subscriber::filter::LevelFilter;
+    use tracing_subscriber::fmt;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::Layer;
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    let mut guards = Vec::new();
+
+    // stdout sink — keep ANSI colours for terminal viewing.
+    let (stdout_writer, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+    guards.push(stdout_guard);
+    let stdout_layer = fmt::layer().with_writer(stdout_writer);
+
+    let log_dir = std::env::var("LOG_DIR").ok().filter(|s| !s.is_empty());
+
+    if let Some(ref dir) = log_dir {
+        // Main file: all levels (subject to global EnvFilter).
+        let main_file = tracing_appender::rolling::daily(dir, format!("{}.log", service));
+        let (main_writer, main_guard) = tracing_appender::non_blocking(main_file);
+        guards.push(main_guard);
+        let main_layer = fmt::layer()
+            .with_writer(main_writer)
+            .with_ansi(false);
+
+        // Error-only file: warn+. Per-layer filter intersects with the global
+        // EnvFilter, so this is "warn or higher AND whatever EnvFilter allows".
+        let err_file = tracing_appender::rolling::daily(dir, format!("{}.error.log", service));
+        let (err_writer, err_guard) = tracing_appender::non_blocking(err_file);
+        guards.push(err_guard);
+        let err_layer = fmt::layer()
+            .with_writer(err_writer)
+            .with_ansi(false)
+            .with_filter(LevelFilter::WARN);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(stdout_layer)
+            .with(main_layer)
+            .with(err_layer)
+            .init();
+
+        info!(
+            service,
+            log_dir = %dir,
+            "tracing initialised (stdout + {service}.log + {service}.error.log, daily rotation)",
+            service = service,
+        );
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(stdout_layer)
+            .init();
+
+        info!(
+            service,
+            "tracing initialised (stdout only; set LOG_DIR for file output)"
+        );
+    }
+
+    LoggingHandle { _guards: guards }
 }
