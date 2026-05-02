@@ -395,3 +395,109 @@ async fn chaos_neo4j_freeze_mid_loop_recovers() {
         "transient outage should not have escalated to DLQ"
     );
 }
+
+// =============================================================================
+// Scenario 4: Poison message (malformed JSON in stream).
+// `decode_messages` filter-maps it out, leaving raw bytes in `raw_by_stream`
+// but nothing parseable. Without the fix in `process_read_batch`, this would
+// hot-loop because pending-first read keeps returning the same orphan and
+// `process_read_batch` early-returns Ok(0,0,0).
+// With the fix: process_read_batch returns Err → worker DLQ ladder kicks in
+// → after max_attempts the raw bytes go to {stream}_dlq and PEL is cleared.
+// =============================================================================
+#[tokio::test]
+#[ignore = "requires Docker; run with --ignored"]
+async fn chaos_poison_message_routes_to_dlq() {
+    common::init_test_tracing();
+    let stack = common::start_stack().await;
+
+    let pg_pool = PgPool::connect(&stack.pg_url).await.expect("pg pool");
+    common::apply_pg_schema(&pg_pool).await;
+
+    // Inject a malformed message BEFORE the loop starts.
+    {
+        let client = redis::Client::open(stack.redis_url.as_str()).expect("redis client");
+        let mut conn = client
+            .get_multiplexed_async_connection()
+            .await
+            .expect("redis conn");
+        let _: String = redis::cmd("XADD")
+            .arg("ingested_txs")
+            .arg("*")
+            .arg("data")
+            .arg("{this is not valid json")
+            .query_async(&mut conn)
+            .await
+            .expect("xadd poison");
+    }
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let redis_url = stack.redis_url.clone();
+    let pg_url = stack.pg_url.clone();
+    let neo4j_uri = stack.neo4j_uri.clone();
+    let neo4j_user = stack.neo4j_user.clone();
+    let neo4j_pass = stack.neo4j_password.clone();
+    let group = "chaos-poison-group".to_string();
+
+    let group_for_loop = group.clone();
+    let loop_handle = tokio::spawn(async move {
+        run_worker_loop_for_test(
+            redis_url,
+            pg_url,
+            neo4j_uri,
+            neo4j_user,
+            neo4j_pass,
+            group_for_loop,
+            "chaos-poison-consumer".to_string(),
+            // Low max_attempts so the test finishes quickly. Parse failures
+            // never recover, so the retry budget is wasted effort — small N
+            // is appropriate.
+            DlqPolicy {
+                max_attempts: 2,
+                dlq_suffix: "_dlq".into(),
+                attempt_ttl_secs: 60,
+            },
+            shutdown_rx,
+            progress_tx,
+        )
+        .await
+    });
+
+    // Wait for the loop to drive the poison batch through retry → DLQ.
+    // Each failed iteration sleeps 200ms, so 2 attempts is ~500ms.
+    let final_stats = wait_for_condition(
+        &mut progress_rx,
+        Duration::from_secs(20),
+        |s| s.dlq_moves > 0,
+    )
+    .await
+    .expect("expected at least one DLQ move within 20s");
+
+    // Give the loop a moment to fully clean up, then shut down.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let _ = shutdown_tx.send(true);
+    let _ = loop_handle.await;
+
+    // PEL should be empty — the DLQ move ACKs the original entries.
+    let pending = common::xpending_total(&stack.redis_url, &group).await;
+    assert_eq!(pending, 0, "poison message should be ACKed after DLQ move");
+
+    // The DLQ should contain the poison entry.
+    let mut conn = redis::Client::open(stack.redis_url.as_str())
+        .unwrap()
+        .get_multiplexed_async_connection()
+        .await
+        .unwrap();
+    let dlq_len = etl::dlq::dlq_len(&mut conn, "ingested_txs_dlq")
+        .await
+        .expect("xlen dlq");
+    assert!(dlq_len > 0, "expected DLQ to contain the poison message; stats={:?}", final_stats);
+
+    assert!(
+        final_stats.batches_err > 0,
+        "expected at least one batch_err (poison parse failure surfaces as Err); stats={:?}",
+        final_stats
+    );
+}
