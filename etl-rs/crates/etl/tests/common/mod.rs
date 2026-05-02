@@ -358,8 +358,17 @@ pub async fn run_worker_loop_for_test(
             _ = shutdown_rx.changed() => break,
         };
 
-        if batch.txs.is_empty() && batch.traces.is_empty() && batch.transfers.is_empty() {
-            // Nothing to do — keep looping but don't spam progress_tx.
+        let raw_total: usize = batch.raw_by_stream.values().map(|v| v.len()).sum();
+        if batch.txs.is_empty()
+            && batch.traces.is_empty()
+            && batch.transfers.is_empty()
+            && raw_total == 0
+        {
+            // Truly empty (BLOCK timed out, nothing in stream). Skip
+            // process_read_batch and don't spam progress_tx.
+            // NOTE: we deliberately DO NOT skip when raw > 0 but parsed == 0
+            // — that's the poison-message case and it must reach
+            // process_read_batch so the Err return triggers the DLQ ladder.
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {}
                 _ = shutdown_rx.changed() => break,
