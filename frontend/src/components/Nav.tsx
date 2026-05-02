@@ -111,6 +111,7 @@ export function Nav() {
                             <NavLink
                                 key={tab.to}
                                 to={tab.to}
+                                data-testid={`nav-tab-${tab.label.toLowerCase()}`}
                                 className={({ isActive }) =>
                                     "flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[0.8rem] font-medium transition-all whitespace-nowrap no-underline " +
                                     (isActive

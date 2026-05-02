@@ -1022,11 +1022,17 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
 
                             {/* Stats bar */}
                             <div className="absolute bottom-5 left-5 z-10 flex gap-2">
-                                <span className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500">
+                                <span
+                                    data-testid="graph-stats-entities"
+                                    className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500"
+                                >
                                     <span className="w-[5px] h-[5px] rounded-full bg-blue-500" />
                                     {graphData.total_nodes} entities
                                 </span>
-                                <span className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500">
+                                <span
+                                    data-testid="graph-stats-transactions"
+                                    className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500"
+                                >
                                     <span className="w-[5px] h-[5px] rounded-full bg-emerald-500" />
                                     {graphData.total_transactions.toLocaleString()} transactions
                                     {selectedNode?.transaction_count != null &&
@@ -1039,6 +1045,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                                 </span>
                                 {graphData.total_transactions === 0 && graphData.center_address && (
                                     <button
+                                        data-testid="fetch-address"
                                         className="inline-flex items-center gap-[5px] px-3 py-[5px] bg-blue-600 text-white backdrop-blur-sm rounded-full text-[0.7rem] font-semibold border-none cursor-pointer transition-colors hover:bg-blue-700 disabled:opacity-45"
                                         onClick={() => handleIngestAndLoad(graphData.center_address)}
                                         disabled={loading}
