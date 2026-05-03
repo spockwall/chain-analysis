@@ -254,7 +254,7 @@ async fn make_reporter(
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    let _tracing_guard = etl::observability::init_tracing("ingest");
+    let _tracing_guard = etl::logging::init_tracing("ingest");
 
     let metrics_port = std::env::var("METRICS_PORT")
         .ok()

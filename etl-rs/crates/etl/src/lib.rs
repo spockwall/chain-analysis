@@ -6,6 +6,7 @@
 //! Layout:
 //!
 //! - [`config`]         — env-driven configuration (one struct per subsystem)
+//! - [`logging`]        — async tracing setup (stdout + rotating log files)
 //! - [`observability`]  — Prometheus exporter + metric-name constants
 //! - [`types`]          — serde value types shared across tiers
 //! - [`sources`]        — `BlockSource` trait + Etherscan / Alchemy / mock impls
@@ -18,6 +19,7 @@ pub mod config;
 pub mod consumer;
 pub mod dlq;
 pub mod ingest;
+pub mod logging;
 pub mod observability;
 pub mod pipeline;
 pub mod sinks;

@@ -17,7 +17,7 @@ use tracing::{error, info};
 async fn main() -> Result<()> {
     color_eyre::install()?;
     // Hold guard until main() returns so buffered logs flush on shutdown.
-    let _tracing_guard = etl::observability::init_tracing("worker");
+    let _tracing_guard = etl::logging::init_tracing("worker");
 
     let metrics_port = std::env::var("METRICS_PORT")
         .ok()
