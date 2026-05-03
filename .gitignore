@@ -247,3 +247,7 @@ minio/
 frontend/certs/selfsigned.crt
 frontend/certs/selfsigned.key
 AGENTS.md
+
+# tracing-appender daily-rotated log files (default LOG_DIR=./logs)
+logs/
+*.log.*

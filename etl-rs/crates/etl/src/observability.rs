@@ -144,21 +144,32 @@ pub struct LoggingHandle {
     _guards: Vec<tracing_appender::non_blocking::WorkerGuard>,
 }
 
+/// Default log directory used when `LOG_DIR` env var isn't set. Created on
+/// startup if it doesn't exist. In Docker you'll typically override via
+/// `LOG_DIR=/var/log/chain-analysis` + a volume mount; for local dev the
+/// default is fine and zero-config.
+pub const DEFAULT_LOG_DIR: &str = "./logs";
+
 /// Initialise tracing with three sinks layered together:
 ///
 /// 1. **stdout** (always on) — for `docker logs` / `kubectl logs` / local dev.
 ///    Wrapped in `tracing_appender::non_blocking` so the call site doesn't
 ///    block on stdout I/O.
-/// 2. **`{LOG_DIR}/{service}.log`** (when `LOG_DIR` env var is set) — daily
-///    rotated full log, all levels honoured by `RUST_LOG`.
-/// 3. **`{LOG_DIR}/{service}.error.log`** (when `LOG_DIR` env var is set) —
-///    daily rotated, `WARN` and above only. Convenient for alerting / triage.
+/// 2. **`{log_dir}/{service}.log`** — daily rotated full log, all levels
+///    honoured by `RUST_LOG`.
+/// 3. **`{log_dir}/{service}.error.log`** — daily rotated, `WARN` and above
+///    only. Convenient for alerting / triage.
 ///
-/// `LOG_DIR` must already exist and be writable; the rolling appender creates
-/// only the per-day file, not the parent directory. In Docker, mount a host
-/// directory or named volume at this path. Set `RUST_LOG=info,etl=debug` (or
-/// similar) to control verbosity; the per-layer filter on the error file is
-/// always at least `WARN`.
+/// `log_dir` resolves to (in order):
+///   1. `$LOG_DIR` env var, if set and non-empty
+///   2. Otherwise [`DEFAULT_LOG_DIR`] (`./logs/`)
+///
+/// The directory is `mkdir -p`'d on first use. If creation fails (e.g.
+/// read-only filesystem, permission denied), file output silently falls back
+/// to stdout-only and a warning is logged to stdout.
+///
+/// Set `RUST_LOG=info,etl=debug` (or similar) to control verbosity; the
+/// per-layer filter on the error file is always at least `WARN`.
 ///
 /// All three sinks use the **lossy** non-blocking mode by default — when the
 /// channel fills, lines are dropped silently and `NonBlocking::error_counter()`
@@ -181,20 +192,35 @@ pub fn init_tracing(service: &str) -> LoggingHandle {
     guards.push(stdout_guard);
     let stdout_layer = fmt::layer().with_writer(stdout_writer);
 
-    let log_dir = std::env::var("LOG_DIR").ok().filter(|s| !s.is_empty());
+    // Resolve the log dir and try to create it. On failure we fall back to
+    // stdout-only so a misconfigured environment doesn't take the binary
+    // down — log_init shouldn't be a startup hazard.
+    let log_dir = std::env::var("LOG_DIR")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_LOG_DIR.to_string());
+    let dir_ready = match std::fs::create_dir_all(&log_dir) {
+        Ok(_) => true,
+        Err(e) => {
+            // Use eprintln! because the subscriber isn't installed yet.
+            eprintln!(
+                "warn: could not create log dir {:?}: {}; falling back to stdout-only",
+                log_dir, e
+            );
+            false
+        }
+    };
 
-    if let Some(ref dir) = log_dir {
-        // Main file: all levels (subject to global EnvFilter).
-        let main_file = tracing_appender::rolling::daily(dir, format!("{}.log", service));
+    if dir_ready {
+        let main_file = tracing_appender::rolling::daily(&log_dir, format!("{}.log", service));
         let (main_writer, main_guard) = tracing_appender::non_blocking(main_file);
         guards.push(main_guard);
         let main_layer = fmt::layer()
             .with_writer(main_writer)
             .with_ansi(false);
 
-        // Error-only file: warn+. Per-layer filter intersects with the global
-        // EnvFilter, so this is "warn or higher AND whatever EnvFilter allows".
-        let err_file = tracing_appender::rolling::daily(dir, format!("{}.error.log", service));
+        let err_file =
+            tracing_appender::rolling::daily(&log_dir, format!("{}.error.log", service));
         let (err_writer, err_guard) = tracing_appender::non_blocking(err_file);
         guards.push(err_guard);
         let err_layer = fmt::layer()
@@ -211,7 +237,7 @@ pub fn init_tracing(service: &str) -> LoggingHandle {
 
         info!(
             service,
-            log_dir = %dir,
+            log_dir = %log_dir,
             "tracing initialised (stdout + {service}.log + {service}.error.log, daily rotation)",
             service = service,
         );
@@ -221,10 +247,7 @@ pub fn init_tracing(service: &str) -> LoggingHandle {
             .with(stdout_layer)
             .init();
 
-        info!(
-            service,
-            "tracing initialised (stdout only; set LOG_DIR for file output)"
-        );
+        info!(service, "tracing initialised (stdout only; log dir unavailable)");
     }
 
     LoggingHandle { _guards: guards }
