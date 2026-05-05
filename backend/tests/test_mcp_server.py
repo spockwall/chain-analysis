@@ -3,9 +3,11 @@
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 import api.deps as deps
-from agent_mcp.server import chain_analysis_mcp
+import agent_mcp.server as mcp_server
+import api.main as api_main
 from api.main import create_app
 from core.ports.graph_db import Node
 
@@ -67,6 +69,9 @@ class FakeRelationalDB:
             ]
         return []
 
+    def session(self):
+        raise AssertionError("Test should stub token validation before opening a DB session")
+
 
 class FakeRedis:
     """Capture LPUSH payloads written by queueing tools."""
@@ -93,6 +98,18 @@ def _structured_result(result: Any) -> Any:
     return result
 
 
+def _reset_mcp_http_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the singleton Streamable HTTP session manager for isolated tests."""
+    mcp_server.chain_analysis_mcp._session_manager = None
+    monkeypatch.setattr(
+        api_main,
+        "chain_analysis_mcp_http_app",
+        mcp_server.AuthenticatedMCPHTTPApp(
+            mcp_server.chain_analysis_mcp.streamable_http_app()
+        ),
+    )
+
+
 @pytest.fixture
 def fake_adapters(monkeypatch: pytest.MonkeyPatch) -> FakeGraphDB:
     """Install fake adapters so MCP tools can run without real services."""
@@ -108,7 +125,7 @@ def fake_adapters(monkeypatch: pytest.MonkeyPatch) -> FakeGraphDB:
 @pytest.mark.asyncio
 async def test_mcp_lists_expected_tools(fake_adapters: FakeGraphDB) -> None:
     """The MCP server should register the main analysis and mutation tools."""
-    tools = await chain_analysis_mcp.list_tools()
+    tools = await mcp_server.chain_analysis_mcp.list_tools()
     tool_names = {tool.name for tool in tools}
 
     assert "get_entity" in tool_names
@@ -123,7 +140,7 @@ async def test_mcp_get_entity_tool_returns_structured_output(
     fake_adapters: FakeGraphDB,
 ) -> None:
     """`get_entity` should delegate to the existing entity route logic."""
-    result = await chain_analysis_mcp.call_tool(
+    result = await mcp_server.chain_analysis_mcp.call_tool(
         "get_entity",
         {"address": fake_adapters.node.address},
     )
@@ -141,7 +158,7 @@ async def test_mcp_upsert_entity_tool_writes_graph_node(
     """`upsert_entity` should validate input and pass a node to the graph adapter."""
     new_address = "0x742d35cc6634c0532925a3b844bc9e7595f0beb0"
 
-    result = await chain_analysis_mcp.call_tool(
+    result = await mcp_server.chain_analysis_mcp.call_tool(
         "upsert_entity",
         {
             "address": new_address,
@@ -165,7 +182,7 @@ async def test_mcp_ingest_address_queues_targeted_fetch(
     fake_adapters: FakeGraphDB,
 ) -> None:
     """`ingest_address` should create an ingestion run and push queue work."""
-    result = await chain_analysis_mcp.call_tool(
+    result = await mcp_server.chain_analysis_mcp.call_tool(
         "ingest_address",
         {"address": fake_adapters.node.address},
     )
@@ -185,3 +202,64 @@ def test_fastapi_app_mounts_mcp_route() -> None:
     paths = {route.path for route in app.routes}
 
     assert "/mcp" in paths
+
+
+def test_mcp_http_requires_bearer_token(fake_adapters: FakeGraphDB) -> None:
+    """Mounted MCP HTTP transport should reject unauthenticated requests."""
+    async def fake_init_adapters(settings: Any) -> None:
+        return None
+
+    async def fake_close_adapters() -> None:
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(api_main, "init_adapters", fake_init_adapters)
+    monkeypatch.setattr(api_main, "close_adapters", fake_close_adapters)
+    _reset_mcp_http_app(monkeypatch)
+
+    app = create_app()
+    with TestClient(app, base_url="http://localhost:8000") as client:
+        response = client.get("/mcp/")
+
+    monkeypatch.undo()
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Not authenticated"}
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_mcp_http_accepts_existing_auth_token(
+    fake_adapters: FakeGraphDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mounted MCP HTTP transport should accept the existing bearer auth scheme."""
+    async def fake_init_adapters(settings: Any) -> None:
+        return None
+
+    async def fake_close_adapters() -> None:
+        return None
+
+    monkeypatch.setattr(api_main, "init_adapters", fake_init_adapters)
+    monkeypatch.setattr(api_main, "close_adapters", fake_close_adapters)
+    _reset_mcp_http_app(monkeypatch)
+
+    app = create_app()
+
+    async def fake_resolve_current_user_from_token(
+        token: str,
+        db: Any,
+        settings: Any,
+    ) -> object:
+        assert token == "valid-token"
+        return object()
+
+    monkeypatch.setattr(mcp_server, "resolve_current_user_from_token", fake_resolve_current_user_from_token)
+
+    with TestClient(app, base_url="http://localhost:8000") as client:
+        response = client.get(
+            "/mcp/",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+    assert response.status_code == 406
+    assert "mcp-session-id" in response.headers

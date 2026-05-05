@@ -13,6 +13,8 @@ from sqlalchemy.exc import IntegrityError
 
 from api.deps import RelationalDBDep, SettingsDep
 from api.models.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from core.config import Settings
+from core.ports import RelationalDatabase
 from db.models import User, UserRole
 from services.auth import (
     create_access_token,
@@ -53,9 +55,18 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    return await resolve_current_user_from_token(credentials.credentials, db, settings)
+
+
+async def resolve_current_user_from_token(
+    token: str,
+    db: RelationalDatabase,
+    settings: Settings,
+) -> User:
+    """Validate a bearer token and return the corresponding active user."""
     try:
         payload = decode_access_token(
-            credentials.credentials,
+            token,
             settings.jwt_secret_key,
             settings.jwt_algorithm,
         )
@@ -76,6 +87,7 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return user

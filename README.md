@@ -118,6 +118,11 @@ The backend now exposes an MCP server in two forms:
 - Streamable HTTP: `http://localhost:8000/mcp`
 - Stdio: `cd backend && pip install -e . && chain-analysis-mcp`
 
+Authentication:
+
+- Streamable HTTP reuses the existing API bearer auth. First obtain a JWT from `/api/auth/login` or `/api/auth/register`, then send `Authorization: Bearer <token>` with MCP HTTP requests.
+- Stdio does not use HTTP bearer auth; it relies on local process access instead.
+
 Typical agent/client configuration examples:
 
 ```json
@@ -135,7 +140,10 @@ Typical agent/client configuration examples:
   "mcpServers": {
     "chain-analysis": {
       "transport": "http",
-      "url": "http://localhost:8000/mcp"
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
     }
   }
 }

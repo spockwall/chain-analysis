@@ -60,6 +60,8 @@ The backend includes an MCP server so agents can call Chain-Analysis tools direc
 
 - Endpoint: `http://localhost:8000/mcp`
 - Mounted inside the existing FastAPI app
+- Requires the existing API bearer token in the `Authorization: Bearer <token>` header
+- Obtain a token from `/api/auth/login` or `/api/auth/register`
 
 ### Stdio
 
@@ -70,6 +72,7 @@ chain-analysis-mcp
 ```
 
 This exposes the same tool set over stdio for local MCP clients.
+Stdio does not use the HTTP bearer token flow.
 
 ## Project Structure
 

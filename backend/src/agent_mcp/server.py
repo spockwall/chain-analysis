@@ -9,7 +9,10 @@ from typing import Any
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.deps import (
     adapters_are_initialized,
@@ -32,6 +35,7 @@ from api.models.entity import (
     RiskLevel,
     TransactionUpsertRequest,
 )
+from api.routes.auth import resolve_current_user_from_token
 from api.routes import entities as entity_routes
 from api.routes import features as feature_routes
 from api.routes import groups as group_routes
@@ -44,6 +48,47 @@ from api.routes import stats as stats_routes
 from core.config import get_settings
 from libs import logger
 from services import EntityService, LabelService
+
+
+class AuthenticatedMCPHTTPApp:
+    """ASGI wrapper that requires an existing Chain-Analysis bearer token."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        request = Request(scope)
+        authorization = request.headers.get("authorization")
+        if authorization is None or not authorization.lower().startswith("bearer "):
+            response = JSONResponse(
+                {"detail": "Not authenticated"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await response(scope, receive, send)
+            return
+
+        token = authorization[7:].strip()
+        try:
+            await resolve_current_user_from_token(
+                token,
+                get_relational_db(),
+                get_settings(),
+            )
+        except HTTPException as exc:
+            response = JSONResponse(
+                {"detail": exc.detail},
+                status_code=exc.status_code,
+                headers=exc.headers,
+            )
+            await response(scope, receive, send)
+            return
+
+        await self._app(scope, receive, send)
 
 
 def _jsonify(value: Any) -> Any:
@@ -133,6 +178,8 @@ def get_server_guide() -> str:
     """Describe the most important Chain-Analysis tool semantics."""
     return (
         "Chain-Analysis MCP exposes entity, transaction, graph, group, feature, and labeling tools.\n"
+        "- Streamable HTTP requires the existing API bearer token in the Authorization header.\n"
+        "- Stdio does not use the HTTP bearer token flow.\n"
         "- Addresses must be 0x-prefixed 42-character Ethereum addresses.\n"
         "- Transaction hashes must be 0x-prefixed 66-character hashes.\n"
         "- `get_entity_neighbors` currently reflects the backend neighbor implementation, "
@@ -740,7 +787,9 @@ async def create_annotation(
     return await _invoke(label_routes.create_annotation, body, get_relational_db())
 
 
-chain_analysis_mcp_http_app = chain_analysis_mcp.streamable_http_app()
+chain_analysis_mcp_http_app = AuthenticatedMCPHTTPApp(
+    chain_analysis_mcp.streamable_http_app()
+)
 
 
 def main() -> None:
