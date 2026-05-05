@@ -2,11 +2,10 @@
 FastAPI dependency injection for service adapters.
 """
 
+from fastapi import Depends
 from typing import Annotated
 
-from fastapi import Depends
-
-from core.adapters import Neo4jAdapter, PostgresAdapter, RedisStreamsAdapter
+from core.adapters import *
 from core.config import Settings, get_settings
 from core.ports import GraphDatabase, MessageQueue, RelationalDatabase
 
@@ -20,6 +19,7 @@ async def init_adapters(settings: Settings) -> None:
     """Initialize all adapter instances at application startup."""
     global _neo4j_adapter, _postgres_adapter, _redis_adapter
 
+    # Neo4j
     _neo4j_adapter = Neo4jAdapter(
         uri=settings.neo4j_uri,
         user=settings.neo4j_user,
@@ -27,11 +27,13 @@ async def init_adapters(settings: Settings) -> None:
     )
     await _neo4j_adapter.connect()
 
+    # PostgreSQL
     _postgres_adapter = PostgresAdapter(
         database_url=settings.database_url,
     )
     await _postgres_adapter.connect()
 
+    # Redis
     _redis_adapter = RedisStreamsAdapter(
         redis_url=settings.redis_url,
     )

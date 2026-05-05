@@ -5,6 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select, text
 
 from api.deps import MessageQueueDep, RelationalDBDep, SettingsDep
 from api.models.entity import (
@@ -13,6 +14,7 @@ from api.models.entity import (
     LabelTaskCreate,
     LabelTaskResponse,
 )
+from db.models import Annotation, LabelTask, TaskStatus
 
 router = APIRouter(prefix="/labels", tags=["labels"])
 
@@ -145,7 +147,7 @@ async def create_label_task(
     result = await db.execute(
         """
         INSERT INTO label_tasks (entity_address, title, description, priority, context)
-        VALUES (:address, :title, :description, :priority, CAST(:context AS JSON))
+        VALUES (:address, :title, :description, :priority, :context)
         RETURNING id, entity_address, status, priority, title, description,
                   assignee_id, created_at, updated_at
         """,
@@ -154,11 +156,7 @@ async def create_label_task(
             "title": task.title,
             "description": task.description,
             "priority": task.priority,
-            "context": (
-                json.dumps(task.context)
-                if task.context is not None
-                else None
-            ),
+            "context": task.context,
         },
     )
 
@@ -316,7 +314,7 @@ async def create_annotation(
         )
         VALUES (
             :task_id, NULL, :address, :entity_type,
-            :risk_level, CAST(:labels AS JSON), :notes, CAST(:evidence AS JSON), :confidence
+            :risk_level, :labels, :notes, :evidence, :confidence
         )
         RETURNING id, task_id, user_id, entity_address, entity_type,
                   risk_level, labels, notes, confidence, created_at
@@ -328,17 +326,9 @@ async def create_annotation(
                 annotation.entity_type.value if annotation.entity_type else None
             ),
             "risk_level": annotation.risk_level.value,
-            "labels": (
-                json.dumps(annotation.labels)
-                if annotation.labels is not None
-                else None
-            ),
+            "labels": annotation.labels,
             "notes": annotation.notes,
-            "evidence": (
-                json.dumps(annotation.evidence)
-                if annotation.evidence is not None
-                else None
-            ),
+            "evidence": annotation.evidence,
             "confidence": annotation.confidence,
         },
     )

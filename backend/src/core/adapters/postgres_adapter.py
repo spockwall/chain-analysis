@@ -85,17 +85,6 @@ class PostgresAdapter:
         self, query: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         """Execute a raw SQL query and return results."""
-        statement = query.lstrip().split(None, 1)[0].upper() if query.strip() else ""
-        should_commit = statement in {
-            "INSERT",
-            "UPDATE",
-            "DELETE",
-            "CREATE",
-            "ALTER",
-            "DROP",
-            "MERGE",
-        }
-
         async with self.session() as session:
             result = await session.execute(text(query), params or {})
             rows: list[dict[str, Any]] = []
@@ -103,9 +92,9 @@ class PostgresAdapter:
                 fetched = result.fetchall()
                 columns = result.keys()
                 rows = [dict(zip(columns, row)) for row in fetched]
-
-            if should_commit:
-                await session.commit()
+            # Always commit — INSERT ... RETURNING reports returns_rows=True,
+            # so skipping commit on that branch silently rolls the write back.
+            await session.commit()
             return rows
 
     async def execute_many(self, query: str, params_list: list[dict[str, Any]]) -> int:

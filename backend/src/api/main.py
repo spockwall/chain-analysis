@@ -92,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(pipeline_router, prefix="/api")
     app.include_router(stats_router, prefix="/api")
     app.include_router(groups_router, prefix="/api")
+    app.include_router(pipeline_router, prefix="/api")
     app.include_router(ingestion_router, prefix="/api")
     app.include_router(detections_router, prefix="/api")
     app.mount("/mcp", chain_analysis_mcp_http_app)

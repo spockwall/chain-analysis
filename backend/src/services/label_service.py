@@ -2,7 +2,6 @@
 Label service for managing labeling workflows.
 """
 
-import json
 from datetime import datetime
 from typing import Any
 
@@ -43,6 +42,9 @@ class LabelService:
             Created task with context
         """
         address = entity_address.lower()
+
+        # Get entity data
+        node = await self._graph_db.get_node(address)
 
         # Get neighborhood if requested
         context: dict[str, Any] = {}
@@ -99,7 +101,7 @@ class LabelService:
         result = await self._relational_db.execute(
             """
             INSERT INTO label_tasks (entity_address, title, description, priority, context)
-            VALUES (:address, :title, :description, :priority, CAST(:context AS JSON))
+            VALUES (:address, :title, :description, :priority, :context)
             RETURNING id, entity_address, status, priority, title, description,
                       assignee_id, created_at, updated_at
             """,
@@ -108,7 +110,7 @@ class LabelService:
                 "title": title or f"Label entity {address[:10]}...",
                 "description": description,
                 "priority": priority,
-                "context": json.dumps(context),
+                "context": context,
             },
         )
 
@@ -208,7 +210,7 @@ class LabelService:
             )
             VALUES (
                 :task_id, :user_id, :address, :entity_type,
-                :risk_level, CAST(:labels AS JSON), :notes, :confidence
+                :risk_level, :labels, :notes, :confidence
             )
             RETURNING id, task_id, user_id, entity_address, entity_type,
                       risk_level, labels, notes, confidence, created_at
@@ -219,7 +221,7 @@ class LabelService:
                 "address": address,
                 "entity_type": entity_type,
                 "risk_level": risk_level,
-                "labels": json.dumps(labels) if labels is not None else None,
+                "labels": labels,
                 "notes": notes,
                 "confidence": confidence,
             },
