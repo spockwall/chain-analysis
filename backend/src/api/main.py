@@ -46,15 +46,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("adapter_initialization_failed", error=str(e))
         raise
 
-    try:
-        async with chain_analysis_mcp.session_manager.run():
-            logger.info("mcp_session_manager_started")
-            yield
-    finally:
-        # Shutdown
-        logger.info("shutting_down_application")
-        await close_adapters()
-        logger.info("adapters_closed")
+    async with chain_analysis_mcp.session_manager.run():
+        logger.info("mcp_session_manager_started")
+        yield
+
+    # Shutdown
+    logger.info("shutting_down_application")
+    await close_adapters()
+    logger.info("adapters_closed")
 
 
 def create_app() -> FastAPI:
