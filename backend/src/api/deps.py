@@ -42,27 +42,12 @@ async def init_adapters(settings: Settings) -> None:
 
 async def close_adapters() -> None:
     """Close all adapter instances at application shutdown."""
-    global _neo4j_adapter, _postgres_adapter, _redis_adapter
-
     if _neo4j_adapter:
         await _neo4j_adapter.close()
     if _postgres_adapter:
         await _postgres_adapter.close()
     if _redis_adapter:
         await _redis_adapter.close()
-
-    _neo4j_adapter = None
-    _postgres_adapter = None
-    _redis_adapter = None
-
-
-def adapters_are_initialized() -> bool:
-    """Whether all runtime adapters have been initialized."""
-    return (
-        _neo4j_adapter is not None
-        and _postgres_adapter is not None
-        and _redis_adapter is not None
-    )
 
 
 def get_graph_db() -> GraphDatabase:

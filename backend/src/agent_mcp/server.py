@@ -10,12 +10,12 @@ from typing import Any
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from jose import JWTError
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.deps import (
-    adapters_are_initialized,
     close_adapters,
     get_graph_db,
     get_message_queue,
@@ -35,7 +35,6 @@ from api.models.entity import (
     RiskLevel,
     TransactionUpsertRequest,
 )
-from api.routes.auth import resolve_current_user_from_token
 from api.routes import entities as entity_routes
 from api.routes import features as feature_routes
 from api.routes import groups as group_routes
@@ -46,8 +45,10 @@ from api.routes import pipeline as pipeline_routes
 from api.routes import detections as detection_routes
 from api.routes import stats as stats_routes
 from core.config import get_settings
+from db.models import User
 from libs import logger
 from services import EntityService, LabelService
+from services.auth import decode_access_token
 
 
 class AuthenticatedMCPHTTPApp:
@@ -89,6 +90,51 @@ class AuthenticatedMCPHTTPApp:
             return
 
         await self._app(scope, receive, send)
+
+
+def _adapters_are_initialized() -> bool:
+    """Return whether the shared runtime adapters are already available."""
+    try:
+        get_graph_db()
+        get_relational_db()
+        get_message_queue()
+    except RuntimeError:
+        return False
+    return True
+
+
+async def resolve_current_user_from_token(
+    token: str,
+    db: Any,
+    settings: Any,
+) -> User:
+    """Validate a bearer token for MCP requests without changing API auth behavior."""
+    try:
+        payload = decode_access_token(
+            token,
+            settings.jwt_secret_key,
+            settings.jwt_algorithm,
+        )
+        user_id: str | None = payload.get("sub")
+        if user_id is None:
+            raise ValueError("missing sub")
+    except (JWTError, ValueError):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    async with db.session() as session:
+        user = await session.get(User, int(user_id))
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail="User not found or inactive",
+        )
+
+    return user
 
 
 def _jsonify(value: Any) -> Any:
@@ -148,7 +194,7 @@ def _label_service() -> LabelService:
 async def _mcp_lifespan(_server: FastMCP) -> AsyncIterator[None]:
     owns_adapters = False
 
-    if not adapters_are_initialized():
+    if not _adapters_are_initialized():
         await init_adapters(get_settings())
         owns_adapters = True
         logger.info("mcp_adapters_initialized")
