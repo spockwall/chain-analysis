@@ -71,7 +71,12 @@ The production machine must have a `.env` file in `DEPLOY_PATH`. The deploy scri
 - `CLICKHOUSE_USER`
 - `CLICKHOUSE_PASSWORD`
 - `JWT_SECRET_KEY`
-- `ETHERSCAN_API_KEY`
+
+Provider credentials depend on `INGEST_SOURCE`:
+
+- unset or `etherscan`: `ETHERSCAN_API_KEY` is required
+- `alchemy`: `ALCHEMY_API_KEY` is required
+- `mock`: no live provider key is required
 
 ## Rollback
 

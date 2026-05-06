@@ -145,6 +145,8 @@ ENV/
 env.bak/
 venv.bak/
 .claude/ 
+.codex/
+.codex
 
 # Local compose-only secrets
 compose/secrets.dev.env

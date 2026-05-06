@@ -15,7 +15,6 @@ REQUIRED_ENV_VARS=(
   CLICKHOUSE_USER
   CLICKHOUSE_PASSWORD
   JWT_SECRET_KEY
-  ETHERSCAN_API_KEY
 )
 
 log() {
@@ -74,7 +73,7 @@ require_env_not_default() {
   value="$(get_env_file_value "$name")" || fail "missing required variable in .env: $name"
 
   case "$value" in
-    "password123"|"postgres123"|"redis123"|"clickhouse123"|"change-me-in-production"|"change-me-in-production-use-a-long-random-secret"|"your_etherscan_api_key_here"|"<required-in-prod>")
+    "password123"|"postgres123"|"redis123"|"clickhouse123"|"change-me-in-production"|"change-me-in-production-use-a-long-random-secret"|"your_etherscan_api_key_here"|"your_alchemy_api_key_here"|"<required-in-prod>")
       fail "unsafe default value detected for $name in .env"
       ;;
   esac
@@ -130,6 +129,31 @@ for name in "${REQUIRED_ENV_VARS[@]}"; do
   require_env_file_value "$name"
   require_env_not_default "$name"
 done
+
+ingest_source="$(get_env_file_value INGEST_SOURCE || true)"
+ingest_source="${ingest_source:-}"
+etherscan_api_key="$(get_env_file_value ETHERSCAN_API_KEY || true)"
+alchemy_api_key="$(get_env_file_value ALCHEMY_API_KEY || true)"
+
+case "$ingest_source" in
+  ""|"etherscan")
+    if [ -z "$etherscan_api_key" ]; then
+      fail "ETHERSCAN_API_KEY is required when INGEST_SOURCE is unset or etherscan"
+    fi
+    require_env_not_default ETHERSCAN_API_KEY
+    ;;
+  "alchemy")
+    if [ -z "$alchemy_api_key" ]; then
+      fail "ALCHEMY_API_KEY is required when INGEST_SOURCE=alchemy"
+    fi
+    require_env_not_default ALCHEMY_API_KEY
+    ;;
+  "mock")
+    ;;
+  *)
+    fail "INGEST_SOURCE must be etherscan, alchemy, mock, or empty"
+    ;;
+esac
 
 previous_commit="$(git rev-parse --short HEAD)"
 log "previous commit: ${previous_commit}"

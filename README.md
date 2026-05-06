@@ -45,6 +45,7 @@ Chain Analysis models blockchain activity as a property graph. Analysts can expl
 ```bash
 git clone <repo>
 cd chain-analysis
+cp compose/secrets.dev.env.example compose/secrets.dev.env
 docker compose up -d
 ```
 
@@ -72,7 +73,7 @@ On first start the backend automatically:
 
 Every operator tool above also appears as a tile on the in-app **Dashboard**.
 
-Default Neo4j credentials: `neo4j` / `password123`.
+Default local Neo4j credentials: `neo4j` / `changeme`.
 
 ### Rebuild after code changes
 
@@ -278,6 +279,11 @@ provisioning + dashboard JSON lives in `compose/grafana/`.
 See `etl-rs/README.md` for the full metric catalog.
 
 ## Environment Variables
+
+For Docker Compose, copy `compose/secrets.dev.env.example` to
+`compose/secrets.dev.env` before starting services. The real
+`compose/secrets.dev.env` file is ignored by Git so each developer can keep
+local secrets out of version control.
 
 Copy `.env.example` to `.env` for non-Docker deployments. Core keys:
 

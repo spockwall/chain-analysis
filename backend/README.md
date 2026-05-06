@@ -12,6 +12,7 @@ FastAPI backend for the Chain-Analysis blockchain AML platform.
 ### 1. Start Infrastructure Services
 
 ```bash
+cp compose/secrets.dev.env.example compose/secrets.dev.env
 docker compose up -d neo4j postgres redis minio minio-init
 ```
 
@@ -43,6 +44,7 @@ uvicorn src.api.main:app --reload --port 8000
 ## Running with Docker
 
 ```bash
+cp compose/secrets.dev.env.example compose/secrets.dev.env
 docker compose up -d backend
 ```
 
