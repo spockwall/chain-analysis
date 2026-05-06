@@ -20,7 +20,9 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
+      - INGEST_SOURCE=${INGEST_SOURCE:-}
     depends_on:
       neo4j:
         condition: service_healthy

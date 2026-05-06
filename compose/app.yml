@@ -21,7 +21,6 @@ services:
       - POSTGRES_DB=chain_analysis
       - POSTGRES_USER=postgres
       - REDIS_URL=redis://redis:6379
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
     depends_on:
       neo4j:
         condition: service_healthy

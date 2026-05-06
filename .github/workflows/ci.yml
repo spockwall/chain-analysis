@@ -317,6 +317,8 @@ jobs:
           CLICKHOUSE_PASSWORD=ci-clickhouse-password
           JWT_SECRET_KEY=ci-jwt-secret
           ETHERSCAN_API_KEY=ci-etherscan-key
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=etherscan
           EOF
           docker compose --env-file "$env_file" -f docker-compose.production.yml config --quiet
 
