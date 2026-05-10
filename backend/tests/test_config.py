@@ -1,9 +1,5 @@
 """Tests for configuration module."""
 
-import os
-
-import pytest
-
 from src.core.config import Settings, get_settings
 
 
