@@ -1,5 +1,8 @@
 /**
  * API client for Chain-Analysis backend.
+ * 
+ * Token is stored in an httpOnly cookie automatically managed by the browser.
+ * No manual token management required.
  */
 
 import type {
@@ -8,7 +11,6 @@ import type {
     AdminUserCreateRequest,
     AdminUserListResponse,
     AdminUserUpdateRequest,
-    AuthResponse,
     EntityResponse,
     GroupCreateRequest,
     GroupDetailResponse,
@@ -37,20 +39,6 @@ import type {
 
 const API_BASE = "/api";
 
-const TOKEN_KEY = "ca_access_token";
-
-export function getStoredToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setStoredToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearStoredToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
-}
-
 class ApiError extends Error {
     constructor(
         message: string,
@@ -63,13 +51,12 @@ class ApiError extends Error {
 
 async function request<T>(endpoint: string, options: RequestInit = {}, noContent = false): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
-    const token = getStoredToken();
 
     const response = await fetch(url, {
         ...options,
+        credentials: "include",  // Include httpOnly cookies in all requests
         headers: {
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...options.headers,
         },
     });
@@ -85,18 +72,22 @@ async function request<T>(endpoint: string, options: RequestInit = {}, noContent
 
 // Auth endpoints
 
-export async function login(body: LoginRequest): Promise<AuthResponse> {
-    return request<AuthResponse>("/auth/login", {
+export async function login(body: LoginRequest): Promise<UserResponse> {
+    return request<UserResponse>("/auth/login", {
         method: "POST",
         body: JSON.stringify(body),
     });
 }
 
-export async function register(body: RegisterRequest): Promise<AuthResponse> {
-    return request<AuthResponse>("/auth/register", {
+export async function register(body: RegisterRequest): Promise<UserResponse> {
+    return request<UserResponse>("/auth/register", {
         method: "POST",
         body: JSON.stringify(body),
     });
+}
+
+export async function logout(): Promise<void> {
+    return request<void>("/auth/logout", { method: "POST" }, true);
 }
 
 export async function fetchMe(): Promise<UserResponse> {

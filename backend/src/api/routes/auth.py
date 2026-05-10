@@ -5,7 +5,7 @@ Auth API routes plus shared authentication dependencies.
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import select
@@ -31,12 +31,21 @@ _bearer = HTTPBearer(auto_error=False)
 # ---------------------------------------------------------------------------
 
 
-def _make_token(user: User, settings) -> str:
-    return create_access_token(
+def _set_auth_cookie(response: Response, user: User, settings) -> None:
+    """Create and set a JWT auth token as an httpOnly, secure cookie."""
+    token = create_access_token(
         data={"sub": str(user.id), "email": user.email, "role": user.role},
         secret_key=settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        max_age=settings.access_token_expire_minutes * 60,
+        httponly=True,
+        secure=settings.environment == "production",
+        samesite="lax",
     )
 
 
@@ -101,14 +110,15 @@ AdminUserDep = Annotated[User, Depends(require_admin_user)]
 
 
 @router.post(
-    "/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
 )
 async def register(
     body: RegisterRequest,
+    response: Response,
     db: RelationalDBDep,
     settings: SettingsDep,
-) -> TokenResponse:
-    """Create a new user account and return a JWT."""
+) -> UserResponse:
+    """Create a new user account and set an auth cookie."""
     hashed = hash_password(body.password)
     new_user = User(
         username=body.username.strip(),
@@ -126,20 +136,18 @@ async def register(
                 detail="Email or username already registered",
             )
 
-    token = _make_token(new_user, settings)
-    return TokenResponse(
-        access_token=token,
-        user=UserResponse.model_validate(new_user),
-    )
+    _set_auth_cookie(response, new_user, settings)
+    return UserResponse.model_validate(new_user)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=UserResponse)
 async def login(
     body: LoginRequest,
+    response: Response,
     db: RelationalDBDep,
     settings: SettingsDep,
-) -> TokenResponse:
-    """Authenticate with email + password and return a JWT."""
+) -> UserResponse:
+    """Authenticate with email + password and set an auth cookie."""
     async with db.session() as session:
         result = await session.execute(
             select(User).where(User.email == body.email.lower().strip())
@@ -159,11 +167,8 @@ async def login(
             detail="Account is disabled",
         )
 
-    token = _make_token(user, settings)
-    return TokenResponse(
-        access_token=token,
-        user=UserResponse.model_validate(user),
-    )
+    _set_auth_cookie(response, user, settings)
+    return UserResponse.model_validate(user)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -172,3 +177,17 @@ async def get_me(
 ) -> UserResponse:
     """Return the profile of the currently authenticated user."""
     return UserResponse.model_validate(current_user)
+
+
+@router.post("/logout")
+async def logout() -> dict:
+    """Logout and clear the auth cookie."""
+    response = Response(content=b'{"message": "Logged out"}')
+    response.headers["content-type"] = "application/json"
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return response
