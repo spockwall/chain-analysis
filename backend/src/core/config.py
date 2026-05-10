@@ -97,8 +97,17 @@ class Settings(BaseSettings):
     # Auth / JWT
     # =========================================================================
     jwt_secret_key: str = "change-me-in-production-use-a-long-random-secret"
+    jwt_previous_secret_key: str | None = None
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24  # 24 hours
+
+    @property
+    def jwt_validation_secret_keys(self) -> list[str]:
+        """Return the current JWT secret plus any previous secret for rotation."""
+        secret_keys = [self.jwt_secret_key]
+        if self.jwt_previous_secret_key and self.jwt_previous_secret_key != self.jwt_secret_key:
+            secret_keys.append(self.jwt_previous_secret_key)
+        return secret_keys
 
     # =========================================================================
     # API Configuration

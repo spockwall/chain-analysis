@@ -359,6 +359,7 @@ ALCHEMY_API_KEY=
 
 # Auth
 JWT_SECRET_KEY=change-me-in-production
+JWT_PREVIOUS_SECRET_KEY=
 ```
 
 The Rust workers accept additional `INGEST_*`, `PROCESS_*`, `CLICKHOUSE_*`, and `DAGSTER_*` knobs — documented in `etl-rs/README.md`.

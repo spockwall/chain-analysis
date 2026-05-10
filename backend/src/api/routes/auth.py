@@ -56,7 +56,7 @@ async def get_current_user(
     try:
         payload = decode_access_token(
             credentials.credentials,
-            settings.jwt_secret_key,
+            settings.jwt_validation_secret_keys,
             settings.jwt_algorithm,
         )
         user_id: str | None = payload.get("sub")

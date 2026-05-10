@@ -125,6 +125,8 @@ backend/
 | `POSTGRES_USER` | `postgres` | PostgreSQL username |
 | `POSTGRES_PASSWORD` | `postgres123` | PostgreSQL password |
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
+| `JWT_SECRET_KEY` | `change-me-in-production-use-a-long-random-secret` | Current JWT signing secret |
+| `JWT_PREVIOUS_SECRET_KEY` | _empty_ | Optional previous JWT secret accepted during rotation |
 | `MINIO_ENDPOINT` | `localhost:9000` | MinIO endpoint |
 | `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
 | `MINIO_SECRET_KEY` | `minioadmin123` | MinIO secret key |

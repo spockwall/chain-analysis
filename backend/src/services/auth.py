@@ -4,6 +4,7 @@ Authentication service: password hashing (bcrypt) and JWT creation / decoding.
 Pure functions with no FastAPI dependencies — importable by routes and tests.
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -46,12 +47,26 @@ def create_access_token(
     return jwt.encode(to_encode, secret_key, algorithm=algorithm)
 
 
-def decode_access_token(token: str, secret_key: str, algorithm: str) -> dict:
+def decode_access_token(token: str, secret_keys: Sequence[str], algorithm: str) -> dict:
     """Decode and verify a JWT, returning its payload as a dict.
+
+    The token is verified against each secret in *secret_keys* in order, which
+    allows deployments to accept tokens signed with the previous secret during
+    a rotation window.
 
     Raises :class:`jose.JWTError` if the token is invalid or expired.
     """
-    return jwt.decode(token, secret_key, algorithms=[algorithm])
+    last_error: JWTError | None = None
+    for secret_key in secret_keys:
+        try:
+            return jwt.decode(token, secret_key, algorithms=[algorithm])
+        except JWTError as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+
+    raise JWTError("no JWT secrets configured")
 
 
 __all__ = [

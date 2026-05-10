@@ -17,6 +17,10 @@ class TestSettings:
         assert settings.environment == "local"
         assert settings.graph_db_provider == "neo4j"
         assert settings.queue_provider == "redis"
+        assert settings.jwt_previous_secret_key is None
+        assert settings.jwt_validation_secret_keys == [
+            "change-me-in-production-use-a-long-random-secret"
+        ]
 
     def test_database_url_property(self):
         """Test database URL generation."""
@@ -58,6 +62,8 @@ class TestEnvironmentOverrides:
         """Test that environment variables override defaults."""
         monkeypatch.setenv("ENVIRONMENT", "aws")
         monkeypatch.setenv("NEO4J_URI", "bolt://neo4j-aura:7687")
+        monkeypatch.setenv("JWT_SECRET_KEY", "new-secret")
+        monkeypatch.setenv("JWT_PREVIOUS_SECRET_KEY", "old-secret")
 
         # Clear the cached settings
         get_settings.cache_clear()
@@ -65,6 +71,9 @@ class TestEnvironmentOverrides:
         settings = Settings()
         assert settings.environment == "aws"
         assert settings.neo4j_uri == "bolt://neo4j-aura:7687"
+        assert settings.jwt_secret_key == "new-secret"
+        assert settings.jwt_previous_secret_key == "old-secret"
+        assert settings.jwt_validation_secret_keys == ["new-secret", "old-secret"]
 
         # Restore
         get_settings.cache_clear()
