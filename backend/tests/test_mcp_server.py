@@ -204,6 +204,25 @@ def test_fastapi_app_mounts_mcp_route() -> None:
     assert "/mcp" in paths
 
 
+def test_fastapi_app_can_start_mcp_lifespan_repeatedly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each app instance should own a fresh single-use MCP session manager."""
+    async def fake_init_adapters(settings: Any) -> None:
+        return None
+
+    async def fake_close_adapters() -> None:
+        return None
+
+    monkeypatch.setattr(api_main, "init_adapters", fake_init_adapters)
+    monkeypatch.setattr(api_main, "close_adapters", fake_close_adapters)
+
+    for _ in range(3):
+        app = create_app()
+        with TestClient(app, base_url="http://localhost:8000") as client:
+            response = client.get("/mcp/")
+
+        assert response.status_code == 401
+
+
 def test_mcp_http_requires_bearer_token(fake_adapters: FakeGraphDB) -> None:
     """Mounted MCP HTTP transport should reject unauthenticated requests."""
     async def fake_init_adapters(settings: Any) -> None:

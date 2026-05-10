@@ -833,8 +833,17 @@ async def create_annotation(
     return await _invoke(label_routes.create_annotation, body, get_relational_db())
 
 
-chain_analysis_mcp_http_app = AuthenticatedMCPHTTPApp(
-    chain_analysis_mcp.streamable_http_app()
+def create_chain_analysis_mcp_http_app() -> tuple[AuthenticatedMCPHTTPApp, Any]:
+    """Create a fresh authenticated Streamable HTTP app and session manager."""
+    # StreamableHTTPSessionManager.run() is intentionally single-use. FastMCP
+    # caches that manager, so each FastAPI app instance needs a fresh cache entry.
+    setattr(chain_analysis_mcp, "_session_manager", None)
+    http_app = AuthenticatedMCPHTTPApp(chain_analysis_mcp.streamable_http_app())
+    return http_app, chain_analysis_mcp.session_manager
+
+
+chain_analysis_mcp_http_app, chain_analysis_mcp_session_manager = (
+    create_chain_analysis_mcp_http_app()
 )
 
 
