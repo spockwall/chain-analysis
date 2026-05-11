@@ -41,6 +41,8 @@ python ../scripts/init_neo4j.py
 uvicorn src.api.main:app --reload --port 8000
 ```
 
+The same process also mounts the MCP endpoint at `http://localhost:8000/mcp`.
+
 ## Running with Docker
 
 ```bash
@@ -49,6 +51,28 @@ docker compose up -d backend
 ```
 
 The backend will be available at http://localhost:8000
+
+## MCP Server
+
+The backend includes an MCP server so agents can call Chain-Analysis tools directly.
+
+### Streamable HTTP
+
+- Endpoint: `http://localhost:8000/mcp`
+- Mounted inside the existing FastAPI app
+- Requires the existing API bearer token in the `Authorization: Bearer <token>` header
+- Obtain a token from `/api/auth/login` or `/api/auth/register`
+
+### Stdio
+
+After installing the backend package:
+
+```bash
+chain-analysis-mcp
+```
+
+This exposes the same tool set over stdio for local MCP clients.
+Stdio does not use the HTTP bearer token flow.
 
 ## Project Structure
 

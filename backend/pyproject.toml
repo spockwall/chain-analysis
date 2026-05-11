@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
+    "mcp>=1.26.0,<2.0.0",
 
     # Database
     "asyncpg>=0.30.0",
@@ -37,6 +38,10 @@ dependencies = [
     "loguru>=0.7.0",
     "orjson>=3.10.0",
 ]
+
+[project.scripts]
+chain-analysis-mcp = "agent_mcp.server:main"
+chain-analysis-mcp-http = "agent_mcp.server:main_http"
 
 [project.optional-dependencies]
 dev = [
