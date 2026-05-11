@@ -512,7 +512,9 @@ async fn run_targeted_mode(
 ) -> Result<()> {
     let (spec, with_traces, with_transfers) = match mode {
         TargetedMode::Addresses { addrs, with_traces, with_transfers } => (
-            TargetSpec::Addresses { addrs, from_block: None },
+            // CLI invocations want the full history — no cap. Only Task B
+            // refresh sets `tx_limit` on its enqueue payloads.
+            TargetSpec::Addresses { addrs, from_block: None, tx_limit: None },
             with_traces,
             with_transfers,
         ),

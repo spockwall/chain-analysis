@@ -11,6 +11,13 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
+/// Default cap on transactions fetched per address per refresh tick.
+/// Whales (Binance hot wallet, 1inch router, etc.) have millions of txs;
+/// without a cap Etherscan times out trying to return everything. The
+/// per-address `effective_from_block` ensures the next refresh resumes
+/// where this one left off.
+const DEFAULT_REFRESH_TX_LIMIT: usize = 500;
+
 pub async fn run(
     targeted_queue_key: String,
     refresh_interval_secs: u64,
@@ -22,10 +29,17 @@ pub async fn run(
     let mut cooldown: HashMap<String, Instant> = HashMap::new();
     let cooldown_dur = Duration::from_secs(refresh_cooldown_secs);
     let tick = Duration::from_secs(refresh_interval_secs);
+    let refresh_tx_limit: usize = std::env::var("REFRESH_TX_LIMIT_PER_ADDR")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n: &usize| *n > 0)
+        .unwrap_or(DEFAULT_REFRESH_TX_LIMIT);
 
     info!(
         refresh_interval_secs,
-        refresh_cooldown_secs, "Task B: refresh loop starting"
+        refresh_cooldown_secs,
+        refresh_tx_limit,
+        "Task B: refresh loop starting"
     );
 
     let mut iter = 0u64;
@@ -80,6 +94,7 @@ pub async fn run(
                     "mode": "addresses",
                     "addrs": [addr.clone()],
                     "from_block": from_block,
+                    "tx_limit": refresh_tx_limit,
                 }
             })
             .to_string();

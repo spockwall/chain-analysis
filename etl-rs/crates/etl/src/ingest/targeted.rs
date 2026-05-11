@@ -6,10 +6,11 @@ use crate::sinks::redis_stream::TransactionWriter;
 use crate::sources::etherscan;
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 use tracing::{info, warn};
 use crate::types::Transaction;
 
-use super::{ingest_address, ingest_address_capped};
+use super::ingest_address_capped;
 
 /// Default cap on transactions fetched per peer during neighborhood BFS.
 /// Override with `NEIGHBORHOOD_TX_LIMIT_PER_ADDR`.
@@ -31,6 +32,12 @@ pub enum TargetSpec {
         addrs: Vec<String>,
         /// Earliest block to include. Defaults to 0 when None.
         from_block: Option<u64>,
+        /// Optional cap on transactions fetched per address. `None` means no
+        /// cap (fetch every tx in [from_block, latest]). Used by Task B
+        /// refresh to keep whale fetches bounded; user-triggered single
+        /// `pipeline/ingest-address` requests still pass `None` to get the
+        /// full history.
+        tx_limit: Option<usize>,
     },
     Hashes(Vec<String>),
     Neighborhood {
@@ -59,6 +66,13 @@ pub enum QueuedSpec {
         addrs: Vec<String>,
         #[serde(default)]
         from_block: Option<u64>,
+        /// Optional per-address tx cap. Task B refresh sets this so whale
+        /// addresses don't time out trying to pull a full history. Web-
+        /// triggered runs (`pipeline/ingest-address`) leave it unset for
+        /// uncapped behaviour. Defaults to `None` for backward compatibility
+        /// with payloads written before this field existed.
+        #[serde(default)]
+        tx_limit: Option<usize>,
     },
     Hashes {
         hashes: Vec<String>,
@@ -72,9 +86,15 @@ pub enum QueuedSpec {
 impl From<QueuedSpec> for TargetSpec {
     fn from(spec: QueuedSpec) -> Self {
         match spec {
-            QueuedSpec::Addresses { addrs, from_block } => {
-                TargetSpec::Addresses { addrs, from_block }
-            }
+            QueuedSpec::Addresses {
+                addrs,
+                from_block,
+                tx_limit,
+            } => TargetSpec::Addresses {
+                addrs,
+                from_block,
+                tx_limit,
+            },
             QueuedSpec::Hashes { hashes } => TargetSpec::Hashes(hashes),
             QueuedSpec::Neighborhood { seed, hops } => TargetSpec::Neighborhood { seed, hops },
         }
@@ -92,7 +112,11 @@ pub async fn run_targeted(
     with_transfers: bool,
 ) -> Result<u64> {
     match spec {
-        TargetSpec::Addresses { addrs, from_block } => {
+        TargetSpec::Addresses {
+            addrs,
+            from_block,
+            tx_limit,
+        } => {
             run_addresses(
                 config,
                 &addrs,
@@ -102,6 +126,7 @@ pub async fn run_targeted(
                 pg_writer,
                 with_traces,
                 with_transfers,
+                tx_limit,
             )
             .await
         }
@@ -156,12 +181,25 @@ async fn run_addresses(
     pg_writer: Option<&PostgresWriter>,
     with_traces: bool,
     with_transfers: bool,
+    tx_limit: Option<usize>,
 ) -> Result<u64> {
     let mut total = 0u64;
+    let run_started = Instant::now();
     for addr in addrs {
         let start = effective_from_block(pg_writer, addr, from_block).await;
-        info!(address = %addr, requested_from = from_block, effective_from = start, "targeted: fetching address");
-        total += ingest_address(
+        let addr_started = Instant::now();
+        info!(
+            address = %addr,
+            requested_from = from_block,
+            effective_from = start,
+            ?tx_limit,
+            "targeted: fetching address"
+        );
+        // ingest_address_capped handles both capped (Some(n)) and uncapped
+        // (None) — `ingest_address` is just a thin wrapper around the same
+        // path with `max_per_kind=None`. Calling it directly keeps the call
+        // sites uniform.
+        let txs = ingest_address_capped(
             config,
             addr,
             start,
@@ -170,9 +208,23 @@ async fn run_addresses(
             reporter,
             with_traces,
             with_transfers,
+            tx_limit,
         )
         .await?;
+        info!(
+            address = %addr,
+            tx_count = txs,
+            elapsed_ms = addr_started.elapsed().as_millis() as u64,
+            "targeted: address done"
+        );
+        total += txs;
     }
+    info!(
+        addresses = addrs.len(),
+        total_txs = total,
+        elapsed_ms = run_started.elapsed().as_millis() as u64,
+        "targeted: addresses run done"
+    );
     Ok(total)
 }
 
@@ -230,6 +282,7 @@ async fn run_neighborhood(
     let max_peers = env_usize("MAX_PEERS_PER_HOP", DEFAULT_MAX_PEERS_PER_HOP);
     info!(tx_limit, max_peers, "neighborhood caps");
 
+    let run_started = Instant::now();
     let mut visited: HashSet<String> = HashSet::new();
     let mut frontier: Vec<String> = vec![seed.to_lowercase()];
     let mut total = 0u64;
@@ -238,14 +291,19 @@ async fn run_neighborhood(
         if frontier.is_empty() {
             break;
         }
-        info!(hop, count = frontier.len(), "targeted neighborhood: hop");
+        let hop_started = Instant::now();
+        info!(hop, count = frontier.len(), "targeted neighborhood: hop start");
         let mut peer_counts: HashMap<String, u32> = HashMap::new();
+        let mut ingest_ms_total: u64 = 0;
+        let mut peer_scan_ms_total: u64 = 0;
+        let mut addresses_processed: usize = 0;
 
         for addr in &frontier {
             if !visited.insert(addr.clone()) {
                 continue;
             }
             let start = effective_from_block(pg_writer, addr, 0).await;
+            let ingest_started = Instant::now();
             total += ingest_address_capped(
                 config,
                 addr,
@@ -258,8 +316,11 @@ async fn run_neighborhood(
                 Some(tx_limit),
             )
             .await?;
+            ingest_ms_total += ingest_started.elapsed().as_millis() as u64;
+            addresses_processed += 1;
 
             if hop < hops {
+                let scan_started = Instant::now();
                 match etherscan::address::fetch_address_transactions(
                     base,
                     api_key,
@@ -284,6 +345,7 @@ async fn run_neighborhood(
                     }
                     Err(e) => warn!(address = %addr, error = %e, "counterparty scan failed"),
                 }
+                peer_scan_ms_total += scan_started.elapsed().as_millis() as u64;
             }
         }
 
@@ -300,7 +362,25 @@ async fn run_neighborhood(
             );
         }
         frontier = ranked.into_iter().take(max_peers).map(|(p, _)| p).collect();
+
+        info!(
+            hop,
+            addresses_processed,
+            ingest_ms_total,
+            peer_scan_ms_total,
+            elapsed_ms = hop_started.elapsed().as_millis() as u64,
+            next_frontier_size = frontier.len(),
+            "targeted neighborhood: hop done"
+        );
     }
+
+    info!(
+        seed = %seed.to_lowercase(),
+        hops,
+        total_txs = total,
+        elapsed_ms = run_started.elapsed().as_millis() as u64,
+        "targeted neighborhood: run done"
+    );
 
     Ok(total)
 }
@@ -445,9 +525,14 @@ mod tests {
         let task: QueuedTask = serde_json::from_str(json).unwrap();
         assert_eq!(task.task_id, Some(42));
         match task.spec {
-            QueuedSpec::Addresses { addrs, from_block } => {
+            QueuedSpec::Addresses {
+                addrs,
+                from_block,
+                tx_limit,
+            } => {
                 assert_eq!(addrs, vec!["0xabc", "0xdef"]);
                 assert_eq!(from_block, None);
+                assert_eq!(tx_limit, None, "missing tx_limit must default to None");
             }
             other => panic!("wrong variant: {:?}", other),
         }
@@ -459,6 +544,24 @@ mod tests {
         let task: QueuedTask = serde_json::from_str(json).unwrap();
         match task.spec {
             QueuedSpec::Addresses { from_block, .. } => assert_eq!(from_block, Some(18000000)),
+            other => panic!("wrong variant: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn queued_spec_parses_addresses_with_tx_limit() {
+        let json =
+            r#"{"spec":{"mode":"addresses","addrs":["0xabc"],"from_block":1000,"tx_limit":500}}"#;
+        let task: QueuedTask = serde_json::from_str(json).unwrap();
+        match task.spec {
+            QueuedSpec::Addresses {
+                from_block,
+                tx_limit,
+                ..
+            } => {
+                assert_eq!(from_block, Some(1000));
+                assert_eq!(tx_limit, Some(500));
+            }
             other => panic!("wrong variant: {:?}", other),
         }
     }

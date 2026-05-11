@@ -131,6 +131,7 @@ pub async fn ingest_address_capped(
     with_transfers: bool,
     max_per_kind: Option<usize>,
 ) -> Result<u64> {
+    let started = Instant::now();
     let base_url = &config.etherscan_base_url;
     let api_key = config
         .etherscan_api_key
@@ -142,7 +143,7 @@ pub async fn ingest_address_capped(
     info!(
         address = %addr,
         with_traces, with_transfers, ?max_per_kind,
-        "Fetching address data (parallel)"
+        "ingest_address_capped: start"
     );
 
     let txs_fut = etherscan::address::fetch_pages_capped(
@@ -186,23 +187,37 @@ pub async fn ingest_address_capped(
         }
     };
 
+    let fetch_started = Instant::now();
     let (txs, traces, transfers) = tokio::try_join!(txs_fut, traces_fut, transfers_fut)?;
+    let fetch_ms = fetch_started.elapsed().as_millis() as u64;
 
     info!(
         address = %addr,
         tx_count = txs.len(),
         trace_count = traces.len(),
         transfer_count = transfers.len(),
-        "Fetched address data, batched write to Redis"
+        fetch_ms,
+        "ingest_address_capped: source fetch complete"
     );
 
     let total_txs = txs.len() as u64;
 
+    let write_started = Instant::now();
     writer.write_transactions_batch(&txs).await?;
     writer.write_traces_batch(&traces).await?;
     writer.write_transfers_batch(&transfers).await?;
+    let write_ms = write_started.elapsed().as_millis() as u64;
 
     progress_reporter.report_complete(0, total_txs).await?;
+
+    info!(
+        address = %addr,
+        tx_count = total_txs,
+        fetch_ms,
+        write_ms,
+        total_ms = started.elapsed().as_millis() as u64,
+        "ingest_address_capped: done"
+    );
 
     Ok(total_txs)
 }
