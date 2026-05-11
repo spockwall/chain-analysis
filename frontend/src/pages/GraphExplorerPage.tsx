@@ -43,6 +43,37 @@ const DETECTION_PATTERNS: Array<{ value: DetectionPattern; label: string }> = [
     { value: "mixer-interaction", label: "Mixer Interaction" },
 ];
 
+const FAVORITE_PATHS_STORAGE_KEY = "ca_favorite_paths";
+
+interface FavoritePath {
+    id: string;
+    source: string;
+    target: string;
+    createdAt: string;
+}
+
+const formatFavoritePathLabel = (favorite: FavoritePath) =>
+    `${favorite.source.slice(0, 6)}...${favorite.source.slice(-4)} -> ${favorite.target.slice(0, 6)}...${favorite.target.slice(-4)}`;
+
+const loadFavoritePaths = (): FavoritePath[] => {
+    try {
+        const raw = window.localStorage.getItem(FAVORITE_PATHS_STORAGE_KEY);
+        if (!raw) return [];
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed.filter((item): item is FavoritePath => (
+            typeof item?.id === "string" &&
+            typeof item?.source === "string" &&
+            typeof item?.target === "string" &&
+            typeof item?.createdAt === "string"
+        ));
+    } catch {
+        return [];
+    }
+};
+
 export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplorerPageProps) {
     const toast = useToastContext();
     const { track: trackRun } = useIngestionRuns();
@@ -65,6 +96,8 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
     const [pathTarget, setPathTarget] = useState("");
     const [pathResult, setPathResult] = useState<PathResponse | null>(null);
     const [pathLoading, setPathLoading] = useState(false);
+    const [favoritePaths, setFavoritePaths] = useState<FavoritePath[]>(() => loadFavoritePaths());
+    const [selectedFavoritePathId, setSelectedFavoritePathId] = useState("");
     const [detectionPattern, setDetectionPattern] = useState<DetectionPattern>("peel-chain");
     const [detectionAddress, setDetectionAddress] = useState("");
     const [detectionLoading, setDetectionLoading] = useState(false);
@@ -85,6 +118,10 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
             setDetectionAddress(graphData.center_address);
         }
     }, [graphData?.center_address, detectionAddress]);
+
+    useEffect(() => {
+        window.localStorage.setItem(FAVORITE_PATHS_STORAGE_KEY, JSON.stringify(favoritePaths));
+    }, [favoritePaths]);
 
     const handleSearch = async (address: string, opts?: { waitForGraph?: boolean }) => {
         // Keep URL in sync so a refresh restores this view.
@@ -459,6 +496,68 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
         }
     };
 
+    const normalizePathAddress = (address: string) => address.trim().toLowerCase();
+
+    const currentFavoritePath = useMemo(() => {
+        const source = normalizePathAddress(pathSource);
+        const target = normalizePathAddress(pathTarget);
+        if (!source || !target) return null;
+        return favoritePaths.find((favorite) => favorite.source === source && favorite.target === target) ?? null;
+    }, [favoritePaths, pathSource, pathTarget]);
+
+    const handleSaveFavoritePath = () => {
+        const source = normalizePathAddress(pathSource);
+        const target = normalizePathAddress(pathTarget);
+
+        if (!source || !target) {
+            toast.error("Enter both source and target addresses before saving");
+            return;
+        }
+
+        if (source === target) {
+            toast.error("Source and target must be different");
+            return;
+        }
+
+        if (currentFavoritePath) {
+            toast.info("Path is already in favorites");
+            return;
+        }
+
+        const favorite: FavoritePath = {
+            id: `${source}-${target}`,
+            source,
+            target,
+            createdAt: new Date().toISOString(),
+        };
+
+        setFavoritePaths((prev) => [favorite, ...prev]);
+        setSelectedFavoritePathId(favorite.id);
+        toast.success("Favorite path saved");
+    };
+
+    const handleSelectFavoritePath = (favoriteId: string) => {
+        setSelectedFavoritePathId(favoriteId);
+        const favorite = favoritePaths.find((item) => item.id === favoriteId);
+        if (!favorite) return;
+
+        setPathSource(favorite.source);
+        setPathTarget(favorite.target);
+        setPathResult(null);
+    };
+
+    const handleRemoveSelectedFavoritePath = () => {
+        const favorite = favoritePaths.find((item) => item.id === selectedFavoritePathId) ?? currentFavoritePath;
+        if (!favorite) {
+            toast.error("Select a favorite path to remove");
+            return;
+        }
+
+        setFavoritePaths((prev) => prev.filter((item) => item.id !== favorite.id));
+        setSelectedFavoritePathId("");
+        toast.info("Favorite path removed");
+    };
+
     const handleFindPath = async () => {
         if (!pathSource.trim() || !pathTarget.trim()) {
             toast.error("Enter both source and target addresses");
@@ -647,6 +746,51 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                     >
                         {pathLoading ? "Finding…" : "Find Path"}
                     </button>
+                    <button
+                        className={`w-[31px] h-[31px] inline-flex items-center justify-center rounded-lg border text-[0.75rem] transition-colors disabled:opacity-45 ${
+                            currentFavoritePath
+                                ? "bg-amber-50 border-amber-200 text-amber-600 hover:bg-amber-100"
+                                : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                        }`}
+                        title={currentFavoritePath ? "Favorite path saved" : "Save favorite path"}
+                        onClick={handleSaveFavoritePath}
+                        disabled={pathLoading}
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill={currentFavoritePath ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                    </button>
+                    {favoritePaths.length > 0 && (
+                        <>
+                            <select
+                                className="w-52 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] bg-white text-gray-700 outline-none transition-colors focus:border-blue-400"
+                                value={selectedFavoritePathId}
+                                onChange={(e) => handleSelectFavoritePath(e.target.value)}
+                                title="Favorite paths"
+                            >
+                                <option value="">Favorite paths</option>
+                                {favoritePaths.map((favorite) => (
+                                    <option key={favorite.id} value={favorite.id}>
+                                        {formatFavoritePathLabel(favorite)}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                className="w-[31px] h-[31px] inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-50 hover:text-red-600 disabled:opacity-45"
+                                title="Remove selected favorite path"
+                                onClick={handleRemoveSelectedFavoritePath}
+                                disabled={!selectedFavoritePathId && !currentFavoritePath}
+                            >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14H6L5 6" />
+                                    <path d="M10 11v6" />
+                                    <path d="M14 11v6" />
+                                    <path d="M9 6V4h6v2" />
+                                </svg>
+                            </button>
+                        </>
+                    )}
                     {pathResult && (
                         <button
                             className="px-3.5 py-1.5 bg-white text-gray-900 text-[0.75rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50"
