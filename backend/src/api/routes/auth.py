@@ -5,7 +5,7 @@ Auth API routes plus shared authentication dependencies.
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import select
@@ -50,12 +50,27 @@ def _set_auth_cookie(response: Response, user: User, settings) -> None:
 
 
 async def get_current_user(
+    request: Request,
     db: RelationalDBDep,
     settings: SettingsDep,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> User:
-    """Return the authenticated active user from the bearer token."""
-    if credentials is None:
+    """Return the authenticated active user from httpOnly cookie or Bearer token.
+    
+    Tries to extract token in order:
+    1. httpOnly cookie 'access_token' (preferred, XSS-safe)
+    2. Authorization: Bearer ... header (fallback, API compatibility)
+    """
+    token: str | None = None
+
+    # Try to get token from httpOnly cookie first
+    token = request.cookies.get("access_token")
+
+    # Fallback to Bearer token from Authorization header
+    if not token and credentials:
+        token = credentials.credentials
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -64,7 +79,7 @@ async def get_current_user(
 
     try:
         payload = decode_access_token(
-            credentials.credentials,
+            token,
             settings.jwt_validation_secret_keys,
             settings.jwt_algorithm,
         )
