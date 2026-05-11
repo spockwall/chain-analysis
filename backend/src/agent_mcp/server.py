@@ -278,8 +278,11 @@ async def get_graph_stats() -> dict[str, Any]:
 )
 async def ingest_address(address: str, chain_id: int = 1) -> dict[str, Any]:
     body = pipeline_routes.IngestAddressRequest(address=address, chain_id=chain_id)
+    # NOTE: call the un-rate-limited core helper — MCP transport is already
+    # bearer-token authenticated, and slowapi's wrapper requires a real
+    # Starlette Request that we don't have here.
     return await _invoke(
-        pipeline_routes.ingest_address,
+        pipeline_routes._ingest_address_core,
         body,
         get_settings(),
         get_relational_db(),
@@ -381,7 +384,7 @@ async def start_address_investigation(
     if queue_fetch:
         body = pipeline_routes.IngestAddressRequest(address=target, chain_id=chain_id)
         ingestion = await _try_invoke(
-            pipeline_routes.ingest_address,
+            pipeline_routes._ingest_address_core,
             body,
             get_settings(),
             get_relational_db(),
@@ -780,7 +783,7 @@ async def create_label_task(
         "context": context,
     }
     request = LabelTaskCreate.model_validate(body)
-    return await _invoke(label_routes.create_label_task, request, get_relational_db())
+    return await _invoke(label_routes._create_label_task_core, request, get_relational_db())
 
 
 @chain_analysis_mcp.tool(

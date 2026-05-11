@@ -41,19 +41,16 @@ def _validate_address(address: str) -> str:
     return addr
 
 
-@router.post("/ingest-address", response_model=IngestAddressResponse, status_code=202)
-@limiter.limit(get_settings().rate_limit_ingest)
-async def ingest_address(
-    request: Request,
+async def _ingest_address_core(
     body: IngestAddressRequest,
     settings: SettingsDep,
     db: RelationalDBDep,
     mq: MessageQueueDep,
 ) -> IngestAddressResponse:
-    """Queue an address for ingestion via the Rust ingest worker.
+    """Internal helper shared by the HTTP route and out-of-band callers (MCP).
 
-    Returns 202 Accepted with a `run_id` the caller polls via
-    `/api/ingestion-runs/{run_id}`.
+    Kept free of `Request` / slowapi machinery so it can be invoked directly
+    from non-HTTP entry points; the HTTP route below adds rate limiting.
     """
     address = _validate_address(body.address)
 
@@ -77,3 +74,20 @@ async def ingest_address(
     )
 
     return IngestAddressResponse(address=address, run_id=run_id, status="queued")
+
+
+@router.post("/ingest-address", response_model=IngestAddressResponse, status_code=202)
+@limiter.limit(get_settings().rate_limit_ingest)
+async def ingest_address(
+    request: Request,
+    body: IngestAddressRequest,
+    settings: SettingsDep,
+    db: RelationalDBDep,
+    mq: MessageQueueDep,
+) -> IngestAddressResponse:
+    """Queue an address for ingestion via the Rust ingest worker.
+
+    Returns 202 Accepted with a `run_id` the caller polls via
+    `/api/ingestion-runs/{run_id}`.
+    """
+    return await _ingest_address_core(body, settings, db, mq)

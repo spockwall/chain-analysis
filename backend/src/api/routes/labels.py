@@ -125,22 +125,11 @@ async def enqueue_label_fetch(
     return LabelFetchResponse(task_ids=task_ids, queued=enqueued)
 
 
-@router.post("/tasks", response_model=LabelTaskResponse, status_code=201)
-@limiter.limit(get_settings().rate_limit_labels)
-async def create_label_task(
-    request: Request,
+async def _create_label_task_core(
     task: LabelTaskCreate,
     db: RelationalDBDep,
 ) -> LabelTaskResponse:
-    """
-    Create a new labeling task.
-
-    Args:
-        task: Task creation data
-
-    Returns:
-        Created task
-    """
+    """Internal helper shared by the HTTP route and out-of-band callers (MCP)."""
     # Validate address format
     if not task.entity_address.startswith("0x") or len(task.entity_address) != 42:
         raise HTTPException(status_code=400, detail="Invalid address format")
@@ -179,6 +168,25 @@ async def create_label_task(
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
+
+
+@router.post("/tasks", response_model=LabelTaskResponse, status_code=201)
+@limiter.limit(get_settings().rate_limit_labels)
+async def create_label_task(
+    request: Request,
+    task: LabelTaskCreate,
+    db: RelationalDBDep,
+) -> LabelTaskResponse:
+    """
+    Create a new labeling task.
+
+    Args:
+        task: Task creation data
+
+    Returns:
+        Created task
+    """
+    return await _create_label_task_core(task, db)
 
 
 @router.get("/tasks", response_model=list[LabelTaskResponse])
