@@ -1,3 +1,4 @@
+use crate::sources::rate_limiter;
 use crate::types::Transfer;
 use eyre::{bail, Result};
 use reqwest::Client;
@@ -6,6 +7,8 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use super::hex;
+
+const PROVIDER: &str = "etherscan";
 
 const ERC20_TRANSFER_TOPIC: &str =
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -29,6 +32,7 @@ pub async fn fetch_block_transfers(
 
     loop {
         attempt += 1;
+        rate_limiter::acquire(PROVIDER).await;
 
         let response = client
             .get(base_url)

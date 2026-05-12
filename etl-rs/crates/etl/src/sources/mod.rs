@@ -4,6 +4,7 @@ pub mod etherscan;
 pub mod failover;
 pub mod mock;
 pub mod public_rpc;
+pub mod rate_limiter;
 
 pub use block_source::{make_source, BlockSource, SourceConfig};
 pub use failover::FailoverSource;

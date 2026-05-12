@@ -3,9 +3,12 @@ use reqwest::Client;
 use serde_json::Value;
 use std::time::Duration;
 use tracing::warn;
+use crate::sources::rate_limiter;
 use crate::types::Transaction;
 
 use super::hex;
+
+const PROVIDER: &str = "etherscan";
 
 const MAX_RETRIES: u32 = 5;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
@@ -26,6 +29,7 @@ pub async fn fetch_by_hash(
 
     loop {
         attempt += 1;
+        rate_limiter::acquire(PROVIDER).await;
         let response = client
             .get(base_url)
             .query(&[

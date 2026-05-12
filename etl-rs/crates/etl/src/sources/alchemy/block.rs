@@ -9,8 +9,8 @@ use crate::types::Transaction;
 use super::rpc;
 use super::super::etherscan::hex;
 
-pub async fn eth_block_number(client: &Client, url: &str) -> Result<u64> {
-    let result = rpc::call(client, url, "eth_blockNumber", json!([])).await?;
+pub async fn eth_block_number(provider: &'static str, client: &Client, url: &str) -> Result<u64> {
+    let result = rpc::call(provider, client, url, "eth_blockNumber", json!([])).await?;
     let s = result
         .as_str()
         .ok_or_else(|| eyre::eyre!("eth_blockNumber: expected hex string"))?;
@@ -18,12 +18,14 @@ pub async fn eth_block_number(client: &Client, url: &str) -> Result<u64> {
 }
 
 pub async fn eth_get_block_by_number(
+    provider: &'static str,
     client: &Client,
     url: &str,
     block_num: u64,
 ) -> Result<Vec<Transaction>> {
     let tag = format!("0x{:x}", block_num);
     let result = rpc::call(
+        provider,
         client,
         url,
         "eth_getBlockByNumber",
@@ -59,11 +61,13 @@ pub async fn eth_get_block_by_number(
 }
 
 pub async fn eth_get_transaction_by_hash(
+    provider: &'static str,
     client: &Client,
     url: &str,
     tx_hash: &str,
 ) -> Result<Option<Transaction>> {
     let result = rpc::call(
+        provider,
         client,
         url,
         "eth_getTransactionByHash",

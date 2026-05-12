@@ -267,6 +267,13 @@ async fn main() -> Result<()> {
     let config = etl::config::Config::from_env();
     let run_id = uuid::Uuid::new_v4().to_string();
 
+    // Wire the cross-replica rate limiter. Reads <PROVIDER>_RATE_LIMIT_PER_SEC
+    // env vars; sources `acquire(provider)` before every HTTP call. Safe to
+    // call unconditionally — no-op for providers without an env var.
+    if let Err(e) = etl::sources::rate_limiter::init_limiters(&config.redis_url).await {
+        tracing::warn!(error = %e, "rate limiter: init failed, sources will run unthrottled");
+    }
+
     match cli.cmd {
         Some(Cmd::Block {
             start,

@@ -41,39 +41,51 @@ impl PublicRpcSource {
     }
 }
 
+/// Tag for the rate-limiter bucket. The shared alchemy submodules accept
+/// `provider` so this source draws from its own `public_rpc` budget, not
+/// alchemy's, even though they share JSON-RPC machinery.
+const PROVIDER: &str = "public_rpc";
+
 #[async_trait]
 impl BlockSource for PublicRpcSource {
     fn name(&self) -> &'static str {
-        "public_rpc"
+        PROVIDER
     }
 
     async fn latest_block(&self) -> Result<u64> {
-        alchemy::block::eth_block_number(&self.client, &self.url).await
+        alchemy::block::eth_block_number(PROVIDER, &self.client, &self.url).await
     }
 
     async fn fetch_block(&self, block_num: u64) -> Result<Vec<Transaction>> {
         let mut txs =
-            alchemy::block::eth_get_block_by_number(&self.client, &self.url, block_num).await?;
+            alchemy::block::eth_get_block_by_number(PROVIDER, &self.client, &self.url, block_num)
+                .await?;
         // Receipt enrichment is best-effort; many public endpoints throttle
         // batch receipt RPCs even when block fetches succeed.
-        if let Err(e) =
-            alchemy::receipts::enrich_with_receipts(&self.client, &self.url, block_num, &mut txs)
-                .await
+        if let Err(e) = alchemy::receipts::enrich_with_receipts(
+            PROVIDER,
+            &self.client,
+            &self.url,
+            block_num,
+            &mut txs,
+        )
+        .await
         {
-            tracing::warn!(block = block_num, source = "public_rpc", error = %e, "receipt enrichment failed");
+            tracing::warn!(block = block_num, source = PROVIDER, error = %e, "receipt enrichment failed");
         }
         Ok(txs)
     }
 
     async fn fetch_traces(&self, block_num: u64) -> Result<Vec<Trace>> {
-        alchemy::traces::trace_block(&self.client, &self.url, block_num).await
+        alchemy::traces::trace_block(PROVIDER, &self.client, &self.url, block_num).await
     }
 
     async fn fetch_transfers(&self, block_num: u64) -> Result<Vec<Transfer>> {
-        alchemy::logs::fetch_transfers(&self.client, &self.url, block_num).await
+        alchemy::logs::fetch_transfers(PROVIDER, &self.client, &self.url, block_num).await
     }
 
     async fn fetch_tx_by_hash(&self, tx_hash: &str) -> Result<Option<Transaction>> {
-        alchemy::block::eth_get_transaction_by_hash(&self.client, &self.url, tx_hash).await
+        alchemy::block::eth_get_transaction_by_hash(PROVIDER, &self.client, &self.url, tx_hash)
+            .await
     }
 }

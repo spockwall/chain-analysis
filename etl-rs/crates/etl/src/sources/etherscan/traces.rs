@@ -1,3 +1,4 @@
+use crate::sources::rate_limiter;
 use crate::types::Trace;
 use eyre::{bail, Result};
 use reqwest::Client;
@@ -6,6 +7,8 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 use super::hex;
+
+const PROVIDER: &str = "etherscan";
 
 const MAX_RETRIES: u32 = 5;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
@@ -25,6 +28,7 @@ pub async fn fetch_block_traces(
 
     loop {
         attempt += 1;
+        rate_limiter::acquire(PROVIDER).await;
 
         let response = client
             .get(base_url)
