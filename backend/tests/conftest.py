@@ -6,6 +6,7 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import AsyncGenerator, Generator
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -17,6 +18,9 @@ src_path = Path(__file__).parent.parent / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
+import api.deps as deps
+import api.main as api_main
+import libs.rate_limiter as rate_limiter_module
 from api.main import create_app
 from core.config import Settings
 
@@ -53,15 +57,34 @@ def app():
 
 
 @pytest.fixture
-def client(app) -> Generator[TestClient, None, None]:
-    """Create test client (sync)."""
-    with TestClient(app) as c:
+def client(app, monkeypatch) -> Generator[TestClient, None, None]:
+    """Create test client (sync) with service connections stubbed out.
+
+    Patches init_adapters/close_adapters so the lifespan succeeds, installs
+    AsyncMock adapters so FastAPI dependency injection doesn't raise RuntimeError,
+    and swaps the rate-limiter to in-memory storage so rate-limited routes are
+    reachable without a live Redis.  Server exceptions are suppressed so routes
+    that would normally hit the DB (and fail because the mock isn't wired up) just
+    return 500 — tests that reach the DB intentionally already accept that code.
+    """
+    monkeypatch.setattr(api_main, "init_adapters", AsyncMock())
+    monkeypatch.setattr(api_main, "close_adapters", AsyncMock())
+    monkeypatch.setattr(deps, "_neo4j_adapter", AsyncMock())
+    monkeypatch.setattr(deps, "_postgres_adapter", AsyncMock())
+    monkeypatch.setattr(deps, "_redis_adapter", AsyncMock())
+    # Disable the shared rate-limiter so decorated routes don't attempt a Redis
+    # connection — the Limiter's `enabled=False` flag is respected by both the
+    # SlowAPIMiddleware and the per-route @limiter.limit(…) wrapper.
+    monkeypatch.setattr(rate_limiter_module.limiter, "enabled", False)
+    with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
 
 @pytest_asyncio.fixture
-async def async_client(app) -> AsyncGenerator[AsyncClient, None]:
-    """Create async test client."""
+async def async_client(app, monkeypatch) -> AsyncGenerator[AsyncClient, None]:
+    """Create async test client with service connections stubbed out."""
+    monkeypatch.setattr(api_main, "init_adapters", AsyncMock())
+    monkeypatch.setattr(api_main, "close_adapters", AsyncMock())
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
