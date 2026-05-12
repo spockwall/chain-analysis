@@ -19,6 +19,7 @@ fn build_source(config: &etl::config::Config) -> Result<DynBlockSource> {
         etherscan_chain_id: config.etherscan_chain_id,
         alchemy_api_key: config.alchemy_api_key.clone(),
         alchemy_base_url: config.alchemy_base_url.clone(),
+        public_rpc_url: config.public_rpc_url.clone(),
     };
     let boxed = make_source(&src_cfg)?;
     Ok(Arc::from(boxed))
