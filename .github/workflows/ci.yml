@@ -209,42 +209,6 @@ jobs:
       - name: Build production image
         run: docker build -f backend/Dockerfile -t chain-analysis-backend:ci .
 
-  # rust-etl:
-  #   name: Rust ETL validation
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  #     # - name: Setup Rust
-  #     #   uses: dtolnay/rust-toolchain@stable
-  #     #   with:
-  #     #     components: rustfmt, clippy
-
-  #     - name: Cache Cargo
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         workspaces: etl-rs -> target
-
-  #     # - name: Clippy
-  #     #   working-directory: etl-rs
-  #     #   run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::too_many_arguments
-
-  #     - name: Test
-  #       working-directory: etl-rs
-  #       run: cargo test --workspace
-
-  #     - name: Release build
-  #       working-directory: etl-rs
-  #       run: cargo build --workspace --release
-
-  #     - name: Build ingest image
-  #       run: docker build -f etl-rs/Dockerfile --target ingest -t chain-analysis-ingest:ci etl-rs
-
-  #     - name: Build worker image
-  #       run: docker build -f etl-rs/Dockerfile --target worker -t chain-analysis-worker:ci etl-rs
-
   compose:
     name: Compose validation
     runs-on: ubuntu-latest

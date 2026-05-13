@@ -11,6 +11,13 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
+/// Default cap on transactions fetched per address per refresh tick.
+/// Whales (Binance hot wallet, 1inch router, etc.) have millions of txs;
+/// without a cap Etherscan times out trying to return everything. The
+/// per-address `effective_from_block` ensures the next refresh resumes
+/// where this one left off.
+const DEFAULT_REFRESH_TX_LIMIT: usize = 500;
+
 pub async fn run(
     targeted_queue_key: String,
     refresh_interval_secs: u64,
@@ -22,18 +29,28 @@ pub async fn run(
     let mut cooldown: HashMap<String, Instant> = HashMap::new();
     let cooldown_dur = Duration::from_secs(refresh_cooldown_secs);
     let tick = Duration::from_secs(refresh_interval_secs);
+    let refresh_tx_limit: usize = std::env::var("REFRESH_TX_LIMIT_PER_ADDR")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n: &usize| *n > 0)
+        .unwrap_or(DEFAULT_REFRESH_TX_LIMIT);
 
     info!(
         refresh_interval_secs,
-        refresh_cooldown_secs, "Task B: refresh loop starting"
+        refresh_cooldown_secs,
+        refresh_tx_limit,
+        "Task B: refresh loop starting"
     );
 
+    let mut iter = 0u64;
     loop {
+        iter += 1;
         tokio::select! {
             _ = tokio::time::sleep(tick) => {},
             _ = shutdown.wait() => break,
         }
 
+        let tick_started = Instant::now();
         // risk_level lives on known_labels (Postgres) — entity_features
         // doesn't have that column. Select the union of (a) all known_labels
         // and (b) their current last_synced_block (0 if never synced).
@@ -54,7 +71,7 @@ pub async fn run(
         {
             Ok(r) => r,
             Err(e) => {
-                warn!(error = %e, "refresh: failed to enumerate addresses, skipping tick");
+                warn!(iter, error = %e, "refresh: failed to enumerate addresses, skipping tick");
                 continue;
             }
         };
@@ -77,6 +94,7 @@ pub async fn run(
                     "mode": "addresses",
                     "addrs": [addr.clone()],
                     "from_block": from_block,
+                    "tx_limit": refresh_tx_limit,
                 }
             })
             .to_string();
@@ -87,12 +105,18 @@ pub async fn run(
                     pushed += 1;
                 }
                 Err(e) => {
-                    warn!(address = %addr, error = %e, "refresh: LPUSH failed");
+                    warn!(iter, address = %addr, error = %e, "refresh: LPUSH failed");
                 }
             }
         }
 
-        info!(pushed, skipped, "Task B: refresh tick complete");
+        info!(
+            iter,
+            pushed,
+            skipped,
+            tick_ms = tick_started.elapsed().as_millis() as u64,
+            "Task B: refresh tick complete"
+        );
     }
 
     info!("Task B: refresh loop shutting down");

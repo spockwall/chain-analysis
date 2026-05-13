@@ -46,12 +46,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    let _tracing_guard = etl::logging::init_tracing("clickhouse-process");
 
     let metrics_port = std::env::var("METRICS_PORT")
         .ok()

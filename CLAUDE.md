@@ -128,6 +128,31 @@ This is a multi-week effort — treat it as a separate track from #1 (which sets
 
 ---
 
+### #10 — User-triggered ingest: latest-first with bidirectional [L, R] fill
+
+**Problem.** `POST /api/pipeline/ingest-address` (Fetch Transactions) and `POST /api/labels/fetch` (Deep Trace) currently let Etherscan default to `sort=asc`, so the first ingest of a whale wallet returns 2017-era txs (oldest 500 within the cap). Users see "ancient activity" instead of "what is this address doing now". The `tx_limit=500` cap from `feature/etl-stability` stops the timeout but doesn't change the chronological direction.
+
+**Proposed scheme.** Track an ingested-block range per address as `(first_synced_block, last_synced_block) = (L, R)`. On each user-triggered ingest:
+- If no record: fetch latest 500 (`sort=desc`, no `start`/`end`). Record `L = min(block)`, `R = max(block)`.
+- Else, try forward fill: `sort=asc, start_block=R+1, cap=500`. If results, ingest and bump R.
+- If forward returned 0, fall back to backward fill: `sort=desc, end_block=L-1, cap=500`. Ingest, lower L. If `L == 1` then fully synced.
+
+Each click costs at most 2 Etherscan calls (forward + maybe backward fallback).
+
+**Acceptance criteria.**
+- Alembic migration adds `first_synced_block BIGINT NOT NULL DEFAULT 0` to `entity_features`.
+- `etl-rs/crates/etl/src/sources/etherscan/address.rs::fetch_address_transactions` accepts a `sort` parameter (`asc` | `desc`), default preserves current behaviour.
+- `effective_from_block` in `etl-rs/crates/etl/src/ingest/targeted.rs` becomes `effective_fetch_window` returning `(sort, start_block, end_block)` based on the per-address [L, R] read from PG.
+- `ingest_address_capped` plumbs `sort` through to the source layer; result handler updates both `L = LEAST(existing, batch_min)` and `R = GREATEST(existing, batch_max)` via `postgres_writer`.
+- Applies to: `pipeline.py`, `labels.py` deep-trace path, `worker` Task A. **Task B refresh stays on `sort=asc, start=R+1`** — its goal is contiguous catch-up, not latest-first.
+- Tests cover three state transitions: first ingest, has-new-txs (forward), no-new-txs (backward fill, `L > 1`), fully-synced (`L == 1`).
+
+**Out of scope.** Frontend "Fetch more" affordance to make the multi-click chain explicit. Good follow-up; not blocking.
+
+**Estimated effort.** ~2 hours including migration + tests. Background context in the 2026-05-08 chat following `feature/etl-stability`'s `tx_limit` cap work.
+
+---
+
 ### Other refinements worth picking up
 
 Smaller issues that don't warrant their own phase but shouldn't rot:
