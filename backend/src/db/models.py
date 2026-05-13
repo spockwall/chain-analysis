@@ -155,6 +155,10 @@ class LabelTask(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Set by the Rust worker's `mark_pickup` when it pulls the task off the
+    # targeted queue. `completed_at - pickup_at` is the worker-time budget
+    # the `label_task_duration_seconds` Prometheus histogram measures.
+    pickup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships

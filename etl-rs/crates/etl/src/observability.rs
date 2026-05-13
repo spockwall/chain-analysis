@@ -37,6 +37,14 @@ pub const CONSUMER_BATCH_DURATION: &str = "consumer_batch_duration_seconds";
 pub const DLQ_MOVES: &str = "dlq_moves_total";
 pub const DLQ_MESSAGES_MOVED: &str = "dlq_messages_moved_total";
 
+// Targeted (Task A) — user-triggered ingest end-to-end latency.
+// Time from `mark_pickup` (worker picks up the queued task) to
+// `mark_terminal` (worker writes the final status). Labelled by `kind`
+// (addresses / hashes / neighborhood) and `outcome` (success / failure)
+// so dashboards can break down deep-trace vs single-address vs whole-hash
+// fetches and separate happy-path latency from failure-path latency.
+pub const LABEL_TASK_DURATION_SECONDS: &str = "label_task_duration_seconds";
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -123,5 +131,11 @@ fn describe_metrics() {
     describe_counter!(
         DLQ_MESSAGES_MOVED,
         "Individual messages moved to DLQ streams (labels: stream)"
+    );
+
+    describe_histogram!(
+        LABEL_TASK_DURATION_SECONDS,
+        Unit::Seconds,
+        "End-to-end worker time for a targeted task, from queue pickup to terminal status (labels: kind, outcome)"
     );
 }

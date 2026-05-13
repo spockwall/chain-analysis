@@ -1,4 +1,6 @@
 use eyre::Result;
+use metrics::histogram;
+use crate::observability::LABEL_TASK_DURATION_SECONDS;
 use crate::pipeline::ProgressReporter;
 use serde::Deserialize;
 use crate::sinks::postgres_writer::PostgresWriter;
@@ -81,6 +83,17 @@ pub enum QueuedSpec {
         seed: String,
         hops: u8,
     },
+}
+
+/// Short static tag describing a `QueuedSpec` variant. Used as a Prometheus
+/// label value on `label_task_duration_seconds`, so the histogram can be
+/// broken down by mode in Grafana without parsing the JSON payload.
+fn spec_kind(spec: &QueuedSpec) -> &'static str {
+    match spec {
+        QueuedSpec::Addresses { .. } => "addresses",
+        QueuedSpec::Hashes { .. } => "hashes",
+        QueuedSpec::Neighborhood { .. } => "neighborhood",
+    }
 }
 
 impl From<QueuedSpec> for TargetSpec {
@@ -416,10 +429,16 @@ pub struct TargetedJob<'a> {
 
 impl<'a> TargetedJob<'a> {
     /// Full lifecycle for a queue payload: pickup → run → terminal. Returns
-    /// the number of transactions ingested on success.
+    /// the number of transactions ingested on success. Records the wall-
+    /// clock duration into [`LABEL_TASK_DURATION_SECONDS`] labelled by spec
+    /// kind and outcome so dashboards can split deep-trace from single-
+    /// address fetches and happy-path latency from failure-path latency.
     pub async fn execute(&mut self, task: QueuedTask) -> Result<u64> {
         let QueuedTask { task_id, run_id, spec } = task;
         info!(?task_id, ?run_id, "Picked up targeted entry");
+
+        let kind = spec_kind(&spec);
+        let started = Instant::now();
 
         Self::mark_pickup(self.pg, task_id, run_id.as_deref()).await;
         let result = run_targeted(
@@ -433,13 +452,27 @@ impl<'a> TargetedJob<'a> {
         )
         .await;
         Self::mark_terminal(self.pg, task_id, run_id.as_deref(), &result).await;
+
+        let outcome = if result.is_ok() { "success" } else { "failure" };
+        histogram!(
+            LABEL_TASK_DURATION_SECONDS,
+            "kind" => kind,
+            "outcome" => outcome,
+        )
+        .record(started.elapsed().as_secs_f64());
+
         result
     }
 
     async fn mark_pickup(pg: &PgPool, task_id: Option<i64>, run_id: Option<&str>) {
         if let Some(tid) = task_id {
+            // pickup_at = NOW() drives the `label_task_duration_seconds`
+            // Prometheus histogram (see observability.rs) and is useful
+            // for ad-hoc SQL like "median time spent in queue vs running".
             if let Err(e) = sqlx::query(
-                "UPDATE label_tasks SET status='running', updated_at=NOW() WHERE id=$1",
+                "UPDATE label_tasks
+                    SET status='running', pickup_at=NOW(), updated_at=NOW()
+                  WHERE id=$1",
             )
             .bind(tid)
             .execute(pg)
