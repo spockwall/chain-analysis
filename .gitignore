@@ -144,7 +144,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-.claude/ 
+.claude/*
+!.claude/skills/
 .codex/
 .codex
 
