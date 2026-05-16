@@ -17,6 +17,7 @@ import { ToastContext } from "./context/ToastContext";
 import { useToast } from "./hooks/useToast";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { IngestionRunsProvider } from "./context/IngestionRunsContext";
+import { NicknamesProvider } from "./context/NicknamesContext";
 import "./index.css";
 
 function ExplorerRoute() {
@@ -56,6 +57,7 @@ function App() {
         <AuthProvider>
             <ToastContext.Provider value={toast}>
                 <IngestionRunsProvider>
+                <NicknamesProvider>
                 <Nav />
                 <Routes>
                     {/* Public routes */}
@@ -129,6 +131,7 @@ function App() {
                 </Routes>
                 <Footer />
                 <Toaster />
+                </NicknamesProvider>
                 </IngestionRunsProvider>
             </ToastContext.Provider>
         </AuthProvider>

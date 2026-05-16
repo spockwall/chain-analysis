@@ -319,3 +319,11 @@ export interface AnnotationResponse {
     confidence: number | null;
     created_at: string;
 }
+
+export interface NicknameResponse {
+    id: number;
+    address: string;
+    nickname: string;
+    created_at: string;
+    updated_at: string;
+}

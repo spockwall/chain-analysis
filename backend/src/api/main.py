@@ -28,6 +28,7 @@ from api.routes import (
     groups_router,
     health_router,
     labels_router,
+    nicknames_router,
     pipeline_router,
     stats_router,
     transactions_router,
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(groups_router, prefix="/api")
     app.include_router(ingestion_router, prefix="/api")
     app.include_router(detections_router, prefix="/api")
+    app.include_router(nicknames_router, prefix="/api")
 
     mcp_http_app, mcp_session_manager = create_chain_analysis_mcp_http_app()
     app.state.mcp_session_manager = mcp_session_manager

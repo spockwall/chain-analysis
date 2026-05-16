@@ -18,6 +18,7 @@ import type {
 } from "../types";
 import { fetchDetection, fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
 import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
+import { useNicknames } from "../context/NicknamesContext";
 import { Background } from "../components/Background";
 
 interface GraphExplorerPageProps {
@@ -78,6 +79,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
     const toast = useToastContext();
     const { track: trackRun } = useIngestionRuns();
     const [, setSearchParams] = useSearchParams();
+    const { nicknames } = useNicknames();
     const [graphData, setGraphData] = useState<NeighborsResponse | null>(null);
     const [selectedNode, setSelectedNode] = useState<EntityResponse | null>(null);
     const [selectedEdge, setSelectedEdge] = useState<TransactionResponse | null>(null);
@@ -886,6 +888,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                                 highlightedEdgeIds={highlightedEdgeIds}
                                 tracingModeEnabled={tracingModeEnabled}
                                 onToggleTracingMode={handleToggleTracingMode}
+                                nicknames={nicknames}
                             />
 
                             {/* Filter toggle */}

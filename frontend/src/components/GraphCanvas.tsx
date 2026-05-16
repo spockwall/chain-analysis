@@ -37,6 +37,9 @@ interface GraphCanvasProps {
     highlightedEdgeIds?: Set<string>;
     tracingModeEnabled?: boolean;
     onToggleTracingMode?: () => void;
+    // Per-user nicknames, keyed by lowercase address. Falls back to entity.name
+    // -> truncated address when an entry is absent.
+    nicknames?: Map<string, string>;
 }
 
 const ctrlBtn = "w-[30px] h-[30px] flex items-center justify-center border-none bg-transparent rounded cursor-pointer text-gray-500 transition-colors p-0 hover:bg-gray-100 hover:text-gray-900";
@@ -56,6 +59,7 @@ export function GraphCanvas({
     highlightedEdgeIds,
     tracingModeEnabled,
     onToggleTracingMode,
+    nicknames,
 }: GraphCanvasProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const cyRef = useRef<Core | null>(null);
@@ -105,7 +109,12 @@ export function GraphCanvas({
             }
 
             const entityType = node.entity_type || "Unknown";
-            const baseName = node.name ? node.name : `${node.address.slice(0, 6)}…${node.address.slice(-4)}`;
+            const nickname = nicknames?.get(node.address.toLowerCase());
+            const baseName = node.name
+                ? node.name
+                : nickname
+                    ? nickname
+                    : `${node.address.slice(0, 6)}…${node.address.slice(-4)}`;
             const memberCount = node.member_count ?? 0;
             const isGroup = memberCount > 0;
             // For group nodes, append a second line so the member count is
@@ -191,7 +200,7 @@ export function GraphCanvas({
         }
 
         return els;
-    }, [data, tracingModeEnabled]);
+    }, [data, tracingModeEnabled, nicknames]);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -233,6 +242,16 @@ export function GraphCanvas({
         cy.elements().forEach((ele) => { if (!newIds.has(ele.id())) ele.remove(); });
         const toAdd = newEls.filter((e) => !currentIds.has(e.data.id as string));
         if (toAdd.length > 0) { cy.add(toAdd); runLayout(cy, activeLayout); }
+        // Refresh labels on already-mounted nodes (e.g. when a nickname changed).
+        for (const el of newEls) {
+            const id = el.data.id as string;
+            if (!currentIds.has(id)) continue;
+            const ele = cy.getElementById(id);
+            const newLabel = el.data.label as string | undefined;
+            if (newLabel !== undefined && ele.data("label") !== newLabel) {
+                ele.data("label", newLabel);
+            }
+        }
         cy.nodes().removeClass("center");
         if (data.center_address) cy.getElementById(data.center_address).addClass("center");
     }, [data, toElements]); // eslint-disable-line react-hooks/exhaustive-deps

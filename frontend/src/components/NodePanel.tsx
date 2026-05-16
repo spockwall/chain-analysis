@@ -17,6 +17,8 @@ import { useToastContext } from "../context/ToastContext";
 import { useIngestionRuns } from "../context/IngestionRunsContext";
 import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
 import { CopyButton } from "./CopyButton";
+import { useNicknames } from "../context/NicknamesContext";
+import { useAuth } from "../context/AuthContext";
 
 interface NodePanelProps {
     node: EntityResponse;
@@ -45,6 +47,41 @@ export function NodePanel({
     const toast = useToastContext();
     const navigate = useNavigate();
     const { track: trackRun, trackTask } = useIngestionRuns();
+    const { getNickname, setNickname, removeNickname } = useNicknames();
+    const { isAuthenticated } = useAuth();
+
+    // Inline nickname editor state — reset whenever a different node is shown.
+    const currentNickname = getNickname(node.address);
+    const [editingNickname, setEditingNickname] = useState(false);
+    const [nicknameInput, setNicknameInput] = useState(currentNickname ?? "");
+    useEffect(() => {
+        setEditingNickname(false);
+        setNicknameInput(getNickname(node.address) ?? "");
+    }, [node.address, getNickname]);
+
+    const handleSaveNickname = async () => {
+        const trimmed = nicknameInput.trim();
+        if (!trimmed) {
+            if (currentNickname) {
+                try {
+                    await removeNickname(node.address);
+                    toast.info("Nickname cleared");
+                } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Failed to clear nickname");
+                    return;
+                }
+            }
+            setEditingNickname(false);
+            return;
+        }
+        try {
+            await setNickname(node.address, trimmed);
+            toast.success("Nickname saved");
+            setEditingNickname(false);
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to save nickname");
+        }
+    };
 
     const [members, setMembers] = useState<EntityResponse[]>([]);
     const [memberInput, setMemberInput] = useState("");
@@ -159,9 +196,17 @@ export function NodePanel({
                     <p className={`${sectionLabel} mb-1`}>
                         {(node.member_count ?? 0) > 0 ? "Selected Group" : "Selected Entity"}
                     </p>
+                    {/* Title: entity.name > user nickname > "Unknown Entity" */}
                     <h2 className="text-[1.25rem] font-semibold tracking-[-0.01em] text-gray-900 mb-1">
-                        {node.name || "Unknown Entity"}
+                        {node.name || currentNickname || "Unknown Entity"}
                     </h2>
+                    {/* Nickname row — shown when the user has set one *and* there's a global entity name above */}
+                    {node.name && currentNickname && !editingNickname && (
+                        <p className="text-[0.7rem] text-violet-600 mb-1">
+                            <span className="font-semibold mr-1">Your nickname:</span>
+                            {currentNickname}
+                        </p>
+                    )}
                     <div className="flex items-center gap-1.5 mt-0.5">
                         <p className="font-mono text-[0.72rem] text-gray-600 truncate flex-1 min-w-0 m-0">
                             {node.address}
@@ -172,6 +217,53 @@ export function NodePanel({
                             onError={() => toast.error("Copy failed")}
                         />
                     </div>
+                    {/* Inline nickname editor */}
+                    {isAuthenticated && (
+                        <div className="mt-2">
+                            {editingNickname ? (
+                                <div className="flex gap-1.5 items-center">
+                                    <input
+                                        autoFocus
+                                        type="text"
+                                        className="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded px-2 py-1 text-[0.72rem] text-gray-900 outline-none focus:border-violet-400"
+                                        placeholder="Nickname (leave blank to clear)"
+                                        value={nicknameInput}
+                                        maxLength={255}
+                                        onChange={(e) => setNicknameInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") handleSaveNickname();
+                                            else if (e.key === "Escape") {
+                                                setEditingNickname(false);
+                                                setNicknameInput(currentNickname ?? "");
+                                            }
+                                        }}
+                                    />
+                                    <button
+                                        className="shrink-0 px-2 py-1 bg-violet-600 text-white text-[0.68rem] font-semibold rounded border-none cursor-pointer hover:bg-violet-700"
+                                        onClick={handleSaveNickname}
+                                    >
+                                        Save
+                                    </button>
+                                    <button
+                                        className="shrink-0 px-2 py-1 bg-white text-gray-500 text-[0.68rem] font-semibold rounded border border-gray-200 cursor-pointer hover:bg-gray-50"
+                                        onClick={() => {
+                                            setEditingNickname(false);
+                                            setNicknameInput(currentNickname ?? "");
+                                        }}
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    className="text-[0.7rem] text-violet-600 hover:underline cursor-pointer bg-transparent border-none p-0"
+                                    onClick={() => setEditingNickname(true)}
+                                >
+                                    {currentNickname ? "Edit nickname" : "Add nickname"}
+                                </button>
+                            )}
+                        </div>
+                    )}
                 </div>
                 <button className={btnIcon} onClick={onClose} aria-label="Close panel">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -488,8 +580,10 @@ export function NodePanel({
                                             >
                                                 {isSent ? "↑" : "↓"}
                                             </span>
-                                            <span className="text-[0.72rem] font-mono text-gray-500 overflow-hidden text-ellipsis whitespace-nowrap">
-                                                {formatAddress(counterparty, 4)}
+                                            <span
+                                                className={`text-[0.72rem] overflow-hidden text-ellipsis whitespace-nowrap ${getNickname(counterparty) ? "text-violet-600 font-medium" : "font-mono text-gray-500"}`}
+                                            >
+                                                {getNickname(counterparty) ?? formatAddress(counterparty, 4)}
                                             </span>
                                             <span className="text-[0.7rem] font-semibold text-gray-900 whitespace-nowrap">
                                                 {formatWei(tx.value)}

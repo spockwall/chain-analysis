@@ -26,6 +26,7 @@ import type {
     LabelTaskStatus,
     LoginRequest,
     NeighborsResponse,
+    NicknameResponse,
     NodeUpsertRequest,
     PathResponse,
     RegisterRequest,
@@ -359,6 +360,23 @@ export async function createAnnotation(body: AnnotationCreateRequest): Promise<A
 
 export async function getEntityAnnotations(address: string, limit = 50): Promise<AnnotationResponse[]> {
     return request<AnnotationResponse[]>(`/labels/annotations/${address}?limit=${limit}`);
+}
+
+// Address-nickname endpoints
+
+export async function listNicknames(): Promise<NicknameResponse[]> {
+    return request<NicknameResponse[]>("/nicknames");
+}
+
+export async function upsertNickname(address: string, nickname: string): Promise<NicknameResponse> {
+    return request<NicknameResponse>(`/nicknames/${address}`, {
+        method: "PUT",
+        body: JSON.stringify({ nickname }),
+    });
+}
+
+export async function deleteNickname(address: string): Promise<void> {
+    return request<void>(`/nicknames/${address}`, { method: "DELETE" }, true);
 }
 
 // Utility functions

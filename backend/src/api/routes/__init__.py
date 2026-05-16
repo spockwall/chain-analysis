@@ -17,6 +17,7 @@ from .groups import router as groups_router
 from .health import router as health_router
 from .ingestion import router as ingestion_router
 from .labels import router as labels_router
+from .nicknames import router as nicknames_router
 from .pipeline import router as pipeline_router
 from .stats import router as stats_router
 
@@ -31,6 +32,7 @@ __all__ = [
     "health_router",
     "ingestion_router",
     "labels_router",
+    "nicknames_router",
     "pipeline_router",
     "stats_router",
     "transactions_router",

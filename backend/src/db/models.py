@@ -414,6 +414,39 @@ class EntityFeatures(Base):
     )
 
 
+class AddressNickname(Base):
+    """A user's private nickname for an on-chain address (typically an EOA)."""
+
+    __tablename__ = "address_nicknames"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+            name="fk_address_nicknames_user_users",
+        ),
+        nullable=False,
+    )
+    address: Mapped[str] = mapped_column(String(42), nullable=False)
+    nickname: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "address", name="uq_address_nicknames_user_address"
+        ),
+    )
+
+
 class RawTransaction(Base):
     """
     Raw transactions ingested from the blockchain.
