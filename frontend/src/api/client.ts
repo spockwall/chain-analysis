@@ -20,6 +20,8 @@ import type {
     IngestionRun,
     AnnotationCreateRequest,
     AnnotationResponse,
+    FavoritePathCreateRequest,
+    FavoritePathResponse,
     LabelFetchRequest,
     LabelFetchResponse,
     LabelTaskResponse,
@@ -359,6 +361,23 @@ export async function createAnnotation(body: AnnotationCreateRequest): Promise<A
 
 export async function getEntityAnnotations(address: string, limit = 50): Promise<AnnotationResponse[]> {
     return request<AnnotationResponse[]>(`/labels/annotations/${address}?limit=${limit}`);
+}
+
+// Favorite-paths endpoints
+
+export async function listFavoritePaths(): Promise<FavoritePathResponse[]> {
+    return request<FavoritePathResponse[]>("/favorites");
+}
+
+export async function createFavoritePath(body: FavoritePathCreateRequest): Promise<FavoritePathResponse> {
+    return request<FavoritePathResponse>("/favorites", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function deleteFavoritePath(favoriteId: number): Promise<void> {
+    return request<void>(`/favorites/${favoriteId}`, { method: "DELETE" }, true);
 }
 
 // Utility functions

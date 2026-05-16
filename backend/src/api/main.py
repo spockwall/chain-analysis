@@ -24,6 +24,7 @@ from api.routes import (
     detections_router,
     entities_router,
     entities_write_router,
+    favorites_router,
     features_router,
     groups_router,
     health_router,
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(groups_router, prefix="/api")
     app.include_router(ingestion_router, prefix="/api")
     app.include_router(detections_router, prefix="/api")
+    app.include_router(favorites_router, prefix="/api")
 
     mcp_http_app, mcp_session_manager = create_chain_analysis_mcp_http_app()
     app.state.mcp_session_manager = mcp_session_manager

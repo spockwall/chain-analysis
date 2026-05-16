@@ -12,6 +12,7 @@ from .entities import (
 from .entities import (
     write_router as entities_write_router,
 )
+from .favorites import router as favorites_router
 from .features import router as features_router
 from .groups import router as groups_router
 from .health import router as health_router
@@ -26,6 +27,7 @@ __all__ = [
     "detections_router",
     "entities_router",
     "entities_write_router",
+    "favorites_router",
     "features_router",
     "groups_router",
     "health_router",

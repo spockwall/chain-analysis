@@ -414,6 +414,36 @@ class EntityFeatures(Base):
     )
 
 
+class FavoritePath(Base):
+    """A user-saved (source, target) address pair for the graph explorer."""
+
+    __tablename__ = "favorite_paths"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "users.id", ondelete="CASCADE", name="fk_favorite_paths_user_users"
+        ),
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(String(42), nullable=False)
+    target: Mapped[str] = mapped_column(String(42), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "source", "target", name="uq_favorite_paths_user_endpoints"
+        ),
+        Index("ix_favorite_paths_user_created", "user_id", "created_at"),
+    )
+
+
 class RawTransaction(Base):
     """
     Raw transactions ingested from the blockchain.

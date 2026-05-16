@@ -12,11 +12,23 @@ import type {
     DetectionPattern,
     DetectionsResponse,
     EntityResponse,
+    FavoritePathResponse,
     NeighborsResponse,
     PathResponse,
     TransactionResponse,
 } from "../types";
-import { fetchDetection, fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
+import {
+    createFavoritePath,
+    deleteFavoritePath,
+    fetchDetection,
+    fetchEntity,
+    fetchNeighbors,
+    fetchPaths,
+    fetchTransaction,
+    ingestAddress,
+    listFavoritePaths,
+} from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
 import { Background } from "../components/Background";
 
@@ -43,35 +55,9 @@ const DETECTION_PATTERNS: Array<{ value: DetectionPattern; label: string }> = [
     { value: "mixer-interaction", label: "Mixer Interaction" },
 ];
 
-const FAVORITE_PATHS_STORAGE_KEY = "ca_favorite_paths";
-
-interface FavoritePath {
-    id: string;
-    source: string;
-    target: string;
-    createdAt: string;
-}
-
-const formatFavoritePathLabel = (favorite: FavoritePath) =>
-    `${favorite.source.slice(0, 6)}...${favorite.source.slice(-4)} -> ${favorite.target.slice(0, 6)}...${favorite.target.slice(-4)}`;
-
-const loadFavoritePaths = (): FavoritePath[] => {
-    try {
-        const raw = window.localStorage.getItem(FAVORITE_PATHS_STORAGE_KEY);
-        if (!raw) return [];
-
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-
-        return parsed.filter((item): item is FavoritePath => (
-            typeof item?.id === "string" &&
-            typeof item?.source === "string" &&
-            typeof item?.target === "string" &&
-            typeof item?.createdAt === "string"
-        ));
-    } catch {
-        return [];
-    }
+const formatFavoritePathLabel = (favorite: FavoritePathResponse) => {
+    if (favorite.label) return favorite.label;
+    return `${favorite.source.slice(0, 6)}...${favorite.source.slice(-4)} -> ${favorite.target.slice(0, 6)}...${favorite.target.slice(-4)}`;
 };
 
 export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplorerPageProps) {
@@ -96,7 +82,8 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
     const [pathTarget, setPathTarget] = useState("");
     const [pathResult, setPathResult] = useState<PathResponse | null>(null);
     const [pathLoading, setPathLoading] = useState(false);
-    const [favoritePaths, setFavoritePaths] = useState<FavoritePath[]>(() => loadFavoritePaths());
+    const { isAuthenticated } = useAuth();
+    const [favoritePaths, setFavoritePaths] = useState<FavoritePathResponse[]>([]);
     const [selectedFavoritePathId, setSelectedFavoritePathId] = useState("");
     const [detectionPattern, setDetectionPattern] = useState<DetectionPattern>("peel-chain");
     const [detectionAddress, setDetectionAddress] = useState("");
@@ -120,8 +107,24 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
     }, [graphData?.center_address, detectionAddress]);
 
     useEffect(() => {
-        window.localStorage.setItem(FAVORITE_PATHS_STORAGE_KEY, JSON.stringify(favoritePaths));
-    }, [favoritePaths]);
+        if (!isAuthenticated) {
+            setFavoritePaths([]);
+            setSelectedFavoritePathId("");
+            return;
+        }
+        let cancelled = false;
+        listFavoritePaths()
+            .then((items) => {
+                if (!cancelled) setFavoritePaths(items);
+            })
+            .catch((err) => {
+                if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load favorites");
+            });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isAuthenticated]);
 
     const handleSearch = async (address: string, opts?: { waitForGraph?: boolean }) => {
         // Keep URL in sync so a refresh restores this view.
@@ -505,7 +508,12 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
         return favoritePaths.find((favorite) => favorite.source === source && favorite.target === target) ?? null;
     }, [favoritePaths, pathSource, pathTarget]);
 
-    const handleSaveFavoritePath = () => {
+    const handleSaveFavoritePath = async () => {
+        if (!isAuthenticated) {
+            toast.error("Sign in to save favorite paths");
+            return;
+        }
+
         const source = normalizePathAddress(pathSource);
         const target = normalizePathAddress(pathTarget);
 
@@ -524,21 +532,19 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
             return;
         }
 
-        const favorite: FavoritePath = {
-            id: `${source}-${target}`,
-            source,
-            target,
-            createdAt: new Date().toISOString(),
-        };
-
-        setFavoritePaths((prev) => [favorite, ...prev]);
-        setSelectedFavoritePathId(favorite.id);
-        toast.success("Favorite path saved");
+        try {
+            const favorite = await createFavoritePath({ source, target });
+            setFavoritePaths((prev) => [favorite, ...prev]);
+            setSelectedFavoritePathId(String(favorite.id));
+            toast.success("Favorite path saved");
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to save favorite");
+        }
     };
 
     const handleSelectFavoritePath = (favoriteId: string) => {
         setSelectedFavoritePathId(favoriteId);
-        const favorite = favoritePaths.find((item) => item.id === favoriteId);
+        const favorite = favoritePaths.find((item) => String(item.id) === favoriteId);
         if (!favorite) return;
 
         setPathSource(favorite.source);
@@ -546,16 +552,22 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
         setPathResult(null);
     };
 
-    const handleRemoveSelectedFavoritePath = () => {
-        const favorite = favoritePaths.find((item) => item.id === selectedFavoritePathId) ?? currentFavoritePath;
+    const handleRemoveSelectedFavoritePath = async () => {
+        const favorite =
+            favoritePaths.find((item) => String(item.id) === selectedFavoritePathId) ?? currentFavoritePath;
         if (!favorite) {
             toast.error("Select a favorite path to remove");
             return;
         }
 
-        setFavoritePaths((prev) => prev.filter((item) => item.id !== favorite.id));
-        setSelectedFavoritePathId("");
-        toast.info("Favorite path removed");
+        try {
+            await deleteFavoritePath(favorite.id);
+            setFavoritePaths((prev) => prev.filter((item) => item.id !== favorite.id));
+            setSelectedFavoritePathId("");
+            toast.info("Favorite path removed");
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to remove favorite");
+        }
     };
 
     const handleFindPath = async () => {
@@ -770,7 +782,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                             >
                                 <option value="">Favorite paths</option>
                                 {favoritePaths.map((favorite) => (
-                                    <option key={favorite.id} value={favorite.id}>
+                                    <option key={favorite.id} value={String(favorite.id)}>
                                         {formatFavoritePathLabel(favorite)}
                                     </option>
                                 ))}

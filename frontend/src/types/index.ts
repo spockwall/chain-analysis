@@ -319,3 +319,17 @@ export interface AnnotationResponse {
     confidence: number | null;
     created_at: string;
 }
+
+export interface FavoritePathResponse {
+    id: number;
+    source: string;
+    target: string;
+    label: string | null;
+    created_at: string;
+}
+
+export interface FavoritePathCreateRequest {
+    source: string;
+    target: string;
+    label?: string | null;
+}
