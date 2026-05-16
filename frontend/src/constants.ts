@@ -54,6 +54,15 @@ export const ENTITY_COLORS: Record<EntityType, string> = {
     Unknown:      "#94a3b8", // slate-400
 };
 
+// ── Flow direction colors (inflow = received, outflow = sent) ────────────────
+// Same hues are used by the Cytoscape stylesheet and the NodePanel arrows so
+// the legend in your head stays the same: green = money in, orange = money out.
+
+export const FLOW_COLORS = {
+    inflow: "#10b981",  // emerald-500
+    outflow: "#f97316", // orange-500
+} as const;
+
 // ── Entity type human-readable labels ─────────────────────────────────────────
 
 export const ENTITY_LABEL: Record<EntityType, string> = {

@@ -21,6 +21,11 @@ export interface GraphFilters {
     entityTypes: Set<string>;
     riskLevels: Set<string>;
     addressSearch: string;
+    // Direction filters apply to edges touching the center node.
+    // Edges between two neighbors are unaffected (no canonical direction
+    // relative to the center).
+    showInflow: boolean;
+    showOutflow: boolean;
 }
 
 interface GraphCanvasProps {
@@ -170,6 +175,9 @@ export function GraphCanvas({
 
                 // When tracing is enabled, edges connected to the synthetic group aren't "outgoing" from the center in the same way
                 const isOutgoing = tx.from_address === data.center_address;
+                const touchesCenter =
+                    !!data.center_address &&
+                    (tx.from_address === data.center_address || tx.to_address === data.center_address);
 
                 const [sourceId, targetId] = key.split("::");
 
@@ -185,6 +193,7 @@ export function GraphCanvas({
                         label: formatWei(tx.value),
                         controlPointDistance,
                         isOutgoing,
+                        touchesCenter,
                     },
                 });
             });
@@ -258,8 +267,16 @@ export function GraphCanvas({
             }
         });
         cy.edges().forEach((e) => {
+            // Hide if either endpoint is hidden by entity/risk filters.
             if ((cy.getElementById(e.data("source")) as any).hidden() || (cy.getElementById(e.data("target")) as any).hidden()) {
                 (e as any).hide();
+                return;
+            }
+            // Direction filter — only applies to edges touching the center.
+            if (e.data("touchesCenter")) {
+                const isOut = !!e.data("isOutgoing");
+                if (isOut && !filters.showOutflow) (e as any).hide();
+                else if (!isOut && !filters.showInflow) (e as any).hide();
             }
         });
         cy.nodes().removeClass("search-match");

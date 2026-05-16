@@ -10,8 +10,12 @@ const NODE_SIZE = 18;
 // Group nodes are scaled up so they stand out from regular entity nodes.
 const GROUP_NODE_SIZE = 34;
 
-const EDGE_COLOR_INCOMING = "#64748b88"; // slate-500 with alpha
-const EDGE_COLOR_OUTGOING = "#6080b088"; // slate-400 with alpha
+// Inflow = money received by the center node (edge points INTO center).
+// Outflow = money sent by the center node (edge originates from center).
+// Hex values match FLOW_COLORS in constants.ts; the trailing alpha keeps
+// the canvas readable without making the colors look painted-on.
+const EDGE_COLOR_INCOMING = "#10b98199"; // emerald-500 with alpha — inflow
+const EDGE_COLOR_OUTGOING = "#f9731699"; // orange-500 with alpha  — outflow
 const EDGE_COLOR_PATH = "#3b82f6"; // blue-500
 const EDGE_COLOR_DEFAULT = "#e2e8f0"; // slate-200
 

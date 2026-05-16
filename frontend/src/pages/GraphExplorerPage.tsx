@@ -17,7 +17,7 @@ import type {
     TransactionResponse,
 } from "../types";
 import { fetchDetection, fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
-import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
+import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR, FLOW_COLORS } from "../constants";
 import { Background } from "../components/Background";
 
 interface GraphExplorerPageProps {
@@ -29,6 +29,8 @@ const DEFAULT_FILTERS: GraphFilters = {
     entityTypes: new Set(ENTITY_TYPES),
     riskLevels: new Set(RISK_LEVELS),
     addressSearch: "",
+    showInflow: true,
+    showOutflow: true,
 };
 
 // shared input style used in path-finder and filter panel
@@ -992,6 +994,40 @@ export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplor
                                                 {level}
                                             </label>
                                         ))}
+                                    </div>
+
+                                    <div className="px-2.5 py-2 flex flex-col gap-1 border-b border-gray-100">
+                                        <span className="text-[0.65rem] font-semibold tracking-widest uppercase text-gray-400 mb-1">
+                                            Flow Direction
+                                        </span>
+                                        <label className="flex items-center gap-1.5 text-[0.73rem] text-gray-500 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={filters.showInflow}
+                                                onChange={() =>
+                                                    setFilters((prev) => ({ ...prev, showInflow: !prev.showInflow }))
+                                                }
+                                            />
+                                            <span
+                                                className="w-1.5 h-1.5 rounded-full shrink-0"
+                                                style={{ background: FLOW_COLORS.inflow }}
+                                            />
+                                            Inflow (received)
+                                        </label>
+                                        <label className="flex items-center gap-1.5 text-[0.73rem] text-gray-500 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={filters.showOutflow}
+                                                onChange={() =>
+                                                    setFilters((prev) => ({ ...prev, showOutflow: !prev.showOutflow }))
+                                                }
+                                            />
+                                            <span
+                                                className="w-1.5 h-1.5 rounded-full shrink-0"
+                                                style={{ background: FLOW_COLORS.outflow }}
+                                            />
+                                            Outflow (sent)
+                                        </label>
                                     </div>
 
                                     <div className="px-2.5 py-2 flex flex-col gap-1 border-b border-gray-100">

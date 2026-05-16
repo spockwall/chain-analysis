@@ -15,7 +15,7 @@ import {
 } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
 import { useIngestionRuns } from "../context/IngestionRunsContext";
-import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
+import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls, FLOW_COLORS } from "../constants";
 import { CopyButton } from "./CopyButton";
 
 interface NodePanelProps {
@@ -150,6 +150,32 @@ export function NodePanel({
     const txForNode = (transactions ?? []).filter(
         (tx) => tx.from_address === node.address || tx.to_address === node.address,
     );
+    const inflowTxs = txForNode.filter((tx) => tx.to_address === node.address);
+    const outflowTxs = txForNode.filter((tx) => tx.from_address === node.address);
+    const [flowTab, setFlowTab] = useState<"all" | "in" | "out">("all");
+    // Reset to the All tab whenever a different node is selected.
+    useEffect(() => {
+        setFlowTab("all");
+    }, [node.address]);
+
+    // Sum tx values for inflow/outflow totals. Values come from the API as
+    // wei-encoded strings; BigInt avoids precision loss on large transfers.
+    const sumWei = (txs: TransactionResponse[]) => {
+        let total = 0n;
+        for (const tx of txs) {
+            if (!tx.value) continue;
+            try {
+                total += BigInt(tx.value);
+            } catch {
+                // skip non-integer values
+            }
+        }
+        return total.toString();
+    };
+    const inflowTotal = sumWei(inflowTxs);
+    const outflowTotal = sumWei(outflowTxs);
+
+    const visibleTxs = flowTab === "in" ? inflowTxs : flowTab === "out" ? outflowTxs : txForNode;
 
     return (
         <>
@@ -472,36 +498,98 @@ export function NodePanel({
                                         : `${txForNode.length.toLocaleString()}`}
                                 </span>
                             </p>
-                            <div className="flex flex-col gap-0.5 max-h-72 overflow-y-auto pr-1">
-                                {txForNode.map((tx) => {
-                                    const isSent = tx.from_address === node.address;
-                                    const counterparty = isSent ? tx.to_address : tx.from_address;
+
+                            {/* Inflow / outflow totals */}
+                            <div className="grid grid-cols-2 gap-2 mb-2">
+                                <div
+                                    className="rounded border px-2 py-1.5"
+                                    style={{ borderColor: `${FLOW_COLORS.inflow}55` }}
+                                >
+                                    <div className="flex items-center gap-1 text-[0.65rem] font-semibold uppercase tracking-wider" style={{ color: FLOW_COLORS.inflow }}>
+                                        <span>↓ Inflow</span>
+                                        <span className="text-gray-400 font-normal">· {inflowTxs.length}</span>
+                                    </div>
+                                    <div className="text-[0.78rem] font-semibold text-gray-900 mt-0.5">
+                                        {formatWei(inflowTotal)}
+                                    </div>
+                                </div>
+                                <div
+                                    className="rounded border px-2 py-1.5"
+                                    style={{ borderColor: `${FLOW_COLORS.outflow}55` }}
+                                >
+                                    <div className="flex items-center gap-1 text-[0.65rem] font-semibold uppercase tracking-wider" style={{ color: FLOW_COLORS.outflow }}>
+                                        <span>↑ Outflow</span>
+                                        <span className="text-gray-400 font-normal">· {outflowTxs.length}</span>
+                                    </div>
+                                    <div className="text-[0.78rem] font-semibold text-gray-900 mt-0.5">
+                                        {formatWei(outflowTotal)}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Direction tabs */}
+                            <div className="flex gap-1 mb-2">
+                                {(["all", "in", "out"] as const).map((tab) => {
+                                    const active = flowTab === tab;
+                                    const label =
+                                        tab === "all"
+                                            ? `All · ${txForNode.length}`
+                                            : tab === "in"
+                                                ? `Inflow · ${inflowTxs.length}`
+                                                : `Outflow · ${outflowTxs.length}`;
                                     return (
                                         <button
-                                            key={tx.hash}
-                                            className="grid grid-cols-[16px_1fr_auto_auto] items-center gap-2 px-[7px] py-[5px] rounded border-none bg-transparent cursor-pointer text-left w-full transition-colors hover:bg-gray-50"
-                                            onClick={() => onNavigateToAddress?.(counterparty)}
-                                            title={`${isSent ? "Sent to" : "Received from"} ${counterparty}`}
+                                            key={tab}
+                                            onClick={() => setFlowTab(tab)}
+                                            className={`px-2 py-[3px] rounded border text-[0.68rem] font-semibold transition-colors ${
+                                                active
+                                                    ? "bg-gray-900 text-white border-gray-900"
+                                                    : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                                            }`}
                                         >
-                                            <span
-                                                className={`font-bold text-[0.85rem] leading-none ${isSent ? "text-orange-500" : "text-green-500"}`}
-                                            >
-                                                {isSent ? "↑" : "↓"}
-                                            </span>
-                                            <span className="text-[0.72rem] font-mono text-gray-500 overflow-hidden text-ellipsis whitespace-nowrap">
-                                                {formatAddress(counterparty, 4)}
-                                            </span>
-                                            <span className="text-[0.7rem] font-semibold text-gray-900 whitespace-nowrap">
-                                                {formatWei(tx.value)}
-                                            </span>
-                                            {tx.block_number != null && (
-                                                <span className="text-[0.65rem] text-gray-400 whitespace-nowrap">
-                                                    #{tx.block_number.toLocaleString()}
-                                                </span>
-                                            )}
+                                            {label}
                                         </button>
                                     );
                                 })}
+                            </div>
+
+                            <div className="flex flex-col gap-0.5 max-h-72 overflow-y-auto pr-1">
+                                {visibleTxs.length === 0 ? (
+                                    <p className="text-[0.7rem] text-gray-400 italic">
+                                        No {flowTab === "in" ? "inflow" : "outflow"} transactions in view.
+                                    </p>
+                                ) : (
+                                    visibleTxs.map((tx) => {
+                                        const isSent = tx.from_address === node.address;
+                                        const counterparty = isSent ? tx.to_address : tx.from_address;
+                                        return (
+                                            <button
+                                                key={tx.hash}
+                                                className="grid grid-cols-[16px_1fr_auto_auto] items-center gap-2 px-[7px] py-[5px] rounded border-none bg-transparent cursor-pointer text-left w-full transition-colors hover:bg-gray-50"
+                                                onClick={() => onNavigateToAddress?.(counterparty)}
+                                                title={`${isSent ? "Sent to" : "Received from"} ${counterparty}`}
+                                            >
+                                                <span
+                                                    className="font-bold text-[0.85rem] leading-none"
+                                                    style={{ color: isSent ? FLOW_COLORS.outflow : FLOW_COLORS.inflow }}
+                                                >
+                                                    {isSent ? "↑" : "↓"}
+                                                </span>
+                                                <span className="text-[0.72rem] font-mono text-gray-500 overflow-hidden text-ellipsis whitespace-nowrap">
+                                                    {formatAddress(counterparty, 4)}
+                                                </span>
+                                                <span className="text-[0.7rem] font-semibold text-gray-900 whitespace-nowrap">
+                                                    {formatWei(tx.value)}
+                                                </span>
+                                                {tx.block_number != null && (
+                                                    <span className="text-[0.65rem] text-gray-400 whitespace-nowrap">
+                                                        #{tx.block_number.toLocaleString()}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        );
+                                    })
+                                )}
                             </div>
                             {node.transaction_count != null && node.transaction_count > txForNode.length && (
                                 <p className="text-[0.65rem] text-gray-400 mt-1.5 mb-0">
