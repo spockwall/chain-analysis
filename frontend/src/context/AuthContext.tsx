@@ -5,14 +5,8 @@
  * Provides login, register, and logout helpers to any component.
  */
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import {
-    clearStoredToken,
-    fetchMe,
-    getStoredToken,
-    login as apiLogin,
-    register as apiRegister,
-    setStoredToken,
-} from "../api/client";
+import { fetchMe, login as apiLogin, register as apiRegister, } from "../api/client";
+import { request as apiRequest } from "../api/client";
 import type { RegisterRequest, UserResponse } from "../types";
 
 interface AuthContextValue {
@@ -41,34 +35,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<UserResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // On mount: restore session from localStorage token
+    // On mount: restore session by calling /auth/me (cookies included by client)
     useEffect(() => {
-        const token = getStoredToken();
-        if (!token) {
-            setLoading(false);
-            return;
-        }
         fetchMe()
             .then((u) => setUser(u))
-            .catch(() => clearStoredToken()) // token expired / invalid
+            .catch(() => setUser(null))
             .finally(() => setLoading(false));
     }, []);
 
     const login = useCallback(async (email: string, password: string) => {
         const res = await apiLogin({ email, password });
-        setStoredToken(res.access_token);
         setUser(res.user);
     }, []);
 
     const register = useCallback(async (username: string, email: string, password: string) => {
         const body: RegisterRequest = { username, email, password };
         const res = await apiRegister(body);
-        setStoredToken(res.access_token);
         setUser(res.user);
     }, []);
 
-    const logout = useCallback(() => {
-        clearStoredToken();
+    const logout = useCallback(async () => {
+        try {
+            await apiRequest("/auth/logout", { method: "POST", credentials: "include" }, true);
+        } catch {
+            // ignore errors
+        }
         setUser(null);
     }, []);
 

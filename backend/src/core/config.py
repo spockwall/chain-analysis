@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change-me-in-production-use-a-long-random-secret"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24  # 24 hours
+    # Refresh token settings
+    refresh_token_expire_days: int = 30
+    refresh_token_cookie_name: str = "refresh_token"
+    access_token_cookie_name: str = "access_token"
+    refresh_token_rotate_on_use: bool = True
 
     # =========================================================================
     # API Configuration

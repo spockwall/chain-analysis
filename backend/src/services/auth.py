@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from jose import JWTError, jwt  # noqa: F401 – re-exported for callers
+import hashlib
+import secrets
 
 
 # ---------------------------------------------------------------------------
@@ -54,9 +56,26 @@ def decode_access_token(token: str, secret_key: str, algorithm: str) -> dict:
     return jwt.decode(token, secret_key, algorithms=[algorithm])
 
 
+# ---------------------------------------------------------------------------
+# Refresh token helpers
+# ---------------------------------------------------------------------------
+
+
+def generate_refresh_token_plaintext(length: int = 48) -> str:
+    """Generate a secure random refresh token (plaintext)."""
+    return secrets.token_urlsafe(length)
+
+
+def hash_refresh_token(token_plain: str) -> str:
+    """Return a sha256 hex digest of the refresh token for DB storage."""
+    return hashlib.sha256(token_plain.encode()).hexdigest()
+
+
 __all__ = [
     "hash_password",
     "verify_password",
     "create_access_token",
     "decode_access_token",
+    "generate_refresh_token_plaintext",
+    "hash_refresh_token",
 ]

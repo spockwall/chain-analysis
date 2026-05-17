@@ -37,19 +37,8 @@ import type {
 
 const API_BASE = "/api";
 
-const TOKEN_KEY = "ca_access_token";
-
-export function getStoredToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setStoredToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearStoredToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
-}
+// Authentication tokens are stored server-side in httpOnly cookies.
+// Frontend uses `credentials: 'include'` and a refresh endpoint to obtain new access tokens.
 
 class ApiError extends Error {
     constructor(
@@ -61,18 +50,38 @@ class ApiError extends Error {
     }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}, noContent = false): Promise<T> {
+export async function request<T>(endpoint: string, options: RequestInit = {}, noContent = false): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
-    const token = getStoredToken();
-
     const response = await fetch(url, {
         ...options,
+        credentials: "include",
         headers: {
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
             ...options.headers,
         },
     });
+
+    // If access token expired, attempt silent refresh once and retry
+    if (response.status === 401) {
+        const refreshResp = await fetch(`${API_BASE}/auth/refresh`, { method: "POST", credentials: "include" });
+        if (refreshResp.ok) {
+            // retry original request once
+            const retry = await fetch(url, {
+                ...options,
+                credentials: "include",
+                headers: {
+                    "Content-Type": "application/json",
+                    ...options.headers,
+                },
+            });
+            if (!retry.ok) {
+                const errorData = await retry.json().catch(() => ({}));
+                throw new ApiError(errorData.detail || `HTTP ${retry.status}`, retry.status);
+            }
+            if (noContent) return undefined as T;
+            return retry.json();
+        }
+    }
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
