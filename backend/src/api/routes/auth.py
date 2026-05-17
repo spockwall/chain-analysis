@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from api.deps import RelationalDBDep, SettingsDep
-from api.models.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from api.models.auth import LoginRequest, RegisterRequest, TokenResponse, UserResponse, MessageResponse
 from db.models import User, UserRole, RefreshToken
 from services.auth import (
     create_access_token,
@@ -316,7 +316,7 @@ async def refresh(
 
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=MessageResponse)
 async def logout(request: Request, response: Response, db: RelationalDBDep, settings: SettingsDep):
     """Revoke refresh token and clear cookies."""
     refresh_plain = request.cookies.get(settings.refresh_token_cookie_name)

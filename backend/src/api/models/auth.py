@@ -44,6 +44,13 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+
+class MessageResponse(BaseModel):
+    """Generic single-field message response."""
+
+    detail: str
+
+
 class ManagedUserCreateRequest(BaseModel):
     """Request body for POST /api/admin/users."""
 
