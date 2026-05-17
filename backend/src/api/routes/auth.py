@@ -17,6 +17,7 @@ from db.models import User, UserRole, RefreshToken
 from services.auth import (
     create_access_token,
     decode_access_token,
+    hash_password,
     generate_refresh_token_plaintext,
     hash_refresh_token,
     verify_password,
