@@ -8,10 +8,7 @@ class TestSettings:
 
     def test_default_settings(self):
         """Test default settings values."""
-<<<<<<< HEAD
-=======
-        monkeypatch.chdir(tmp_path)
->>>>>>> 24c77a6 (fix: test bug)
+
         settings = Settings(_env_file=None)
 
         assert settings.environment == "local"
