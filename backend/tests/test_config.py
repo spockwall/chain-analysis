@@ -6,9 +6,10 @@ from src.core.config import Settings, get_settings
 class TestSettings:
     """Tests for Settings class."""
 
-    def test_default_settings(self):
+    def test_default_settings(self, monkeypatch):
         """Test default settings values."""
-
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        monkeypatch.delenv("JWT_PREVIOUS_SECRET_KEY", raising=False)
         settings = Settings(_env_file=None)
 
         assert settings.environment == "local"
