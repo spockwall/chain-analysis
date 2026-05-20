@@ -121,6 +121,29 @@ class User(Base):
     )
 
 
+class RevokedToken(Base):
+    """JWT deny-list entry created when a user logs out."""
+
+    __tablename__ = "revoked_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_revoked_tokens_token_hash", "token_hash", unique=True),
+        Index("ix_revoked_tokens_expires_at", "expires_at"),
+    )
+
+
 class LabelTask(Base):
     """A labeling task for an entity or subgraph."""
 

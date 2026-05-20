@@ -4,6 +4,7 @@ FastAPI application factory.
 Run with: uvicorn src.api.main:app --reload
 """
 
+import secrets
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -11,8 +12,10 @@ from agent_mcp.server import (
     chain_analysis_mcp_http_app as _chain_analysis_mcp_http_app,
     create_chain_analysis_mcp_http_app,
 )
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from jose import JWTError
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
@@ -33,9 +36,16 @@ from api.routes import (
     transactions_router,
     ingestion_router,
 )
+from api.routes.auth import (
+    ACCESS_TOKEN_COOKIE,
+    CSRF_TOKEN_COOKIE,
+    CSRF_TOKEN_HEADER,
+    SAFE_METHODS,
+)
 from core.config import get_settings
 from libs import logger
 from libs.rate_limiter import limiter
+from services.auth import decode_access_token
 
 
 chain_analysis_mcp_http_app = _chain_analysis_mcp_http_app
@@ -92,6 +102,41 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def csrf_cookie_middleware(request: Request, call_next):
+        if (
+            request.method.upper() not in SAFE_METHODS
+            and request.url.path
+            not in {"/api/auth/login", "/api/auth/register", "/api/auth/logout"}
+        ):
+            token = request.cookies.get(ACCESS_TOKEN_COOKIE)
+            if token:
+                try:
+                    payload = decode_access_token(
+                        token,
+                        settings.jwt_validation_secret_keys,
+                        settings.jwt_algorithm,
+                    )
+                except JWTError:
+                    payload = None
+
+                expected = payload.get("csrf") if payload else None
+                header_token = request.headers.get(CSRF_TOKEN_HEADER)
+                cookie_token = request.cookies.get(CSRF_TOKEN_COOKIE)
+                if (
+                    not isinstance(expected, str)
+                    or not header_token
+                    or not cookie_token
+                    or not secrets.compare_digest(header_token, cookie_token)
+                    or not secrets.compare_digest(header_token, expected)
+                ):
+                    return JSONResponse(
+                        {"detail": "CSRF token missing or invalid"},
+                        status_code=status.HTTP_403_FORBIDDEN,
+                    )
+
+        return await call_next(request)
 
     # Register routers — write_router must come before read router so Starlette
     # matches PUT/PATCH/DELETE before the GET-only /{address} route.

@@ -38,6 +38,9 @@ import type {
 } from "../types";
 
 const API_BASE = "/api";
+const CSRF_COOKIE = "csrf_token";
+const CSRF_HEADER = "X-CSRF-Token";
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
 
 class ApiError extends Error {
     constructor(
@@ -49,14 +52,26 @@ class ApiError extends Error {
     }
 }
 
+function readCookie(name: string): string | null {
+    if (typeof document === "undefined") return null;
+    const prefix = `${name}=`;
+    const cookie = document.cookie
+        .split("; ")
+        .find((part) => part.startsWith(prefix));
+    return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}, noContent = false): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
+    const method = (options.method ?? "GET").toUpperCase();
+    const csrfToken = SAFE_METHODS.has(method) ? null : readCookie(CSRF_COOKIE);
 
     const response = await fetch(url, {
         ...options,
         credentials: "include",  // Include httpOnly cookies in all requests
         headers: {
             "Content-Type": "application/json",
+            ...(csrfToken ? { [CSRF_HEADER]: csrfToken } : {}),
             ...options.headers,
         },
     });
