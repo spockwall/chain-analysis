@@ -1,0 +1,72 @@
+# Worker Deployment — the Kubernetes equivalent of the compose `worker`
+# service with `deploy.replicas`.
+#
+# Why this maps cleanly from compose (Issue #3 groundwork):
+#   - Task A (BRPOP queue)  — Redis dispatches each entry to one consumer;
+#     N pods sharing the queue is safe with no extra work.
+#   - Task B (refresh loop) — gated by a Redis lease (SET NX EX), so only
+#     one pod runs the refresh tick per interval.
+#   - Task C (XREADGROUP)   — Redis consumer groups are natively multi-
+#     consumer; each pod registers under a unique consumer name.
+#   - replica identity      — refresh.rs reads $HOSTNAME for the lease
+#     owner id; Kubernetes sets each pod's hostname to the pod name, which
+#     is unique, so this works unchanged.
+#
+# All cross-replica coordination is via Redis, not the orchestrator —
+# which is why the same worker image runs identically under compose or K8s.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: chain-analysis
+  labels:
+    app: worker
+spec:
+  # Equivalent of compose `deploy.replicas`. Scale with
+  # `kubectl scale deployment/worker --replicas=N` or edit here.
+  replicas: 3
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          # Built locally for now: `docker build -f etl-rs/Dockerfile
+          # --target worker -t chain-analysis/worker:local etl-rs`, then
+          # load into the local cluster (kind: `kind load docker-image`,
+          # minikube: `minikube image load`). A real multi-node cluster
+          # needs this pushed to a registry — see the K8s migration issue.
+          image: chain-analysis/worker:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: worker-config
+            - secretRef:
+                # Shared Secret defined at k8s/secret.example.yaml — same
+                # credentials power worker, backend, postgres, neo4j.
+                name: chain-analysis-secrets
+          ports:
+            # Prometheus metrics endpoint (observability.rs).
+            - name: metrics
+              containerPort: 9100
+          livenessProbe:
+            # The worker has no HTTP health route; a TCP check on the
+            # metrics port confirms the process is up and serving.
+            tcpSocket:
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+      # Worker is stateless (all state in Redis / PG / Neo4j); a pod can
+      # be killed and rescheduled freely. No volumes — logs go to stdout.
+      restartPolicy: Always

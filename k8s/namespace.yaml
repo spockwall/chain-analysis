@@ -1,0 +1,7 @@
+# All chain-analysis resources live in one namespace so they can be
+# applied / torn down as a unit (`kubectl apply -k k8s/`,
+# `kubectl delete namespace chain-analysis`).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chain-analysis

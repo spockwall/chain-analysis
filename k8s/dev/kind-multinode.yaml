@@ -1,0 +1,15 @@
+# Local multi-node "cross-machine" simulation. kind spins up each "node"
+# as a Docker container with containerd inside; pods then get scheduled
+# across those fake nodes exactly like a real multi-machine cluster.
+#
+# Bring up:
+#   kind create cluster --name chain-analysis --config k8s/dev/kind-multinode.yaml
+#
+# Tear down:
+#   kind delete cluster --name chain-analysis
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
