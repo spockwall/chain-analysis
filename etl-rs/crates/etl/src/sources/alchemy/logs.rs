@@ -17,14 +17,19 @@ use super::super::etherscan::hex;
 pub const TRANSFER_TOPIC0: &str =
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-pub async fn fetch_transfers(client: &Client, url: &str, block_num: u64) -> Result<Vec<Transfer>> {
+pub async fn fetch_transfers(
+    provider: &'static str,
+    client: &Client,
+    url: &str,
+    block_num: u64,
+) -> Result<Vec<Transfer>> {
     let tag = format!("0x{:x}", block_num);
     let params = json!([{
         "fromBlock": tag,
         "toBlock": tag,
         "topics": [TRANSFER_TOPIC0],
     }]);
-    let result = rpc::call(client, url, "eth_getLogs", params).await?;
+    let result = rpc::call(provider, client, url, "eth_getLogs", params).await?;
     let entries = result.as_array().cloned().unwrap_or_default();
 
     let mut out = Vec::with_capacity(entries.len());

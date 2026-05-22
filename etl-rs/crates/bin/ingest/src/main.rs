@@ -19,6 +19,7 @@ fn build_source(config: &etl::config::Config) -> Result<DynBlockSource> {
         etherscan_chain_id: config.etherscan_chain_id,
         alchemy_api_key: config.alchemy_api_key.clone(),
         alchemy_base_url: config.alchemy_base_url.clone(),
+        public_rpc_url: config.public_rpc_url.clone(),
     };
     let boxed = make_source(&src_cfg)?;
     Ok(Arc::from(boxed))
@@ -265,6 +266,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = etl::config::Config::from_env();
     let run_id = uuid::Uuid::new_v4().to_string();
+
+    // Wire the cross-replica rate limiter. Reads <PROVIDER>_RATE_LIMIT_PER_SEC
+    // env vars; sources `acquire(provider)` before every HTTP call. Safe to
+    // call unconditionally — no-op for providers without an env var.
+    if let Err(e) = etl::sources::rate_limiter::init_limiters(&config.redis_url).await {
+        tracing::warn!(error = %e, "rate limiter: init failed, sources will run unthrottled");
+    }
 
     match cli.cmd {
         Some(Cmd::Block {

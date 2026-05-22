@@ -1,11 +1,15 @@
 //! Thin JSON-RPC envelope over reqwest. Handles 429 retries with exponential
 //! backoff (same policy as Etherscan), extracts the `result` or `error` field.
+//! Shared between `AlchemySource` and `PublicRpcSource`; the `provider` arg
+//! routes calls to the right rate-limit bucket (`alchemy` vs `public_rpc`).
 
 use eyre::{bail, Result};
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tracing::warn;
+
+use crate::sources::rate_limiter;
 
 const MAX_RETRIES: u32 = 5;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
@@ -15,7 +19,13 @@ const MAX_BACKOFF: Duration = Duration::from_secs(5);
 ///
 /// Errors if the response contains an `error` object or HTTP status is
 /// non-success after retries.
-pub async fn call(client: &Client, url: &str, method: &str, params: Value) -> Result<Value> {
+pub async fn call(
+    provider: &'static str,
+    client: &Client,
+    url: &str,
+    method: &str,
+    params: Value,
+) -> Result<Value> {
     let body = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -28,6 +38,11 @@ pub async fn call(client: &Client, url: &str, method: &str, params: Value) -> Re
 
     loop {
         attempt += 1;
+        // Drain a token from the per-provider bucket before each attempt.
+        // The retry loop below is *additional* defence against the rare 429
+        // that slips past the limiter (e.g. burst beyond capacity, clock
+        // skew between replicas).
+        rate_limiter::acquire(provider).await;
         let resp = client.post(url).json(&body).send().await?;
 
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {

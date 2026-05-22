@@ -1,0 +1,86 @@
+# FastAPI backend. backend/entrypoint.sh runs alembic migrations + seeds
+# on every container start, then `uvicorn`. Single replica avoids racing
+# the migrations against itself — for HA, extract migrations into an
+# initContainer or a one-shot Job and only then scale replicas.
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: chain-analysis
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: chain-analysis
+data:
+  ENVIRONMENT: "local"
+  NEO4J_URI: "bolt://neo4j:7687"
+  NEO4J_USER: "neo4j"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "chain_analysis"
+  POSTGRES_USER: "postgres"
+  REDIS_URL: "redis://redis:6379"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: chain-analysis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          # Build locally: docker build -f backend/Dockerfile -t chain-analysis/backend:local .
+          # Then load into the local cluster (kind / minikube / Docker Desktop).
+          # A real multi-node cluster needs this pushed to a registry.
+          image: chain-analysis/backend:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: chain-analysis-secrets
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+# To reach the backend from your host (no Ingress in dev):
+#   kubectl -n chain-analysis port-forward svc/backend 8000:8000
+# then hit http://localhost:8000/health

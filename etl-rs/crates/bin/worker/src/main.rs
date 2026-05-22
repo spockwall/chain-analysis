@@ -38,6 +38,15 @@ async fn main() -> Result<()> {
     let ingest_cfg = Arc::new(cfg.ingest);
     let process_cfg = Arc::new(cfg.process);
 
+    // Cross-replica rate limiter — reads <PROVIDER>_RATE_LIMIT_PER_SEC env
+    // vars and installs a Redis-backed fixed-window counter for each
+    // configured provider. Sources call rate_limiter::acquire(provider)
+    // before every HTTP request. No-op for providers without an env var,
+    // so this is safe to call unconditionally.
+    if let Err(e) = etl::sources::rate_limiter::init_limiters(&ingest_cfg.redis_url).await {
+        tracing::warn!(error = %e, "rate limiter: init failed, sources will run unthrottled");
+    }
+
     let pg = sqlx::PgPool::connect(&process_cfg.postgres_url).await?;
 
     // One ConnectionManager for A+B (queue), a second one implicit inside

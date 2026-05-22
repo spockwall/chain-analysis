@@ -11,9 +11,14 @@ use crate::types::Trace;
 use super::rpc;
 use super::super::etherscan::hex;
 
-pub async fn trace_block(client: &Client, url: &str, block_num: u64) -> Result<Vec<Trace>> {
+pub async fn trace_block(
+    provider: &'static str,
+    client: &Client,
+    url: &str,
+    block_num: u64,
+) -> Result<Vec<Trace>> {
     let tag = format!("0x{:x}", block_num);
-    let result = rpc::call(client, url, "trace_block", json!([tag])).await?;
+    let result = rpc::call(provider, client, url, "trace_block", json!([tag])).await?;
     let entries = result.as_array().cloned().unwrap_or_default();
 
     let mut out = Vec::with_capacity(entries.len());

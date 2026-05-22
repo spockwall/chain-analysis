@@ -12,6 +12,7 @@ use super::rpc;
 use super::super::etherscan::hex;
 
 pub async fn enrich_with_receipts(
+    provider: &'static str,
     client: &Client,
     url: &str,
     block_num: u64,
@@ -21,7 +22,7 @@ pub async fn enrich_with_receipts(
         return Ok(());
     }
     let tag = format!("0x{:x}", block_num);
-    let result = rpc::call(client, url, "eth_getBlockReceipts", json!([tag])).await?;
+    let result = rpc::call(provider, client, url, "eth_getBlockReceipts", json!([tag])).await?;
     let receipts = result.as_array().cloned().unwrap_or_default();
 
     // Map tx_hash → (gasUsed, contractAddress)

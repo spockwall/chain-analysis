@@ -1,0 +1,88 @@
+# PostgreSQL — entity_features, ingestion_runs, raw_transactions,
+# known_labels, label_tasks, annotations, users. Single replica for dev;
+# HA in prod typically uses a managed Postgres (Cloud SQL / RDS / Aurora)
+# rather than running stateful Postgres in K8s.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: chain-analysis
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: chain-analysis
+data:
+  POSTGRES_USER: "postgres"
+  POSTGRES_DB: "chain_analysis"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: chain-analysis
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+          env:
+            # Password pulled from the shared Secret. On first start
+            # Postgres uses this to initialise the `postgres` superuser.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chain-analysis-secrets
+                  key: POSTGRES_PASSWORD
+          ports:
+            - containerPort: 5432
+              name: postgres
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

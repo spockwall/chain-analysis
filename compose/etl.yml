@@ -4,11 +4,20 @@
 # Task C: drains Redis Streams into Neo4j + Postgres.
 services:
   # =============================================================================
-  # Rust worker — single long-running container with three tokio tasks:
+  # Rust worker — horizontally scaled (deploy.replicas) container running
+  # three tokio tasks per replica:
   #   A) BRPOP `ingest:targeted_queue` for user-triggered targeted fetches
-  #   B) periodic refresh of known_labels ∪ high-risk entities
+  #      — multi-reader safe, Redis dispatches each entry to exactly one
+  #      consumer, so replicas naturally share the queue.
+  #   B) periodic refresh of known_labels ∪ high-risk entities — gated by
+  #      a Redis distributed lease (see refresh.rs) so only one replica
+  #      enqueues per interval; the rest sit out the tick.
   #   C) XREADGROUP drain of `ingested_*` streams into Neo4j + Postgres
+  #      — Redis consumer groups are natively multi-consumer; each replica
+  #      registers under a unique `consumer-{pid}` name.
   # Replaces the old `process` container (deleted in Phase I).
+  # `container_name:` is intentionally omitted so multiple replicas can run
+  # with auto-generated names (`chain-analysis-worker-1` etc.).
   # =============================================================================
   worker:
     build:
@@ -16,8 +25,15 @@ services:
       dockerfile: Dockerfile
       target: worker
     image: chain-analysis/worker:local
-    container_name: chain-analysis-worker
     restart: unless-stopped
+    deploy:
+      # Horizontal scaling. Override per-environment via the
+      # `WORKER_REPLICAS` host env var (Compose substitutes at parse time).
+      # NOTE: `deploy.replicas` is only honoured by Swarm (`docker stack
+      # deploy`). Plain `docker compose up` ignores it — to run N replicas
+      # there, scale explicitly:
+      #   docker compose up -d --scale worker=${WORKER_REPLICAS:-3}
+      replicas: ${WORKER_REPLICAS:-3}
     env_file:
       - ./secrets.dev.env
     environment:

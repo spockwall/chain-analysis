@@ -1,3 +1,4 @@
+use crate::sources::rate_limiter;
 use crate::types::{Trace, Transaction, Transfer};
 use eyre::{bail, Result};
 use reqwest::Client;
@@ -7,6 +8,9 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use super::hex;
+
+/// Rate-limiter bucket tag for every Etherscan HTTP call in this module.
+const PROVIDER: &str = "etherscan";
 
 const MAX_RETRIES: u32 = 5;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
@@ -76,6 +80,7 @@ pub async fn fetch_address_transactions(
 
     loop {
         attempt += 1;
+        rate_limiter::acquire(PROVIDER).await;
 
         let response = client
             .get(base_url)
@@ -171,6 +176,7 @@ pub async fn fetch_address_internal_txs(
 
     loop {
         attempt += 1;
+        rate_limiter::acquire(PROVIDER).await;
 
         let response = client
             .get(base_url)
@@ -272,6 +278,7 @@ pub async fn fetch_address_token_transfers(
 
     loop {
         attempt += 1;
+        rate_limiter::acquire(PROVIDER).await;
 
         let response = client
             .get(base_url)

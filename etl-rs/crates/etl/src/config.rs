@@ -22,12 +22,17 @@ pub struct Config {
     pub targeted_queue_key: String,
     /// Postgres URL for targeted-ingest modes that query `label_tasks`.
     pub postgres_url: Option<String>,
-    /// Data-source selector: `"etherscan"` | `"alchemy"` | `"mock"`. Unset →
-    /// inferred from whichever provider key is populated, defaulting to mock.
+    /// Data-source selector: `"etherscan"` | `"alchemy"` | `"public_rpc"` |
+    /// `"failover"` | `"mock"`. Unset → inferred from whichever provider key
+    /// is populated, defaulting to mock.
     pub ingest_source: Option<String>,
     pub alchemy_api_key: Option<String>,
     pub alchemy_base_url: String,
     pub alchemy_chain: String,
+    /// Endpoint for the keyless public RPC tier. Used by `INGEST_SOURCE=public_rpc`
+    /// and as the last fallback in `INGEST_SOURCE=failover`. Unset → the
+    /// `sources::public_rpc::DEFAULT_PUBLIC_RPC_URL` default (Ankr).
+    pub public_rpc_url: Option<String>,
 }
 
 impl Config {
@@ -56,6 +61,9 @@ impl Config {
                 "https://eth-mainnet.g.alchemy.com/v2/",
             ),
             alchemy_chain: env_or("ALCHEMY_CHAIN", "eth-mainnet"),
+            public_rpc_url: std::env::var("PUBLIC_RPC_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
         }
     }
 }

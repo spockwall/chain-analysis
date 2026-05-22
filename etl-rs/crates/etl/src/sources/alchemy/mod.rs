@@ -41,21 +41,27 @@ impl AlchemySource {
     }
 }
 
+/// Tag identifying this source for the rate-limiter bucket. Lives as a
+/// const so `&'static str` plumbing matches the alchemy submodule signature.
+const PROVIDER: &str = "alchemy";
+
 #[async_trait]
 impl BlockSource for AlchemySource {
     fn name(&self) -> &'static str {
-        "alchemy"
+        PROVIDER
     }
 
     async fn latest_block(&self) -> Result<u64> {
-        block::eth_block_number(&self.client, &self.url).await
+        block::eth_block_number(PROVIDER, &self.client, &self.url).await
     }
 
     async fn fetch_block(&self, block_num: u64) -> Result<Vec<Transaction>> {
-        let mut txs = block::eth_get_block_by_number(&self.client, &self.url, block_num).await?;
+        let mut txs =
+            block::eth_get_block_by_number(PROVIDER, &self.client, &self.url, block_num).await?;
         // Enrich with receipts (gas_used, contract_address). Non-fatal on failure.
-        if let Err(e) = receipts::enrich_with_receipts(&self.client, &self.url, block_num, &mut txs)
-            .await
+        if let Err(e) =
+            receipts::enrich_with_receipts(PROVIDER, &self.client, &self.url, block_num, &mut txs)
+                .await
         {
             tracing::warn!(block = block_num, error = %e, "receipt enrichment failed");
         }
@@ -63,14 +69,14 @@ impl BlockSource for AlchemySource {
     }
 
     async fn fetch_traces(&self, block_num: u64) -> Result<Vec<Trace>> {
-        traces::trace_block(&self.client, &self.url, block_num).await
+        traces::trace_block(PROVIDER, &self.client, &self.url, block_num).await
     }
 
     async fn fetch_transfers(&self, block_num: u64) -> Result<Vec<Transfer>> {
-        logs::fetch_transfers(&self.client, &self.url, block_num).await
+        logs::fetch_transfers(PROVIDER, &self.client, &self.url, block_num).await
     }
 
     async fn fetch_tx_by_hash(&self, tx_hash: &str) -> Result<Option<Transaction>> {
-        block::eth_get_transaction_by_hash(&self.client, &self.url, tx_hash).await
+        block::eth_get_transaction_by_hash(PROVIDER, &self.client, &self.url, tx_hash).await
     }
 }
