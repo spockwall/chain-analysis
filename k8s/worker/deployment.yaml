@@ -1,7 +1,7 @@
 # Worker Deployment — the Kubernetes equivalent of the compose `worker`
 # service with `deploy.replicas`.
 #
-# Why this maps cleanly from compose (Issue #3 groundwork):
+# Why this maps cleanly from compose (Issue #27 groundwork):
 #   - Task A (BRPOP queue)  — Redis dispatches each entry to one consumer;
 #     N pods sharing the queue is safe with no extra work.
 #   - Task B (refresh loop) — gated by a Redis lease (SET NX EX), so only

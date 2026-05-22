@@ -26,7 +26,7 @@ data:
   NEIGHBORHOOD_TX_LIMIT_PER_ADDR: "500"
   MAX_PEERS_PER_HOP: "20"
 
-  # Cross-replica rate limits (Issue #3). Unset a key to leave that
+  # Cross-replica rate limits (Issue #27). Unset a key to leave that
   # provider unthrottled.
   ETHERSCAN_RATE_LIMIT_PER_SEC: "5"
   ALCHEMY_RATE_LIMIT_PER_SEC: "100"

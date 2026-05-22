@@ -1,6 +1,6 @@
 //! Cross-replica rate limiter backed by Redis fixed-window counters.
 //!
-//! Issue #3 acceptance: the Etherscan free tier is ~5 req/s, and naively
+//! Issue #27 acceptance: the Etherscan free tier is ~5 req/s, and naively
 //! scaling `worker` to N replicas would multiply our 429s instead of
 //! throughput. This module gives each provider (Etherscan / Alchemy /
 //! public RPC) a single Redis-backed counter — all replicas drain the

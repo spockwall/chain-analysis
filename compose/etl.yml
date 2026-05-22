@@ -29,6 +29,10 @@ services:
     deploy:
       # Horizontal scaling. Override per-environment via the
       # `WORKER_REPLICAS` host env var (Compose substitutes at parse time).
+      # NOTE: `deploy.replicas` is only honoured by Swarm (`docker stack
+      # deploy`). Plain `docker compose up` ignores it — to run N replicas
+      # there, scale explicitly:
+      #   docker compose up -d --scale worker=${WORKER_REPLICAS:-3}
       replicas: ${WORKER_REPLICAS:-3}
     env_file:
       - ./secrets.dev.env

@@ -1,6 +1,7 @@
 # All chain-analysis resources live in one namespace so they can be
-# applied / torn down as a unit (`kubectl apply -k k8s/`,
-# `kubectl delete namespace chain-analysis`).
+# torn down as a unit (`kubectl delete namespace chain-analysis`).
+# Apply per-directory with `kubectl apply -f` — see k8s/README.md for
+# the ordered bring-up (infra first, then backend, worker, frontend).
 apiVersion: v1
 kind: Namespace
 metadata:

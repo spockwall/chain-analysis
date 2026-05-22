@@ -11,7 +11,7 @@ overlay (managed K8s + managed databases) is a follow-up — see the
 k8s/
 ├── namespace.yaml            # Namespace: chain-analysis
 ├── secret.example.yaml       # TEMPLATE — shared Secret across all components
-├── worker/                   # Rust worker (3 replicas, Issue #3)
+├── worker/                   # Rust worker (3 replicas, Issue #27)
 │   ├── configmap.yaml
 │   └── deployment.yaml
 ├── infra/                    # Stateful tier (StatefulSet + PVC)
@@ -105,7 +105,7 @@ kubectl -n chain-analysis exec -it deployment/backend -- /bin/sh
 kubectl delete namespace chain-analysis
 ```
 
-## What transfers from Issue #3 unchanged
+## What transfers from Issue #27 unchanged
 
 The worker's multi-replica safety relies entirely on Redis-side
 coordination, which is orchestrator-agnostic:

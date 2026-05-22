@@ -438,9 +438,10 @@ impl<'a> TargetedJob<'a> {
         info!(?task_id, ?run_id, "Picked up targeted entry");
 
         let kind = spec_kind(&spec);
-        let started = Instant::now();
 
         Self::mark_pickup(self.pg, task_id, run_id.as_deref()).await;
+        // Time from pickup to terminal, mirroring the `pickup_at` column.
+        let started = Instant::now();
         let result = run_targeted(
             self.config,
             spec.into(),

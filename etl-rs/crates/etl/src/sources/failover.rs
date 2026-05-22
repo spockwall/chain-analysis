@@ -9,7 +9,7 @@
 //! `FailoverSource` is constructed; each method tries them top-down.
 //!
 //! Per-source rate limiting is **out of scope here** — see the Redis
-//! token-bucket limiter in `sources::rate_limiter`. This module only handles
+//! fixed-window limiter in `sources::rate_limiter`. This module only handles
 //! the "which source did the call land on" question.
 
 use async_trait::async_trait;
