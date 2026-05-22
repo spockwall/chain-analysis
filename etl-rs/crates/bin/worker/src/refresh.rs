@@ -15,6 +15,15 @@
 //! the lease on completion to avoid the clock-skew race where a slow
 //! replica releases a lease another replica has already re-acquired.
 //!
+//! The lease TTL is `interval - 30`, so there is a ~30s window each tick
+//! where no lease is held. If a second replica's tick happens to land in
+//! that window (clock skew / tick drift) it could win the lease and run a
+//! *second* refresh within the same interval. A shared last-refresh
+//! timestamp (`refresh_last_ts`, written from Redis server `TIME` so it's
+//! consistent across machines) guards that: after winning the lease a
+//! replica still skips if the previous refresh was less than one interval
+//! ago.
+//!
 //! The per-instance `cooldown` HashMap stays as-is: in the rare case lease
 //! ownership flips to a fresh replica, that replica might re-enqueue an
 //! address it has no record of. Downstream `effective_from_block` makes
@@ -41,6 +50,11 @@ const DEFAULT_REFRESH_TX_LIMIT: usize = 500;
 /// one Task B refresh schedule, so one lease is enough.
 const LEASE_KEY: &str = "refresh_lease";
 
+/// Redis key holding the Unix-seconds timestamp of the last refresh tick
+/// that actually ran. Used to suppress a second refresh inside one
+/// interval when the lease gap lets another replica slip through.
+const LAST_REFRESH_KEY: &str = "refresh_last_ts";
+
 /// Floor on the lease TTL. If `REFRESH_INTERVAL_SECS` is configured very
 /// short the natural `interval - 30` formula would give a negative or zero
 /// TTL; clamp it so the lease can't be set with a non-positive expiry.
@@ -55,6 +69,14 @@ fn replica_id() -> String {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("worker-pid-{}", std::process::id()))
+}
+
+/// Redis server clock in Unix seconds. Using the server's `TIME` rather
+/// than each replica's local clock keeps the last-refresh guard correct
+/// even when worker replicas run on different machines.
+async fn redis_now_secs(redis: &mut ConnectionManager) -> Option<i64> {
+    let res: redis::RedisResult<(i64, i64)> = redis::cmd("TIME").query_async(redis).await;
+    res.ok().map(|(secs, _micros)| secs)
 }
 
 pub async fn run(
@@ -124,6 +146,28 @@ pub async fn run(
                 warn!(iter, replica = %replica, error = %e, "Task B: lease acquisition failed, skipping tick");
                 continue;
             }
+        }
+
+        // Second guard behind the lease: even holding the lease, bail if a
+        // refresh ran less than one interval ago. This closes the lease-gap
+        // window where a drifted replica could double-refresh. Best-effort —
+        // if the Redis clock or read is unavailable we proceed rather than
+        // stall refreshes entirely.
+        let now_secs = redis_now_secs(&mut redis).await;
+        if let Some(now) = now_secs {
+            let last: Option<i64> = redis.get(LAST_REFRESH_KEY).await.ok().flatten();
+            if let Some(last) = last {
+                if now.saturating_sub(last) < refresh_interval_secs as i64 {
+                    debug!(
+                        iter,
+                        replica = %replica,
+                        since_last_secs = now - last,
+                        "Task B: refresh ran <1 interval ago, skipping tick"
+                    );
+                    continue;
+                }
+            }
+            let _: redis::RedisResult<()> = redis.set(LAST_REFRESH_KEY, now).await;
         }
 
         let tick_started = Instant::now();
