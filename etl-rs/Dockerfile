@@ -1,44 +1,38 @@
-# Multi-stage build for Rust ETL binaries (ingest + process)
+# Multi-stage build for the Rust ETL binaries.
+# Builds `ingest`, `worker`, and `clickhouse-process` in one pass and
+# produces three minimal runtime images (selectable by --target).
 
-# =============================================================================
-# Stage 1: Build both binaries
-# =============================================================================
-FROM rust:1.86-slim AS builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev && \
-    rm -rf /var/lib/apt/lists/*
+FROM rust:1.89-slim-bookworm AS builder
 
 WORKDIR /build
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY Cargo.toml Cargo.lock ./
-COPY chain-analysis-common/ chain-analysis-common/
-COPY chain-analysis-ingest/ chain-analysis-ingest/
-COPY chain-analysis-process/ chain-analysis-process/
+COPY crates ./crates
 
-RUN cargo build --release
+RUN cargo build --release --workspace --bins
 
-# =============================================================================
-# Stage 2: Shared runtime base
-# =============================================================================
-FROM debian:bookworm-slim AS runtime
+
+FROM debian:bookworm-slim AS runtime-base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libssl3 && \
-    rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# =============================================================================
-# Stage 3a: Ingest binary
-# =============================================================================
-FROM runtime AS ingest
 
+FROM runtime-base AS ingest
 COPY --from=builder /build/target/release/ingest /usr/local/bin/ingest
-ENTRYPOINT ["ingest"]
+ENTRYPOINT ["/usr/local/bin/ingest"]
 
-# =============================================================================
-# Stage 3b: Process binary
-# =============================================================================
-FROM runtime AS process
 
-COPY --from=builder /build/target/release/process /usr/local/bin/process
-ENTRYPOINT ["process"]
+FROM runtime-base AS worker
+COPY --from=builder /build/target/release/worker /usr/local/bin/worker
+ENTRYPOINT ["/usr/local/bin/worker"]
+
+
+FROM runtime-base AS clickhouse-process
+COPY --from=builder /build/target/release/clickhouse-process /usr/local/bin/clickhouse-process
+ENTRYPOINT ["/usr/local/bin/clickhouse-process"]

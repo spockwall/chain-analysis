@@ -16,6 +16,8 @@ import type {
     UserResponse,
     UserRole,
 } from "../types";
+import { Badge } from "../components/ui/Badge";
+import { USER_ROLE_TONE, type Tone } from "../components/ui/tokens";
 
 type RoleFilter = "all" | UserRole;
 
@@ -25,16 +27,6 @@ const ROLE_LABELS: Record<UserRole, string> = {
     operator: "Operator",
     user: "User",
 };
-const ROLE_BADGES: Record<UserRole, string> = {
-    admin: "bg-violet-50 text-violet-700 border-violet-200",
-    operator: "bg-sky-50 text-sky-700 border-sky-200",
-    user: "bg-emerald-50 text-emerald-700 border-emerald-200",
-};
-
-const STATUS_BADGES = {
-    active: "bg-green-50 text-green-700 border-green-200",
-    inactive: "bg-gray-100 text-gray-600 border-gray-200",
-} as const;
 
 function emptyCreateForm(): AdminUserCreateRequest {
     return {
@@ -271,10 +263,10 @@ export function AdminUsersPage() {
                 </div>
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-                    <SummaryCard label="Active Accounts" value={String(totalActive)} accent="green" />
-                    <SummaryCard label="Operators" value={String(totalOperators)} accent="sky" />
-                    <SummaryCard label="Users" value={String(totalUsers)} accent="emerald" />
-                    <SummaryCard label="Admins" value={String(totalAdmins)} accent="violet" />
+                    <SummaryCard label="Active Accounts" value={String(totalActive)} tone="success" />
+                    <SummaryCard label="Operators" value={String(totalOperators)} tone="info" />
+                    <SummaryCard label="Users" value={String(totalUsers)} tone="success" />
+                    <SummaryCard label="Admins" value={String(totalAdmins)} tone="accent" />
                 </div>
 
                 <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -445,22 +437,14 @@ export function AdminUsersPage() {
                                                         </div>
                                                     </td>
                                                     <td className="py-3 pr-4 border-t border-gray-100">
-                                                        <span
-                                                            className={`inline-flex px-2.5 py-1 rounded-full border text-[0.7rem] font-semibold ${ROLE_BADGES[entry.role]}`}
-                                                        >
+                                                        <Badge tone={USER_ROLE_TONE[entry.role]}>
                                                             {ROLE_LABELS[entry.role]}
-                                                        </span>
+                                                        </Badge>
                                                     </td>
                                                     <td className="py-3 pr-4 border-t border-gray-100">
-                                                        <span
-                                                            className={`inline-flex px-2.5 py-1 rounded-full border text-[0.7rem] font-semibold ${
-                                                                entry.is_active
-                                                                    ? STATUS_BADGES.active
-                                                                    : STATUS_BADGES.inactive
-                                                            }`}
-                                                        >
+                                                        <Badge tone={entry.is_active ? "success" : "neutral"}>
                                                             {entry.is_active ? "Active" : "Inactive"}
-                                                        </span>
+                                                        </Badge>
                                                     </td>
                                                     <td className="py-3 pr-4 border-t border-gray-100 text-[0.75rem] text-gray-500">
                                                         {formatDate(entry.created_at)}
@@ -633,24 +617,15 @@ export function AdminUsersPage() {
 function SummaryCard({
     label,
     value,
-    accent,
+    tone,
 }: {
     label: string;
     value: string;
-    accent: "green" | "sky" | "emerald" | "violet";
+    tone: Tone;
 }) {
-    const accentMap = {
-        green: "bg-green-500/10 text-green-700",
-        sky: "bg-sky-500/10 text-sky-700",
-        emerald: "bg-emerald-500/10 text-emerald-700",
-        violet: "bg-violet-500/10 text-violet-700",
-    } as const;
-
     return (
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
-            <div className={`inline-flex px-2 py-0.5 rounded-full text-[0.65rem] font-semibold ${accentMap[accent]}`}>
-                {label}
-            </div>
+            <Badge tone={tone} size="sm">{label}</Badge>
             <div className="mt-3 text-2xl font-bold tracking-tight text-gray-900">{value}</div>
         </div>
     );

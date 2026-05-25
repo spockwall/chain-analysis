@@ -1,0 +1,79 @@
+# Vite frontend dev server. The compose version bind-mounted ./src into
+# the container for hot reload; that doesn't translate cleanly to K8s
+# (no host filesystem on the cluster). For dev iteration, rebuild the
+# image when source changes, or use Tilt/Skaffold for live sync.
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: chain-analysis
+spec:
+  type: ClusterIP
+  selector:
+    app: frontend
+  ports:
+    - port: 5173
+      targetPort: 5173
+      name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: chain-analysis
+data:
+  # Vite reads this at server startup and uses it as the /api proxy
+  # target, so the frontend talks to backend via in-cluster DNS.
+  VITE_API_PROXY_TARGET: "http://backend:8000"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: chain-analysis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          # Build locally: docker build -f frontend/Dockerfile --target development \
+          #   -t chain-analysis/frontend:local frontend
+          # Then load into the local cluster (see backend / worker notes).
+          image: chain-analysis/frontend:local
+          imagePullPolicy: IfNotPresent
+          command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+          envFrom:
+            - configMapRef:
+                name: frontend-config
+          ports:
+            - containerPort: 5173
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+# To reach the frontend from your host:
+#   kubectl -n chain-analysis port-forward svc/frontend 5173:5173
+# then open http://localhost:5173

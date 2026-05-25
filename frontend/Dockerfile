@@ -27,17 +27,11 @@ FROM nginx:alpine AS production
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy SSL certificates
-COPY certs/selfsigned.crt /etc/nginx/certs/selfsigned.crt
-COPY certs/selfsigned.key /etc/nginx/certs/selfsigned.key
-
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Expose ports
 EXPOSE 80 443
 
-# Health check
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
     CMD wget --no-verbose --no-check-certificate --tries=1 --spider https://127.0.0.1/ || exit 1
 

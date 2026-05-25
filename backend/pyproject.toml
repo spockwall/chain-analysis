@@ -1,6 +1,6 @@
 [project]
 name = "chain-analysis"
-version = "0.1.0"
+version = "0.2.0"
 description = "Blockchain transaction analysis platform for detecting and investigating money laundering patterns"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
+    "mcp>=1.26.0,<2.0.0",
 
     # Database
     "asyncpg>=0.30.0",
@@ -19,10 +20,8 @@ dependencies = [
 
     # Message Queue
     "redis>=5.2.0",
-
-    # Object Storage
-    "minio>=7.2.0",
-    "boto3>=1.35.0",
+    "slowapi>=0.1.4",
+    "limits>=2.9.0",
 
     # ETL Orchestration
     "dagster>=1.9.0",
@@ -41,6 +40,10 @@ dependencies = [
     "loguru>=0.7.0",
     "orjson>=3.10.0",
 ]
+
+[project.scripts]
+chain-analysis-mcp = "agent_mcp.server:main"
+chain-analysis-mcp-http = "agent_mcp.server:main_http"
 
 [project.optional-dependencies]
 dev = [

@@ -57,7 +57,7 @@ class TaskStatus(str, PyEnum):
     """Label task status."""
 
     PENDING = "pending"
-    IN_PROGRESS = "in_progress"
+    RUNNING = "running"
     COMPLETED = "completed"
     SKIPPED = "skipped"
 
@@ -89,6 +89,7 @@ class EntityType(str, PyEnum):
 class IngestionStatus(str, PyEnum):
     """Ingestion run status."""
 
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -154,6 +155,10 @@ class LabelTask(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Set by the Rust worker's `mark_pickup` when it pulls the task off the
+    # targeted queue. `completed_at - pickup_at` is the worker-time budget
+    # the `label_task_duration_seconds` Prometheus histogram measures.
+    pickup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
@@ -348,6 +353,12 @@ class EntityFeatures(Base):
     has_deployed_contract: Mapped[bool] = mapped_column(Boolean, default=False)
     # Whether this address is matched in the known_labels reference table
     is_labeled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Highest block number whose transactions have been ingested for this
+    # address. The Rust worker's refresh loop uses this as a delta cursor.
+    last_synced_block: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
 
     # ── Graph Topology ───────────────────────────────────────────────────────
     # Out-degree: number of outgoing transactions sent

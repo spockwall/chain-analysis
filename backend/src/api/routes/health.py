@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.deps import GraphDBDep, MessageQueueDep, ObjectStorageDep, RelationalDBDep
+from api.deps import GraphDBDep, MessageQueueDep, RelationalDBDep
 
 router = APIRouter(tags=["health"])
 
@@ -22,12 +22,17 @@ class ServiceStatus(BaseModel):
     message: str | None = None
 
 
+class HealthStatusResponse(BaseModel):
+    """Simple health status response for probes."""
+
+    status: str
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check(
     graph_db: GraphDBDep,
     relational_db: RelationalDBDep,
     message_queue: MessageQueueDep,
-    object_storage: ObjectStorageDep,
 ) -> HealthResponse:
     """
     Check the health of all services.
@@ -57,13 +62,6 @@ async def health_check(
     except Exception:
         services["redis"] = False
 
-    # Check MinIO
-    try:
-        healthy = await object_storage.health_check()
-        services["minio"] = healthy
-    except Exception:
-        services["minio"] = False
-
     # Overall status
     all_healthy = all(services.values())
     status = "healthy" if all_healthy else "degraded"
@@ -71,21 +69,21 @@ async def health_check(
     return HealthResponse(status=status, services=services)
 
 
-@router.get("/health/live")
-async def liveness_probe() -> dict[str, str]:
+@router.get("/health/live", response_model=HealthStatusResponse)
+async def liveness_probe() -> HealthStatusResponse:
     """
     Kubernetes liveness probe.
 
     Simply returns OK to indicate the service is running.
     """
-    return {"status": "ok"}
+    return HealthStatusResponse(status="ok")
 
 
-@router.get("/health/ready")
+@router.get("/health/ready", response_model=HealthStatusResponse)
 async def readiness_probe(
     graph_db: GraphDBDep,
     relational_db: RelationalDBDep,
-) -> dict[str, str]:
+) -> HealthStatusResponse:
     """
     Kubernetes readiness probe.
 
@@ -105,4 +103,4 @@ async def readiness_probe(
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"PostgreSQL error: {e}")
 
-    return {"status": "ready"}
+    return HealthStatusResponse(status="ready")

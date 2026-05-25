@@ -5,6 +5,8 @@ import { useState, useCallback, useRef } from "react";
 import { useHealth } from "../hooks/useHealth";
 import { useGraphStats } from "../hooks/useGraphStats";
 import { useToastContext } from "../context/ToastContext";
+import { useIngestionRun } from "../hooks/useIngestionRun";
+import { useIngestionRuns } from "../context/IngestionRunsContext";
 import {
     fetchEntity,
     fetchNeighbors,
@@ -14,11 +16,16 @@ import {
     deleteEntity,
     upsertTransaction,
     deleteTransaction,
+    ingestAddress,
+    enqueueLabelFetch,
     formatAddress,
     formatWei,
     type TransactionUpsertRequest,
 } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { parseTxImportFile, type ParsedTxRow } from "../utils/txImportParser";
+import { Badge } from "../components/ui/Badge";
+import { RISK_TONE, ENTITY_TONE, RUN_STATUS_TONE } from "../components/ui/tokens";
 import type { EntityResponse, EntityType, NeighborsResponse, RiskLevel, TransactionResponse } from "../types";
 import {
     ENTITY_TYPES,
@@ -46,8 +53,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     );
 }
 
+const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
 export function ETLPage() {
     const toast = useToastContext();
+    const { user } = useAuth();
     const { health } = useHealth({ refreshInterval: 30000 });
     const {
         stats,
@@ -62,6 +72,7 @@ export function ETLPage() {
     const [neighborsResult, setNeighborsResult] = useState<NeighborsResponse | null>(null);
 
     const [txLookupHash, setTxLookupHash] = useState("");
+    const [txLookupSourceAddr, setTxLookupSourceAddr] = useState("");
     const [txLookupLoading, setTxLookupLoading] = useState(false);
     const [txLookupResult, setTxLookupResult] = useState<TransactionResponse | null>(null);
 
@@ -99,7 +110,76 @@ export function ETLPage() {
     const importCancelledRef = useRef(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // ── Ingest address state ─────────────────────────────────────────────────
+    const [ingestAddr, setIngestAddr] = useState("");
+    const [ingestLoading, setIngestLoading] = useState(false);
+    const [ingestRunId, setIngestRunId] = useState<string | null>(null);
+    const ingestRun = useIngestionRun(ingestRunId, {
+        onComplete: (run) => {
+            if (run.status === "completed") {
+                refreshStats();
+            }
+        },
+    });
+    const { track: trackRun } = useIngestionRuns();
+
+    // ── Ingest hashes state ──────────────────────────────────────────────────
+    const [ingestHashes, setIngestHashes] = useState("");
+    const [ingestHashesLoading, setIngestHashesLoading] = useState(false);
+    const parsedHashLines = ingestHashes
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+    const validHashes = parsedHashLines.filter((l) => TX_HASH_RE.test(l));
+    const invalidHashes = parsedHashLines.filter((l) => !TX_HASH_RE.test(l));
+
+    const handleIngestHashes = async () => {
+        if (validHashes.length === 0) {
+            toast.error("No valid tx hashes to queue");
+            return;
+        }
+        setIngestHashesLoading(true);
+        try {
+            await enqueueLabelFetch({ mode: "hashes", hashes: validHashes });
+            toast.success(`Queued ${validHashes.length} hash(es) for ingestion`);
+            setIngestHashes("");
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : "Failed to queue hashes");
+        } finally {
+            setIngestHashesLoading(false);
+        }
+    };
+
     const overallHealthy = health?.status === "healthy";
+
+    const handleIngestAddress = async () => {
+        const addr = ingestAddr.trim().toLowerCase();
+        if (!isValidAddress(addr)) {
+            toast.error("Must be 0x followed by 40 hex characters.");
+            return;
+        }
+        setIngestLoading(true);
+        setIngestRunId(null);
+        try {
+            const result = await ingestAddress({ address: addr });
+            setIngestRunId(result.run_id);
+            trackRun(result.run_id, {
+                onComplete: (run) => {
+                    if (run.status === "completed") {
+                        toast.success(`Ingest complete — ${run.transactions_processed} txs`);
+                        refreshStats();
+                    } else {
+                        toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                    }
+                },
+            });
+            toast.success("Queued — follow progress in the run pill");
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Ingestion failed");
+        } finally {
+            setIngestLoading(false);
+        }
+    };
 
     const handleSearch = async () => {
         const addr = searchAddress.trim().toLowerCase();
@@ -142,9 +222,41 @@ export function ETLPage() {
             setTxLookupResult(result);
             toast.dismiss(id);
             toast.success(`Found: ${hash.slice(0, 10)}…`);
-        } catch (err) {
+        } catch (err: any) {
             toast.dismiss(id);
-            toast.error(err instanceof Error ? err.message : "Request failed");
+            if (err?.status === 404) {
+                const addrToIngest =
+                    (isValidAddress(txLookupSourceAddr.trim().toLowerCase()) ? txLookupSourceAddr.trim().toLowerCase() : null) ||
+                    entityResult?.address ||
+                    (isValidAddress(searchAddress.trim().toLowerCase()) ? searchAddress.trim().toLowerCase() : null);
+                if (addrToIngest) {
+                    try {
+                        const queued = await ingestAddress({ address: addrToIngest });
+                        toast.success(`Queued ingest of ${addrToIngest.slice(0, 10)}…`);
+                        trackRun(queued.run_id, {
+                            onComplete: async (run) => {
+                                if (run.status !== "completed") {
+                                    toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                                    return;
+                                }
+                                try {
+                                    const result = await fetchTransaction(hash);
+                                    setTxLookupResult(result);
+                                    toast.success(`Found after ingestion: ${hash.slice(0, 10)}…`);
+                                } catch {
+                                    toast.error("Ingest succeeded but transaction still not found");
+                                }
+                            },
+                        });
+                    } catch (ingestErr: any) {
+                        toast.error(ingestErr?.message || "Failed to queue ingest");
+                    }
+                } else {
+                    toast.error("Transaction not found. Enter a source address below to auto-ingest.");
+                }
+            } else {
+                toast.error(err instanceof Error ? err.message : "Request failed");
+            }
         } finally {
             setTxLookupLoading(false);
         }
@@ -428,6 +540,108 @@ export function ETLPage() {
                     )}
                 </div>
 
+                {/* Ingest Address from Etherscan */}
+                <Section title="Ingest Address from Etherscan">
+                    <p className="text-[0.75rem] text-gray-500 mb-3">
+                        Fetch all transactions for an address from Etherscan and import entities + transactions into Neo4j and PostgreSQL.
+                    </p>
+                    <div className="flex gap-2">
+                        <input
+                            value={ingestAddr}
+                            onChange={(e) => setIngestAddr(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleIngestAddress()}
+                            placeholder="0x… address to ingest"
+                            className={monoCls}
+                        />
+                        <button
+                            onClick={handleIngestAddress}
+                            disabled={ingestLoading || !ingestAddr.trim()}
+                            className={btnPrimary}
+                        >
+                            {ingestLoading ? "Ingesting…" : "Ingest"}
+                        </button>
+                    </div>
+                    {ingestRun && (
+                        <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
+                            <div className="mb-2">
+                                <Badge tone={RUN_STATUS_TONE[ingestRun.status]} size="sm">
+                                    Run {ingestRun.status}
+                                </Badge>
+                            </div>
+                            <div className="grid grid-cols-3 gap-3">
+                                {[
+                                    { v: ingestRun.transactions_processed, l: "Txs Processed" },
+                                    { v: ingestRun.traces_processed, l: "Traces" },
+                                    { v: ingestRun.nodes_created, l: "Nodes Created" },
+                                ].map(({ v, l }) => (
+                                    <div key={l}>
+                                        <div className="text-[1rem] font-bold text-gray-900 leading-none">{v}</div>
+                                        <div className="text-[0.7rem] text-gray-400 mt-[3px]">{l}</div>
+                                    </div>
+                                ))}
+                            </div>
+                            {ingestRun.error_message && (
+                                <p className="text-[0.72rem] text-red-600 mt-2">{ingestRun.error_message}</p>
+                            )}
+                            <p className="font-mono text-[0.68rem] text-gray-500 mt-2">
+                                Run ID: {ingestRun.run_id}
+                            </p>
+                        </div>
+                    )}
+                </Section>
+
+                {/* Ingest Transactions by Hash */}
+                <Section title="Ingest Transactions by Hash">
+                    <p className="text-[0.75rem] text-gray-500 mb-3">
+                        Paste newline-separated transaction hashes to queue them through the Rust ingest worker.
+                        Fire-and-forget — no per-hash progress is tracked.
+                    </p>
+                    <textarea
+                        value={ingestHashes}
+                        onChange={(e) => setIngestHashes(e.target.value)}
+                        placeholder={"0xabc…\n0xdef…"}
+                        rows={5}
+                        className={`${monoCls} w-full resize-y min-h-[100px]`}
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                        <div className="text-[0.72rem] text-gray-500">
+                            {validHashes.length > 0 && (
+                                <span className="text-green-600 font-medium">
+                                    {validHashes.length} valid
+                                </span>
+                            )}
+                            {validHashes.length > 0 && invalidHashes.length > 0 && <span> · </span>}
+                            {invalidHashes.length > 0 && (
+                                <span className="text-red-600 font-medium">
+                                    {invalidHashes.length} invalid
+                                </span>
+                            )}
+                        </div>
+                        <button
+                            onClick={handleIngestHashes}
+                            disabled={ingestHashesLoading || validHashes.length === 0}
+                            className={btnPrimary}
+                        >
+                            {ingestHashesLoading
+                                ? "Queueing…"
+                                : `Queue ${validHashes.length || ""} Hash${validHashes.length === 1 ? "" : "es"}`.trim()}
+                        </button>
+                    </div>
+                    {invalidHashes.length > 0 && (
+                        <div className="mt-2 p-2.5 border border-red-300 rounded-lg text-[0.7rem] text-red-600">
+                            <p className="font-semibold mb-1">Invalid lines (skipped):</p>
+                            <ul className="list-disc pl-5 font-mono">
+                                {invalidHashes.slice(0, 5).map((h, i) => (
+                                    <li key={i} className="break-all">{h}</li>
+                                ))}
+                                {invalidHashes.length > 5 && (
+                                    <li>… and {invalidHashes.length - 5} more</li>
+                                )}
+                            </ul>
+                        </div>
+                    )}
+                </Section>
+
                 {/* Lookup */}
                 <Section title="Lookup Entity">
                     <div className="flex gap-2">
@@ -450,22 +664,13 @@ export function ETLPage() {
                     {entityResult && (
                         <div className="mt-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
                             <div className="flex items-center gap-2 mb-2">
-                                <span
-                                    className={`inline-flex items-center px-2 py-[3px] rounded text-[0.65rem] font-semibold uppercase ${{
-                                            unknown: "bg-slate-100 text-slate-500",
-                                            low: "bg-green-100 text-green-700",
-                                            medium: "bg-yellow-100 text-yellow-700",
-                                            high: "bg-orange-100 text-orange-700",
-                                            critical: "bg-red-100 text-red-700",
-                                        }[entityResult.risk_level]
-                                        }`}
-                                >
+                                <Badge tone={RISK_TONE[entityResult.risk_level]} size="sm">
                                     {entityResult.risk_level}
-                                </span>
+                                </Badge>
                                 {entityResult.entity_type && (
-                                    <span className="inline-flex items-center px-2 py-[3px] rounded text-[0.65rem] font-semibold uppercase bg-violet-50 text-violet-700">
+                                    <Badge tone={ENTITY_TONE[entityResult.entity_type]} size="sm">
                                         {entityResult.entity_type}
-                                    </span>
+                                    </Badge>
                                 )}
                             </div>
                             <p className="font-mono text-[0.75rem] text-gray-600 mb-2">{entityResult.address}</p>
@@ -560,6 +765,15 @@ export function ETLPage() {
                         >
                             {txLookupLoading ? "…" : "Search"}
                         </button>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                        <input
+                            value={txLookupSourceAddr}
+                            onChange={(e) => setTxLookupSourceAddr(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleTxLookup()}
+                            placeholder="Source address to auto-ingest if tx not found (optional)"
+                            className={monoCls}
+                        />
                     </div>
                     {txLookupResult && (
                         <div className="mt-3 p-3 border border-gray-200 rounded-lg">
@@ -804,11 +1018,11 @@ export function ETLPage() {
 
                             {/* Done summary */}
                             {importDone && !importRunning && (
-                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-green-500">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5">
                                         <polyline points="20 6 9 17 4 12" />
                                     </svg>
-                                    <span className="text-[0.78rem] text-green-700 font-semibold">
+                                    <span className="text-[0.78rem] text-green-600 font-semibold">
                                         Done —{" "}
                                         {importStatuses.filter((s) => s === "ok").length} succeeded,{" "}
                                         {importStatuses.filter((s) => s !== undefined && s !== "ok").length} failed
@@ -840,11 +1054,11 @@ export function ETLPage() {
                                         {importRows.map((row) => {
                                             const status = importStatuses[row.index];
                                             const rowBg = !row.valid
-                                                ? "bg-red-50"
+                                                ? "bg-red-50/40"
                                                 : status === "ok"
-                                                    ? "bg-green-50"
+                                                    ? "bg-green-50/40"
                                                     : status !== undefined
-                                                        ? "bg-red-50"
+                                                        ? "bg-red-50/40"
                                                         : "bg-white";
                                             return (
                                                 <tr
@@ -869,23 +1083,15 @@ export function ETLPage() {
                                                     </td>
                                                     <td className="px-2 py-1.5">
                                                         {!row.valid ? (
-                                                            <span
-                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-red-100 text-red-600"
-                                                                title={row.errors.join(" · ")}
-                                                            >
-                                                                ✗ Invalid
-                                                            </span>
+                                                            <Badge tone="danger" size="sm" className={"" /* invalid */}>
+                                                                <span title={row.errors.join(" · ")}>✗ Invalid</span>
+                                                            </Badge>
                                                         ) : status === "ok" ? (
-                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-green-100 text-green-700">
-                                                                ✓ OK
-                                                            </span>
+                                                            <Badge tone="success" size="sm">✓ OK</Badge>
                                                         ) : status !== undefined ? (
-                                                            <span
-                                                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-semibold bg-red-100 text-red-600"
-                                                                title={status}
-                                                            >
-                                                                ✗ Error
-                                                            </span>
+                                                            <Badge tone="danger" size="sm">
+                                                                <span title={status}>✗ Error</span>
+                                                            </Badge>
                                                         ) : importRunning ? (
                                                             <span className="text-gray-300 text-[0.6rem]">…</span>
                                                         ) : (
@@ -1041,6 +1247,35 @@ export function ETLPage() {
                         </ol>
                     </div>
                 </Section>
+
+                {user?.role === "admin" && (
+                    <Section title="Orchestration (admin)">
+                        <p className="text-[0.75rem] text-gray-500 mb-3">
+                            Open the Dagster UI to inspect jobs, sensors, and schedules. Reprocess drains{" "}
+                            <code className="font-mono text-[0.72rem] bg-gray-100 px-1 py-[1px] rounded">ingest:failed_blocks:{"{"}source{"}"}</code>{" "}
+                            and re-runs the failed blocks. Runs on an hourly schedule by default; use the Launchpad
+                            link below to trigger it manually.
+                        </p>
+                        <div className="flex gap-2 flex-wrap">
+                            <a
+                                href="http://localhost:3000/jobs/reprocess_job/launchpad"
+                                target="_blank"
+                                rel="noreferrer"
+                                className={btnPrimary}
+                            >
+                                Open Reprocess Launchpad
+                            </a>
+                            <a
+                                href="http://localhost:3000"
+                                target="_blank"
+                                rel="noreferrer"
+                                className={btnSecondary}
+                            >
+                                Open Dagster UI
+                            </a>
+                        </div>
+                    </Section>
+                )}
             </div>
         </div>
     );

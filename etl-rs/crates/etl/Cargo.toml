@@ -1,0 +1,37 @@
+[package]
+name = "etl"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = "0.1"
+clickhouse = { version = "0.13", features = ["uuid", "time"] }
+color-eyre = "0.6"
+eyre = "0.6"
+futures = "0.3"
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+neo4rs = "0.8"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+time = "0.3"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4"] }
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres", "redis"] }
+hdrhistogram = "7"
+
+[[bench]]
+name = "ingest_throughput"
+harness = false

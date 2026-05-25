@@ -26,7 +26,7 @@ def _find_env_file() -> str | None:
 
 
 class Settings(BaseSettings):
-    """Application settings with support for local, AWS, and GCP environments."""
+    """Application settings with support for local, cloud, and production environments."""
 
     model_config = SettingsConfigDict(
         env_file=_find_env_file(),
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     )
 
     # Environment
-    environment: Literal["local", "aws", "gcp"] = "local"
+    environment: Literal["local", "aws", "gcp", "production"] = "local"
 
     # =========================================================================
     # Graph Database
@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     # =========================================================================
     queue_provider: Literal["redis", "kafka", "sqs"] = "redis"
     redis_url: str = "redis://localhost:6379"
+    ingest_targeted_queue: str = "ingest:targeted_queue"
 
     # Kafka (alternative)
     kafka_bootstrap_servers: str = "localhost:9092"
@@ -84,28 +85,6 @@ class Settings(BaseSettings):
     # SQS (AWS)
     aws_region: str = "us-east-1"
     sqs_queue_url: str | None = None
-
-    # =========================================================================
-    # Object Storage
-    # =========================================================================
-    storage_provider: Literal["local", "minio", "s3", "gcs"] = "minio"
-
-    # MinIO / S3
-    minio_endpoint: str = "localhost:9000"
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin123"
-    minio_bucket: str = "chain-analysis"
-    minio_secure: bool = False
-
-    # S3
-    aws_s3_bucket: str | None = None
-
-    # GCS
-    gcs_bucket: str | None = None
-    gcs_project_id: str | None = None
-
-    # Local filesystem
-    local_storage_path: str = "./storage"
 
     # =========================================================================
     # Data Sources
@@ -130,6 +109,10 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:5173"]
     )
+
+    # Rate limiting (slowapi style strings, e.g. "5/minute", "100/hour")
+    rate_limit_ingest: str = "5/minute"
+    rate_limit_labels: str = "30/minute"
 
     # =========================================================================
     # Dagster

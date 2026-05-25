@@ -132,6 +132,24 @@ export interface PathData {
     total_value?: string | null;
 }
 
+export type DetectionPattern =
+    | "peel-chain"
+    | "structuring"
+    | "round-trip"
+    | "fan-out-fan-in"
+    | "mixer-interaction";
+
+export interface DetectionsResponse {
+    pattern: DetectionPattern;
+    address: string;
+    matches: number;
+    nodes: EntityResponse[];
+    transactions: TransactionResponse[];
+    highlighted_node_ids: string[];
+    highlighted_edge_ids: string[];
+    truncated: boolean;
+}
+
 export interface HealthResponse {
     status: "healthy" | "degraded";
     services: Record<string, boolean>;
@@ -211,4 +229,93 @@ export interface GraphStatsResponse {
     edge_count: number;
     entity_types: Record<string, number>;
     risk_levels: Record<string, number>;
+}
+
+// Ingestion (pipeline)
+export interface IngestAddressRequest {
+    address: string;
+    chain_id?: number;
+}
+
+export interface IngestAddressResponse {
+    address: string;
+    run_id: string;
+    status: string;
+}
+
+export type IngestionRunStatus = "queued" | "running" | "completed" | "failed";
+
+export interface IngestionRun {
+    id: number;
+    run_id: string;
+    chain_id: number;
+    start_block: number;
+    end_block: number;
+    data_source: string;
+    status: IngestionRunStatus;
+    error_message: string | null;
+    transactions_processed: number;
+    traces_processed: number;
+    nodes_created: number;
+    edges_created: number;
+    started_at: string | null;
+    completed_at: string | null;
+    dagster_run_id: string | null;
+}
+
+// ── Labeling ──────────────────────────────────────────────────────────────────
+
+export type LabelTaskStatus =
+    | "pending"
+    | "running"
+    | "completed"
+    | "cancelled";
+
+export interface LabelTaskResponse {
+    id: number;
+    entity_address: string;
+    status: LabelTaskStatus;
+    priority: number;
+    title: string | null;
+    description: string | null;
+    assignee_id: number | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface LabelFetchRequest {
+    mode: "addresses" | "hashes" | "neighborhood";
+    addresses?: string[];
+    hashes?: string[];
+    seed?: string;
+    hops?: number;
+}
+
+export interface LabelFetchResponse {
+    task_ids: number[];
+    queued: number;
+}
+
+export interface AnnotationCreateRequest {
+    task_id: number;
+    entity_address: string;
+    entity_type?: EntityType | null;
+    risk_level: RiskLevel;
+    labels?: string[];
+    notes?: string | null;
+    evidence?: string | null;
+    confidence?: number | null;
+}
+
+export interface AnnotationResponse {
+    id: number;
+    task_id: number;
+    user_id: number | null;
+    entity_address: string;
+    entity_type: EntityType | null;
+    risk_level: RiskLevel;
+    labels: string[];
+    notes: string | null;
+    confidence: number | null;
+    created_at: string;
 }

@@ -3,6 +3,8 @@
  */
 
 import type {
+    DetectionPattern,
+    DetectionsResponse,
     AdminUserCreateRequest,
     AdminUserListResponse,
     AdminUserUpdateRequest,
@@ -13,6 +15,15 @@ import type {
     GroupListResponse,
     GroupMemberResponse,
     GroupUpdateRequest,
+    IngestAddressRequest,
+    IngestAddressResponse,
+    IngestionRun,
+    AnnotationCreateRequest,
+    AnnotationResponse,
+    LabelFetchRequest,
+    LabelFetchResponse,
+    LabelTaskResponse,
+    LabelTaskStatus,
     LoginRequest,
     NeighborsResponse,
     NodeUpsertRequest,
@@ -166,6 +177,23 @@ export async function fetchPaths(source: string, target: string, options: PathOp
     return request<PathResponse>(endpoint);
 }
 
+export interface DetectionOptions {
+    limit?: number;
+}
+
+export async function fetchDetection(
+    pattern: DetectionPattern,
+    address: string,
+    options: DetectionOptions = {},
+): Promise<DetectionsResponse> {
+    const params = new URLSearchParams({ address });
+    if (options.limit !== undefined) {
+        params.set("limit", options.limit.toString());
+    }
+
+    return request<DetectionsResponse>(`/detections/${pattern}?${params.toString()}`);
+}
+
 // Transaction endpoints
 
 export async function fetchTransaction(hash: string): Promise<TransactionResponse> {
@@ -273,6 +301,64 @@ export async function deleteGroup(address: string): Promise<void> {
 
 export async function fetchGraphStats(): Promise<GraphStatsResponse> {
     return request<GraphStatsResponse>("/stats");
+}
+
+// Pipeline endpoints
+
+export async function ingestAddress(body: IngestAddressRequest): Promise<IngestAddressResponse> {
+    return request<IngestAddressResponse>("/pipeline/ingest-address", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+// Ingestion runs (polled by useIngestionRun + RunStatusPill)
+
+export async function fetchIngestionRun(runId: string): Promise<IngestionRun> {
+    return request<IngestionRun>(`/ingestion-runs/${runId}`);
+}
+
+export async function listIngestionRuns(limit = 10): Promise<IngestionRun[]> {
+    return request<IngestionRun[]>(`/ingestion-runs?limit=${limit}`);
+}
+
+// Labeling endpoints
+
+export async function enqueueLabelFetch(body: LabelFetchRequest): Promise<LabelFetchResponse> {
+    return request<LabelFetchResponse>("/labels/fetch", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export interface ListLabelTasksOptions {
+    status?: LabelTaskStatus;
+    limit?: number;
+    offset?: number;
+}
+
+export async function listLabelTasks(options: ListLabelTasksOptions = {}): Promise<LabelTaskResponse[]> {
+    const params = new URLSearchParams();
+    if (options.status) params.set("status", options.status);
+    if (options.limit !== undefined) params.set("limit", options.limit.toString());
+    if (options.offset !== undefined) params.set("offset", options.offset.toString());
+    const query = params.toString();
+    return request<LabelTaskResponse[]>(`/labels/tasks${query ? `?${query}` : ""}`);
+}
+
+export async function getLabelTask(taskId: number): Promise<LabelTaskResponse> {
+    return request<LabelTaskResponse>(`/labels/tasks/${taskId}`);
+}
+
+export async function createAnnotation(body: AnnotationCreateRequest): Promise<AnnotationResponse> {
+    return request<AnnotationResponse>("/labels/annotations", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function getEntityAnnotations(address: string, limit = 50): Promise<AnnotationResponse[]> {
+    return request<AnnotationResponse[]>(`/labels/annotations/${address}?limit=${limit}`);
 }
 
 // Utility functions

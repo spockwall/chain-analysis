@@ -62,7 +62,8 @@ async def list_ingestion_runs(
 ) -> list[IngestionRunResponse]:
     """List ingestion runs, newest first."""
     rows = await db.execute(
-        "SELECT * FROM ingestion_runs ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
+        "SELECT * FROM ingestion_runs "
+        "ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
         {"limit": limit, "offset": offset},
     )
     return [_row_to_response(row) for row in rows]

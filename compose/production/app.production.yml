@@ -1,0 +1,68 @@
+# Application tier for production.
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    container_name: chain-analysis-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT}
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
+      - INGEST_SOURCE=${INGEST_SOURCE:-}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - chain-analysis-net
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: chain-analysis-frontend
+    restart: always
+    ports:
+      - "442:443"
+    volumes:
+      - /home/mars/chain-analysis/certs/selfsigned.crt:/etc/nginx/certs/selfsigned.crt:ro
+      - /home/mars/chain-analysis/certs/selfsigned.key:/etc/nginx/certs/selfsigned.key:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--no-check-certificate", "--tries=1", "--spider", "https://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - chain-analysis-net
+
+networks:
+  chain-analysis-net:
+    driver: bridge

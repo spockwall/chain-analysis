@@ -1,4 +1,25 @@
 # Multi-stage build for Chain-Analysis Backend
+#
+# Also bakes the Rust `ingest` binary into the final image at
+# /opt/rust-bin/ingest so the Dagster containers (dagster-webserver,
+# dagster-daemon) can exec it without a shared volume. Replaces the
+# removed `ingest-builder` compose one-shot (2026-04-22).
+
+# =============================================================================
+# Stage 0: Build Rust `ingest` binary (for Dagster jobs)
+# =============================================================================
+FROM rust:1.89-slim-bookworm AS rust-builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY etl-rs/Cargo.toml etl-rs/Cargo.lock ./
+COPY etl-rs/crates ./crates
+
+RUN cargo build --release --bin ingest
 
 # =============================================================================
 # Stage 1: Build dependencies
@@ -31,6 +52,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 
 # Copy the virtual environment from builder
 COPY --from=builder /app/.venv .venv
+
+# Copy the Rust ingest binary for Dagster jobs (unused by the FastAPI entrypoint).
+COPY --from=rust-builder /build/target/release/ingest /opt/rust-bin/ingest
 
 # Copy application source
 COPY backend/src ./src

@@ -1,0 +1,303 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - "release-*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Test
+        working-directory: frontend
+        run: npm test -- --run --passWithNoTests
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Build production image
+        run: docker build -f frontend/Dockerfile --target production -t chain-analysis-frontend:ci frontend
+
+  backend:
+    name: Backend validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare local compose secrets
+        run: |
+          set -euo pipefail
+          mkdir -p compose
+
+          # Root .env is consumed by host-side commands in this workflow
+          # (Alembic, pytest, and docker compose interpolation). Keep hostnames
+          # reachable from the GitHub runner.
+          cat > .env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_URI=bolt://localhost:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://localhost:6379
+          DATABASE_URL=postgresql://postgres:changeme@localhost:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+          # compose/*.yml files load this path from within the compose/
+          # directory. Neo4j intentionally does not read this shared env_file:
+          # Neo4j 5.x interprets most NEO4J_* variables as config keys and
+          # fails strict validation on app-only names like NEO4J_PASSWORD.
+          # Service connection vars are set inline by compose/app.yml,
+          # compose/etl.yml, etc.
+          cat > compose/secrets.dev.env <<'EOF'
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          POSTGRES_PASSWORD=changeme
+          DATABASE_URL=postgresql://postgres:changeme@postgres:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install --upgrade uv
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          uv venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+
+      - name: Critical lint
+        working-directory: backend
+        run: .venv/bin/ruff check . --select E9,F63,F7,F82
+
+      - name: Type check advisory
+        working-directory: backend
+        run: |
+          set +e
+          MYPYPATH=src .venv/bin/mypy --explicit-package-bases src
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::mypy reported advisory issues; backend CI continues because strict typing is not yet enforced."
+          fi
+          exit 0
+
+      - name: Start backend test infrastructure
+        run: |
+          set -euo pipefail
+
+          docker compose up -d neo4j postgres redis
+
+          deadline=$((SECONDS + 240))
+          while true; do
+            neo_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-neo4j 2>/dev/null || true)"
+            pg_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-postgres 2>/dev/null || true)"
+            redis_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-redis 2>/dev/null || true)"
+
+            echo "neo4j=${neo_state:-missing} postgres=${pg_state:-missing} redis=${redis_state:-missing}"
+
+            if echo "$neo_state" | grep -q '^exited'; then
+              echo "::error::Neo4j exited during startup."
+              docker compose ps
+              docker compose logs --no-color --tail=200 neo4j postgres redis
+              exit 1
+            fi
+
+            if echo "$neo_state" | grep -q 'healthy' \
+              && echo "$pg_state" | grep -q 'healthy' \
+              && echo "$redis_state" | grep -q 'healthy'; then
+              break
+            fi
+
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for backend infrastructure to become healthy."
+              docker compose ps
+              docker compose logs --no-color --tail=200 neo4j postgres redis
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+      - name: Apply test database migrations
+        working-directory: backend
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: chain_analysis
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: changeme
+          JWT_SECRET_KEY: changeme
+        run: .venv/bin/alembic upgrade head
+
+      - name: Test
+        working-directory: backend
+        env:
+          ENVIRONMENT: local
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: chain_analysis
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: changeme
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: changeme
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET_KEY: changeme
+        run: .venv/bin/pytest -m "not integration"
+
+      - name: Stop backend test infrastructure
+        if: always()
+        run: docker compose down -v
+
+      - name: Remove local compose secrets
+        if: always()
+        run: rm -f .env compose/secrets.dev.env
+
+      - name: Build production image
+        run: docker build -f backend/Dockerfile -t chain-analysis-backend:ci .
+
+  compose:
+    name: Compose validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare local compose secrets
+        run: |
+          set -euo pipefail
+          mkdir -p compose
+
+          # Root .env is used by docker compose interpolation. Values are also
+          # safe for any host-side validation command that reads the app config.
+          cat > .env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_URI=bolt://localhost:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://localhost:6379
+          DATABASE_URL=postgresql://postgres:changeme@localhost:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+          cat > compose/secrets.dev.env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_URI=bolt://neo4j:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://redis:6379
+          DATABASE_URL=postgresql://postgres:changeme@postgres:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+      - name: Validate local compose file
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Validate production compose file
+        run: |
+          set -euo pipefail
+          env_file="$(mktemp)"
+          trap 'rm -f "$env_file"' EXIT
+          cat > "$env_file" <<'EOF'
+          ENVIRONMENT=production
+          NEO4J_USER=ci-neo4j
+          NEO4J_PASSWORD=ci-neo4j-password
+          POSTGRES_USER=ci-postgres
+          POSTGRES_PASSWORD=ci-postgres-password
+          POSTGRES_DB=chain_analysis
+          REDIS_PASSWORD=ci-redis-password
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=ci-clickhouse-password
+          JWT_SECRET_KEY=ci-jwt-secret
+          ETHERSCAN_API_KEY=ci-etherscan-key
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=etherscan
+          EOF
+          docker compose --env-file "$env_file" -f docker-compose.production.yml config --quiet
+
+      - name: Remove local compose secrets
+        if: always()
+        run: rm -f .env compose/secrets.dev.env

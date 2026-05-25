@@ -2,9 +2,19 @@
  * Node details panel — Oravia style
  */
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import type { EntityResponse, TransactionResponse } from "../types";
-import { formatAddress, formatWei, fetchGroupMembers, addGroupMember, removeGroupMember } from "../api/client";
+import {
+    formatAddress,
+    formatWei,
+    fetchGroupMembers,
+    addGroupMember,
+    removeGroupMember,
+    ingestAddress,
+    enqueueLabelFetch,
+} from "../api/client";
 import { useToastContext } from "../context/ToastContext";
+import { useIngestionRuns } from "../context/IngestionRunsContext";
 import { RISK_BADGE, ENTITY_LABEL, sectionLabel, labelCls } from "../constants";
 import { CopyButton } from "./CopyButton";
 
@@ -15,19 +25,32 @@ interface NodePanelProps {
     transactions?: TransactionResponse[];
     onNavigateToAddress?: (address: string) => void;
     overrideMembers?: EntityResponse[];
+    onIngestComplete?: (address: string) => void;
 }
 
 const divider = "border-none border-t border-gray-100 m-0";
 const btnIcon =
     "w-[26px] h-[26px] flex items-center justify-center border border-gray-200 rounded bg-transparent cursor-pointer text-gray-500 p-0 transition-colors hover:bg-gray-100 hover:text-gray-900";
 
-export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToAddress, overrideMembers }: NodePanelProps) {
+export function NodePanel({
+    node,
+    onExpand,
+    onClose,
+    transactions,
+    onNavigateToAddress,
+    overrideMembers,
+    onIngestComplete,
+}: NodePanelProps) {
     const entityType = node.entity_type || "Unknown";
     const toast = useToastContext();
+    const navigate = useNavigate();
+    const { track: trackRun, trackTask } = useIngestionRuns();
 
     const [members, setMembers] = useState<EntityResponse[]>([]);
     const [memberInput, setMemberInput] = useState("");
     const [membersLoading, setMembersLoading] = useState(false);
+    const [ingesting, setIngesting] = useState(false);
+    const [tracing, setTracing] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -45,7 +68,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
             .then((res) => {
                 if (!cancelled) setMembers(res.members);
             })
-            .catch(() => { })
+            .catch(() => {})
             .finally(() => {
                 if (!cancelled) setMembersLoading(false);
             });
@@ -74,6 +97,53 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
             toast.success(`Removed ${formatAddress(childAddress, 4)}`);
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : "Failed to remove member");
+        }
+    };
+
+    const handleIngest = async () => {
+        setIngesting(true);
+        try {
+            const result = await ingestAddress({ address: node.address });
+            toast.success(`Queued ingest for ${formatAddress(node.address, 4)} — see run pill for progress`);
+            trackRun(result.run_id, {
+                onComplete: (run) => {
+                    if (run.status === "completed") {
+                        toast.success(`Ingest complete — ${run.transactions_processed} txs`);
+                        onIngestComplete?.(node.address);
+                    } else {
+                        toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                    }
+                },
+            });
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : "Ingestion failed");
+        } finally {
+            setIngesting(false);
+        }
+    };
+
+    const handleDeepTrace = async () => {
+        setTracing(true);
+        try {
+            const res = await enqueueLabelFetch({ mode: "neighborhood", seed: node.address, hops: 1 });
+            toast.success("Queued neighborhood fetch — worker will pick up within seconds");
+            const taskId = res.task_ids?.[0];
+            if (taskId) {
+                trackTask(taskId, {
+                    onComplete: (task) => {
+                        if (task.status === "completed") {
+                            toast.success("Neighborhood fetch complete");
+                            onIngestComplete?.(node.address);
+                        } else {
+                            toast.error(`Neighborhood fetch ${task.status}`);
+                        }
+                    },
+                });
+            }
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : "Failed to queue neighborhood fetch");
+        } finally {
+            setTracing(false);
         }
     };
 
@@ -127,7 +197,14 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                         </span>
                         {(node.member_count ?? 0) > 0 && (
                             <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded text-[0.65rem] font-semibold tracking-[0.04em] uppercase bg-violet-600 text-white border border-violet-600">
-                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <svg
+                                    width="9"
+                                    height="9"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2.5"
+                                >
                                     <circle cx="9" cy="7" r="4" />
                                     <path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2" />
                                     <path d="M16 3.13a4 4 0 010 7.75" />
@@ -215,6 +292,68 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                 <polyline points="12 5 19 12 12 19" />
                             </svg>
                         </button>
+                        <button
+                            className="w-full px-3.5 py-[9px] rounded-lg text-[0.78rem] font-semibold font-[inherit] cursor-pointer flex items-center justify-between transition-colors bg-blue-600 text-white border-none hover:bg-blue-700 disabled:opacity-45 disabled:cursor-not-allowed"
+                            onClick={handleIngest}
+                            disabled={ingesting}
+                        >
+                            {ingesting ? "Fetching…" : "Fetch Transactions"}
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                            >
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                        </button>
+                        <button
+                            className="w-full px-3.5 py-[9px] rounded-lg text-[0.78rem] font-semibold font-[inherit] cursor-pointer flex items-center justify-between transition-colors bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 disabled:opacity-45 disabled:cursor-not-allowed"
+                            onClick={handleDeepTrace}
+                            disabled={tracing}
+                            title="Queue a 2-hop neighborhood ingest via the Rust ETL worker"
+                        >
+                            {tracing ? "Queueing…" : "Deep trace (1 hop)"}
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                            >
+                                <circle cx="12" cy="12" r="3" />
+                                <circle cx="4" cy="6" r="2" />
+                                <circle cx="20" cy="6" r="2" />
+                                <circle cx="4" cy="18" r="2" />
+                                <circle cx="20" cy="18" r="2" />
+                                <line x1="12" y1="12" x2="4" y2="6" />
+                                <line x1="12" y1="12" x2="20" y2="6" />
+                                <line x1="12" y1="12" x2="4" y2="18" />
+                                <line x1="12" y1="12" x2="20" y2="18" />
+                            </svg>
+                        </button>
+                        <button
+                            className="w-full px-3.5 py-[9px] rounded-lg text-[0.78rem] font-semibold font-[inherit] cursor-pointer flex items-center justify-between transition-colors bg-white text-gray-900 border border-gray-200 hover:bg-gray-50"
+                            onClick={() => navigate(`/labels?address=${encodeURIComponent(node.address)}`)}
+                        >
+                            Label this entity
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                            >
+                                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                                <line x1="7" y1="7" x2="7.01" y2="7" />
+                            </svg>
+                        </button>
                         <a
                             href={`https://etherscan.io/address/${node.address}`}
                             target="_blank"
@@ -263,7 +402,7 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                     {members.map((m) => (
                                         <div
                                             key={m.address}
-                                            className="flex items-center gap-1.5 px-1 py-[4px] rounded bg-violet-50 border border-violet-100 hover:bg-violet-100 transition-colors"
+                                            className="flex items-center gap-1.5 px-1 py-[4px] rounded border border-gray-200 hover:bg-gray-50 transition-colors"
                                         >
                                             {/* Clickable name + address */}
                                             <button
@@ -272,21 +411,23 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                                 onClick={() => onNavigateToAddress?.(m.address)}
                                             >
                                                 {m.name && (
-                                                    <span className="block text-[0.72rem] font-semibold text-violet-800 truncate leading-snug">
+                                                    <span className="block text-[0.72rem] font-semibold text-gray-800 truncate leading-snug">
                                                         {m.name}
                                                     </span>
                                                 )}
-                                                <span className={`block font-mono text-[0.66rem] truncate leading-snug ${m.name ? "text-violet-500" : "text-gray-900 hover:underline"}`}>
+                                                <span
+                                                    className={`block font-mono text-[0.66rem] truncate leading-snug ${m.name ? "text-gray-500" : "text-gray-900 hover:underline"}`}
+                                                >
                                                     {formatAddress(m.address, 5)}
                                                 </span>
                                             </button>
                                             {m.entity_type && (
-                                                <span className="shrink-0 inline-flex items-center px-[5px] py-[1px] rounded text-[0.6rem] font-semibold uppercase bg-violet-100 text-violet-700">
+                                                <span className="shrink-0 inline-flex items-center px-[5px] py-[1px] rounded text-[0.6rem] font-semibold uppercase border border-violet-500 text-violet-600">
                                                     {m.entity_type}
                                                 </span>
                                             )}
                                             <button
-                                                className="shrink-0 flex items-center justify-center w-5 h-5 border border-gray-200 rounded bg-transparent cursor-pointer text-gray-400 text-base leading-none p-0 transition-colors hover:text-red-500 hover:bg-red-50"
+                                                className="shrink-0 flex items-center justify-center w-5 h-5 border border-gray-200 rounded bg-transparent cursor-pointer text-gray-400 text-base leading-none p-0 transition-colors hover:text-red-500 hover:border-red-300"
                                                 title="Remove member"
                                                 onClick={() => handleRemoveMember(m.address)}
                                             >
@@ -323,9 +464,16 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                     <>
                         <hr className={divider} />
                         <div>
-                            <p className={sectionLabel}>Recent Transactions</p>
-                            <div className="flex flex-col gap-0.5">
-                                {txForNode.slice(0, 10).map((tx) => {
+                            <p className={sectionLabel}>
+                                Transactions
+                                <span className="ml-1.5 text-[0.68rem] font-normal text-gray-400 normal-case tracking-normal">
+                                    {node.transaction_count != null && node.transaction_count > txForNode.length
+                                        ? `showing ${txForNode.length.toLocaleString()} of ${node.transaction_count.toLocaleString()}`
+                                        : `${txForNode.length.toLocaleString()}`}
+                                </span>
+                            </p>
+                            <div className="flex flex-col gap-0.5 max-h-72 overflow-y-auto pr-1">
+                                {txForNode.map((tx) => {
                                     const isSent = tx.from_address === node.address;
                                     const counterparty = isSent ? tx.to_address : tx.from_address;
                                     return (
@@ -354,12 +502,14 @@ export function NodePanel({ node, onExpand, onClose, transactions, onNavigateToA
                                         </button>
                                     );
                                 })}
-                                {txForNode.length > 10 && (
-                                    <p className="text-[0.65rem] text-gray-400 text-center mt-1 mb-0">
-                                        +{txForNode.length - 10} more
-                                    </p>
-                                )}
                             </div>
+                            {node.transaction_count != null && node.transaction_count > txForNode.length && (
+                                <p className="text-[0.65rem] text-gray-400 mt-1.5 mb-0">
+                                    Only the {txForNode.length.toLocaleString()} transactions in the current graph view
+                                    are shown. Click <span className="font-semibold">Expand Neighbours</span> or open
+                                    the address on Etherscan for the full history.
+                                </p>
+                            )}
                         </div>
                     </>
                 )}

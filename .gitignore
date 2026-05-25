@@ -144,6 +144,13 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.claude/*
+!.claude/skills/
+.codex/
+.codex
+
+# Local compose-only secrets
+compose/secrets.dev.env
 
 # Spyder project settings
 .spyderproject
@@ -241,3 +248,7 @@ minio/
 frontend/certs/selfsigned.crt
 frontend/certs/selfsigned.key
 AGENTS.md
+
+# tracing-appender daily-rotated log files (default LOG_DIR=./logs)
+logs/
+*.log.*

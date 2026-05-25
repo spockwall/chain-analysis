@@ -172,6 +172,37 @@ class PathResponse(BaseModel):
     total_paths: int = Field(..., description="Total number of paths found")
 
 
+class DetectionPattern(str, Enum):
+    """Supported AML detection patterns."""
+
+    PEEL_CHAIN = "peel-chain"
+    STRUCTURING = "structuring"
+    ROUND_TRIP = "round-trip"
+    FAN_OUT_FAN_IN = "fan-out-fan-in"
+    MIXER_INTERACTION = "mixer-interaction"
+
+
+class DetectionsResponse(BaseModel):
+    """Response model for AML detection queries."""
+
+    pattern: DetectionPattern = Field(..., description="AML pattern used")
+    address: str = Field(..., description="Target address")
+    matches: int = Field(..., description="Number of query matches")
+    nodes: list[EntityResponse] = Field(
+        default_factory=list, description="Matched subgraph entity nodes"
+    )
+    transactions: list[TransactionResponse] = Field(
+        default_factory=list, description="Matched subgraph transaction nodes"
+    )
+    highlighted_node_ids: list[str] = Field(
+        default_factory=list, description="Entity addresses to highlight"
+    )
+    highlighted_edge_ids: list[str] = Field(
+        default_factory=list, description="Edge ids (tx-<hash>) to highlight"
+    )
+    truncated: bool = Field(False, description="Whether result set was truncated")
+
+
 class NodeUpsertRequest(BaseModel):
     """Request model for creating or updating a node."""
 

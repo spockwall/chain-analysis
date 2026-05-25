@@ -1,0 +1,128 @@
+# Neo4j 5.x Enterprise + GDS plugin (used by AML detection Cypher in
+# backend/src/graph/queries.py). Single replica for dev; clustering
+# would need StatefulSet replicas + core/replica role config + an
+# Enterprise license that covers cluster mode.
+#
+# Single Service exposing both HTTP (7474, browser UI / readiness) and
+# Bolt (7687, driver protocol used by backend & worker).
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: chain-analysis
+spec:
+  clusterIP: None
+  selector:
+    app: neo4j
+  ports:
+    - name: http
+      port: 7474
+      targetPort: 7474
+    - name: bolt
+      port: 7687
+      targetPort: 7687
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neo4j-config
+  namespace: chain-analysis
+data:
+  NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+  NEO4J_PLUGINS: '["graph-data-science"]'
+  NEO4J_dbms_memory_heap_initial__size: "512m"
+  NEO4J_dbms_memory_heap_max__size: "2G"
+  NEO4J_dbms_memory_pagecache_size: "512m"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+  namespace: chain-analysis
+spec:
+  serviceName: neo4j
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      containers:
+        - name: neo4j
+          image: neo4j:5.26.0-enterprise
+          envFrom:
+            - configMapRef:
+                name: neo4j-config
+          env:
+            # K8s env-var substitution: `$(VAR)` in a value resolves to a
+            # previously-defined env var in the same list. We pull the
+            # password from the Secret into a NON-`NEO4J_`-prefixed var
+            # first (the image treats any `NEO4J_*` env as a config
+            # setting and rejects unknown ones), then compose NEO4J_AUTH
+            # ("neo4j/<password>") which is the format the image expects.
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chain-analysis-secrets
+                  key: NEO4J_PASSWORD
+            - name: NEO4J_AUTH
+              value: "neo4j/$(DB_PASSWORD)"
+          ports:
+            - containerPort: 7474
+              name: http
+            - containerPort: 7687
+              name: bolt
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "3Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+            - name: plugins
+              mountPath: /plugins
+  # Three PVCs match the compose volumes (neo4j_data / logs / plugins).
+  # `plugins` is small but separate so GDS jar survives data wipes.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+    - metadata:
+        name: logs
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+    - metadata:
+        name: plugins
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,128 @@
+# Stateful infrastructure: graph DB, relational DB, stream bus, OLAP, object store.
+services:
+  # =============================================================================
+  # Neo4j Graph Database with GDS Plugin
+  # =============================================================================
+  neo4j:
+    image: neo4j:5.26.0-enterprise
+    container_name: chain-analysis-neo4j
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    environment:
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - NEO4J_AUTH=${NEO4J_AUTH:-neo4j/changeme}
+      - NEO4J_PLUGINS=${NEO4J_PLUGINS:-["graph-data-science"]}
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_memory_pagecache_size=512m
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit
+            1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # PostgreSQL Database
+  # =============================================================================
+  postgres:
+    image: postgres:17-alpine
+    container_name: chain-analysis-postgres
+    env_file:
+      - ./secrets.dev.env
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=chain_analysis
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # Redis (with Streams support)
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: chain-analysis-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # ClickHouse (Analytical OLAP Store)
+  # =============================================================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: chain-analysis-clickhouse
+    env_file:
+      - ./secrets.dev.env
+    ports:
+      - "8123:8123" # HTTP
+      - "9002:9000" # Native TCP (remapped off host port 9000 to leave room for future cold-tier)
+    environment:
+      - CLICKHOUSE_DB=chain_analysis
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ../etl-rs/crates/etl/migrations/clickhouse:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8123/ping",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - chain-analysis-net
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:
+  postgres_data:
+  redis_data:
+  clickhouse_data:
+
+networks:
+  chain-analysis-net:
+    driver: bridge

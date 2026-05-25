@@ -1,0 +1,73 @@
+# Redis — Streams + targeted-queue list + cross-replica coordination
+# (Task B refresh lease, rate-limiter counters). Single replica is
+# sufficient for dev; HA would use a Redis cluster / sentinel chart.
+#
+# Headless Service (clusterIP: None) gives stable per-pod DNS — necessary
+# for StatefulSets even with a single replica, and lets `redis-0.redis`
+# resolve directly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: chain-analysis
+spec:
+  clusterIP: None
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+      name: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: chain-analysis
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          # AOF persistence keeps state through pod restarts. PVC below
+          # preserves it across pod rescheduling.
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

@@ -2,19 +2,27 @@
  * Graph Explorer page — main address search & graph view.
  */
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { GraphCanvas, type LayoutName, type GraphFilters } from "../components/GraphCanvas";
 import { NodePanel } from "../components/NodePanel";
 import { TxPanel } from "../components/TxPanel";
 import { useToastContext } from "../context/ToastContext";
-import type { EntityResponse, NeighborsResponse, PathResponse, TransactionResponse } from "../types";
-import { fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction } from "../api/client";
+import { useIngestionRuns } from "../context/IngestionRunsContext";
+import type {
+    DetectionPattern,
+    DetectionsResponse,
+    EntityResponse,
+    NeighborsResponse,
+    PathResponse,
+    TransactionResponse,
+} from "../types";
+import { fetchDetection, fetchEntity, fetchNeighbors, fetchPaths, fetchTransaction, ingestAddress } from "../api/client";
 import { ENTITY_TYPES, RISK_LEVELS, RISK_COLOR } from "../constants";
 import { Background } from "../components/Background";
 
 interface GraphExplorerPageProps {
     initialAddress?: string | null;
     initialTxHash?: string | null;
-    onAddressLoad?: () => void;
 }
 
 const DEFAULT_FILTERS: GraphFilters = {
@@ -27,8 +35,49 @@ const DEFAULT_FILTERS: GraphFilters = {
 const monoInput =
     "w-60 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none transition-colors focus:border-blue-400";
 
-export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad }: GraphExplorerPageProps) {
+const DETECTION_PATTERNS: Array<{ value: DetectionPattern; label: string }> = [
+    { value: "peel-chain", label: "Peel Chain" },
+    { value: "structuring", label: "Structuring" },
+    { value: "round-trip", label: "Round Trip" },
+    { value: "fan-out-fan-in", label: "Fan-Out / Fan-In" },
+    { value: "mixer-interaction", label: "Mixer Interaction" },
+];
+
+const FAVORITE_PATHS_STORAGE_KEY = "ca_favorite_paths";
+
+interface FavoritePath {
+    id: string;
+    source: string;
+    target: string;
+    createdAt: string;
+}
+
+const formatFavoritePathLabel = (favorite: FavoritePath) =>
+    `${favorite.source.slice(0, 6)}...${favorite.source.slice(-4)} -> ${favorite.target.slice(0, 6)}...${favorite.target.slice(-4)}`;
+
+const loadFavoritePaths = (): FavoritePath[] => {
+    try {
+        const raw = window.localStorage.getItem(FAVORITE_PATHS_STORAGE_KEY);
+        if (!raw) return [];
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed.filter((item): item is FavoritePath => (
+            typeof item?.id === "string" &&
+            typeof item?.source === "string" &&
+            typeof item?.target === "string" &&
+            typeof item?.createdAt === "string"
+        ));
+    } catch {
+        return [];
+    }
+};
+
+export function GraphExplorerPage({ initialAddress, initialTxHash }: GraphExplorerPageProps) {
     const toast = useToastContext();
+    const { track: trackRun } = useIngestionRuns();
+    const [, setSearchParams] = useSearchParams();
     const [graphData, setGraphData] = useState<NeighborsResponse | null>(null);
     const [selectedNode, setSelectedNode] = useState<EntityResponse | null>(null);
     const [selectedEdge, setSelectedEdge] = useState<TransactionResponse | null>(null);
@@ -47,43 +96,67 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     const [pathTarget, setPathTarget] = useState("");
     const [pathResult, setPathResult] = useState<PathResponse | null>(null);
     const [pathLoading, setPathLoading] = useState(false);
+    const [favoritePaths, setFavoritePaths] = useState<FavoritePath[]>(() => loadFavoritePaths());
+    const [selectedFavoritePathId, setSelectedFavoritePathId] = useState("");
+    const [detectionPattern, setDetectionPattern] = useState<DetectionPattern>("peel-chain");
+    const [detectionAddress, setDetectionAddress] = useState("");
+    const [detectionLoading, setDetectionLoading] = useState(false);
+    const [detectionResult, setDetectionResult] = useState<DetectionsResponse | null>(null);
 
     useEffect(() => {
-        if (initialAddress) {
-            handleSearch(initialAddress);
-            onAddressLoad?.();
-        }
+        if (initialAddress) handleSearch(initialAddress);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialAddress]);
 
     useEffect(() => {
-        if (initialTxHash) {
-            handleTxSearch(initialTxHash);
-            onAddressLoad?.();
-        }
+        if (initialTxHash) handleTxSearch(initialTxHash);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialTxHash]);
 
-    const handleSearch = async (address: string) => {
+    useEffect(() => {
+        if (graphData?.center_address && !detectionAddress) {
+            setDetectionAddress(graphData.center_address);
+        }
+    }, [graphData?.center_address, detectionAddress]);
+
+    useEffect(() => {
+        window.localStorage.setItem(FAVORITE_PATHS_STORAGE_KEY, JSON.stringify(favoritePaths));
+    }, [favoritePaths]);
+
+    const handleSearch = async (address: string, opts?: { waitForGraph?: boolean }) => {
+        // Keep URL in sync so a refresh restores this view.
+        setSearchParams({ address }, { replace: true });
         setLoading(true);
         const loadId = toast.loading("Fetching graph data…");
         try {
-            const [entityResult, neighborsResult] = await Promise.allSettled([
-                fetchEntity(address),
-                fetchNeighbors(address, { depth: 1, limit: 50 }),
-            ]);
+            // When called right after an ingest completes, the Rust worker has
+            // XADDed txs to Redis but task C (stream→Neo4j) may still be
+            // draining. Retry briefly so the first render isn't empty.
+            const maxAttempts = opts?.waitForGraph ? 8 : 1;
+            let entity: EntityResponse | null = null;
+            let neighbors: Awaited<ReturnType<typeof fetchNeighbors>> | null = null;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const [entityResult, neighborsResult] = await Promise.allSettled([
+                    fetchEntity(address),
+                    fetchNeighbors(address, { depth: 1, limit: 500 }),
+                ]);
 
-            // Tolerate 404 — synthesise a stub so the canvas can still render
-            const entity: EntityResponse =
-                entityResult.status === "fulfilled"
-                    ? entityResult.value
-                    : { address, risk_level: "unknown", labels: [], properties: {} };
+                entity =
+                    entityResult.status === "fulfilled"
+                        ? entityResult.value
+                        : { address, risk_level: "unknown", labels: [], properties: {} };
 
-            if (neighborsResult.status === "rejected") throw neighborsResult.reason;
+                if (neighborsResult.status === "rejected") throw neighborsResult.reason;
+                neighbors = neighborsResult.value;
 
-            const neighbors = neighborsResult.value;
+                if (!opts?.waitForGraph || neighbors.nodes.length > 0) break;
+                // Neo4j consumer still draining — back off and retry (0.5s, 1s, ..., up to ~8s total).
+                await new Promise((r) => setTimeout(r, 1000));
+            }
+
+            if (!entity || !neighbors) throw new Error("no graph data");
             setSelectedNode(entity);
-            const centerInNodes = neighbors.nodes.some((n) => n.address === entity.address);
+            const centerInNodes = neighbors.nodes.some((n) => n.address === entity!.address);
             const nodes = centerInNodes ? neighbors.nodes : [entity, ...neighbors.nodes];
             setGraphData({ ...neighbors, nodes, total_nodes: nodes.length });
             setPathResult(null);
@@ -97,10 +170,47 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     };
 
     const handleTxSearch = async (hash: string) => {
+        setSearchParams({ tx: hash }, { replace: true });
         setLoading(true);
         const loadId = toast.loading("Fetching transaction…");
         try {
-            const tx = await fetchTransaction(hash);
+            let tx: TransactionResponse | null = null;
+            try {
+                tx = await fetchTransaction(hash);
+            } catch (err: any) {
+                if (err?.status === 404) {
+                    const addrToIngest = selectedNode?.address;
+                    if (!addrToIngest) {
+                        toast.dismiss(loadId);
+                        toast.error("Transaction not found. Search for a related address first to load its transactions.");
+                        setLoading(false);
+                        return;
+                    }
+                    toast.dismiss(loadId);
+                    toast.info(
+                        `Transaction not found. Queued ingest of ${addrToIngest.slice(0, 10)}… — retry when the run pill shows completed.`,
+                    );
+                    try {
+                        const queued = await ingestAddress({ address: addrToIngest });
+                        trackRun(queued.run_id, {
+                            onComplete: (run) => {
+                                if (run.status === "completed") {
+                                    toast.success("Ingest complete — try the transaction again.");
+                                } else {
+                                    toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                                }
+                            },
+                        });
+                    } catch (ingestErr: any) {
+                        toast.error(ingestErr?.message || "Failed to queue ingest");
+                    }
+                    setLoading(false);
+                    return;
+                } else {
+                    throw err;
+                }
+            }
+            if (!tx) throw new Error("Transaction not found after ingestion");
 
             // Load neighbors for both endpoints in parallel, tolerating 404s
             const [fromNeighbors, toNeighbors] = await Promise.allSettled([
@@ -191,6 +301,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
     };
 
     const handleEdgeSelect = async (txHash: string) => {
+        const currentAddress = selectedNode?.address;
         setSelectedNode(null);
         const cached = graphData?.transactions.find((t) => t.hash === txHash) ?? null;
         if (cached) {
@@ -199,8 +310,29 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         }
         try {
             setSelectedEdge(await fetchTransaction(txHash));
-        } catch {
-            setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
+        } catch (err: any) {
+            if (err?.status === 404 && currentAddress) {
+                // Queue an async ingest; show a placeholder edge now and
+                // retry the fetch when the run completes.
+                setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
+                try {
+                    const queued = await ingestAddress({ address: currentAddress });
+                    trackRun(queued.run_id, {
+                        onComplete: async (run) => {
+                            if (run.status !== "completed") return;
+                            try {
+                                setSelectedEdge(await fetchTransaction(txHash));
+                            } catch {
+                                // still missing — leave placeholder
+                            }
+                        },
+                    });
+                } catch {
+                    // ignore; placeholder already shown
+                }
+            } else {
+                setSelectedEdge({ hash: txHash, from_address: "", to_address: "", properties: {} });
+            }
         }
     };
 
@@ -208,7 +340,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         setLoading(true);
         const loadId = toast.loading("Expanding node…");
         try {
-            const neighbors = await fetchNeighbors(address, { depth: 1, limit: 50 });
+            const neighbors = await fetchNeighbors(address, { depth: 1, limit: 500 });
             if (graphData) {
                 const existingAddresses = new Set(graphData.nodes.map((n) => n.address));
                 const newNodes = neighbors.nodes.filter((n) => !existingAddresses.has(n.address));
@@ -239,6 +371,28 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         } catch (err) {
             toast.dismiss(loadId);
             toast.error(err instanceof Error ? err.message : "Failed to expand node");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleIngestAndLoad = async (address: string) => {
+        setLoading(true);
+        try {
+            const result = await ingestAddress({ address });
+            toast.success("Queued ingest — graph will refresh when run completes.");
+            trackRun(result.run_id, {
+                onComplete: async (run) => {
+                    if (run.status !== "completed") {
+                        toast.error(`Ingest failed${run.error_message ? `: ${run.error_message}` : ""}`);
+                        return;
+                    }
+                    toast.success(`Ingest complete — ${run.transactions_processed} txs`);
+                    await handleSearch(address, { waitForGraph: true });
+                },
+            });
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to queue ingest");
         } finally {
             setLoading(false);
         }
@@ -342,6 +496,68 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         }
     };
 
+    const normalizePathAddress = (address: string) => address.trim().toLowerCase();
+
+    const currentFavoritePath = useMemo(() => {
+        const source = normalizePathAddress(pathSource);
+        const target = normalizePathAddress(pathTarget);
+        if (!source || !target) return null;
+        return favoritePaths.find((favorite) => favorite.source === source && favorite.target === target) ?? null;
+    }, [favoritePaths, pathSource, pathTarget]);
+
+    const handleSaveFavoritePath = () => {
+        const source = normalizePathAddress(pathSource);
+        const target = normalizePathAddress(pathTarget);
+
+        if (!source || !target) {
+            toast.error("Enter both source and target addresses before saving");
+            return;
+        }
+
+        if (source === target) {
+            toast.error("Source and target must be different");
+            return;
+        }
+
+        if (currentFavoritePath) {
+            toast.info("Path is already in favorites");
+            return;
+        }
+
+        const favorite: FavoritePath = {
+            id: `${source}-${target}`,
+            source,
+            target,
+            createdAt: new Date().toISOString(),
+        };
+
+        setFavoritePaths((prev) => [favorite, ...prev]);
+        setSelectedFavoritePathId(favorite.id);
+        toast.success("Favorite path saved");
+    };
+
+    const handleSelectFavoritePath = (favoriteId: string) => {
+        setSelectedFavoritePathId(favoriteId);
+        const favorite = favoritePaths.find((item) => item.id === favoriteId);
+        if (!favorite) return;
+
+        setPathSource(favorite.source);
+        setPathTarget(favorite.target);
+        setPathResult(null);
+    };
+
+    const handleRemoveSelectedFavoritePath = () => {
+        const favorite = favoritePaths.find((item) => item.id === selectedFavoritePathId) ?? currentFavoritePath;
+        if (!favorite) {
+            toast.error("Select a favorite path to remove");
+            return;
+        }
+
+        setFavoritePaths((prev) => prev.filter((item) => item.id !== favorite.id));
+        setSelectedFavoritePathId("");
+        toast.info("Favorite path removed");
+    };
+
     const handleFindPath = async () => {
         if (!pathSource.trim() || !pathTarget.trim()) {
             toast.error("Enter both source and target addresses");
@@ -413,19 +629,65 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
         }
     };
 
+    const handleRunDetection = async () => {
+        const address = detectionAddress.trim() || graphData?.center_address || "";
+        if (!address) {
+            toast.error("Enter an address for detection");
+            return;
+        }
+
+        setDetectionLoading(true);
+        const loadId = toast.loading("Running AML detection…");
+        try {
+            const result = await fetchDetection(detectionPattern, address, { limit: 20 });
+            setDetectionResult(result);
+
+            if (graphData) {
+                const existingAddresses = new Set(graphData.nodes.map((n) => n.address));
+                const existingTxHashes = new Set(graphData.transactions.map((t) => t.hash));
+                const addNodes = result.nodes.filter((n) => !existingAddresses.has(n.address));
+                const addTxs = result.transactions.filter((t) => !existingTxHashes.has(t.hash));
+
+                if (addNodes.length > 0 || addTxs.length > 0) {
+                    setGraphData({
+                        ...graphData,
+                        nodes: [...graphData.nodes, ...addNodes],
+                        transactions: [...graphData.transactions, ...addTxs],
+                        total_nodes: graphData.nodes.length + addNodes.length,
+                        total_transactions: graphData.transactions.length + addTxs.length,
+                    });
+                }
+            }
+
+            toast.dismiss(loadId);
+            toast.success(`Detection finished: ${result.matches} match(es)`);
+        } catch (err) {
+            toast.dismiss(loadId);
+            toast.error(err instanceof Error ? err.message : "Detection failed");
+        } finally {
+            setDetectionLoading(false);
+        }
+    };
+
+    const clearDetection = () => setDetectionResult(null);
+
     const highlightedNodeIds = useMemo(() => {
-        if (!pathResult) return new Set<string>();
         const ids = new Set<string>();
-        pathResult.paths.forEach((p) => p.nodes.forEach((n) => ids.add(n.address)));
+        if (pathResult) {
+            pathResult.paths.forEach((p) => p.nodes.forEach((n) => ids.add(n.address)));
+        }
+        detectionResult?.highlighted_node_ids.forEach((id) => ids.add(id));
         return ids;
-    }, [pathResult]);
+    }, [pathResult, detectionResult]);
 
     const highlightedEdgeIds = useMemo(() => {
-        if (!pathResult) return new Set<string>();
         const ids = new Set<string>();
-        pathResult.paths.forEach((p) => p.transactions.forEach((tx) => ids.add(`tx-${tx.hash}`)));
+        if (pathResult) {
+            pathResult.paths.forEach((p) => p.transactions.forEach((tx) => ids.add(`tx-${tx.hash}`)));
+        }
+        detectionResult?.highlighted_edge_ids.forEach((id) => ids.add(id));
         return ids;
-    }, [pathResult]);
+    }, [pathResult, detectionResult]);
 
     const toggleEntityType = (type: string) => {
         setFilters((prev) => {
@@ -484,6 +746,51 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                     >
                         {pathLoading ? "Finding…" : "Find Path"}
                     </button>
+                    <button
+                        className={`w-[31px] h-[31px] inline-flex items-center justify-center rounded-lg border text-[0.75rem] transition-colors disabled:opacity-45 ${
+                            currentFavoritePath
+                                ? "bg-amber-50 border-amber-200 text-amber-600 hover:bg-amber-100"
+                                : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+                        }`}
+                        title={currentFavoritePath ? "Favorite path saved" : "Save favorite path"}
+                        onClick={handleSaveFavoritePath}
+                        disabled={pathLoading}
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill={currentFavoritePath ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
+                    </button>
+                    {favoritePaths.length > 0 && (
+                        <>
+                            <select
+                                className="w-52 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] bg-white text-gray-700 outline-none transition-colors focus:border-blue-400"
+                                value={selectedFavoritePathId}
+                                onChange={(e) => handleSelectFavoritePath(e.target.value)}
+                                title="Favorite paths"
+                            >
+                                <option value="">Favorite paths</option>
+                                {favoritePaths.map((favorite) => (
+                                    <option key={favorite.id} value={favorite.id}>
+                                        {formatFavoritePathLabel(favorite)}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                className="w-[31px] h-[31px] inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-50 hover:text-red-600 disabled:opacity-45"
+                                title="Remove selected favorite path"
+                                onClick={handleRemoveSelectedFavoritePath}
+                                disabled={!selectedFavoritePathId && !currentFavoritePath}
+                            >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14H6L5 6" />
+                                    <path d="M10 11v6" />
+                                    <path d="M14 11v6" />
+                                    <path d="M9 6V4h6v2" />
+                                </svg>
+                            </button>
+                        </>
+                    )}
                     {pathResult && (
                         <button
                             className="px-3.5 py-1.5 bg-white text-gray-900 text-[0.75rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50"
@@ -491,6 +798,53 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                         >
                             Clear
                         </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Detections bar */}
+            <div className="shrink-0 border-b border-gray-100 bg-white/80">
+                <div className="flex items-center gap-2.5 px-5 py-2.5">
+                    <span className="text-[0.68rem] font-semibold tracking-widest uppercase text-gray-400">
+                        Detections
+                    </span>
+                    <select
+                        className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] bg-white text-gray-900"
+                        value={detectionPattern}
+                        onChange={(e) => setDetectionPattern(e.target.value as DetectionPattern)}
+                    >
+                        {DETECTION_PATTERNS.map((p) => (
+                            <option key={p.value} value={p.value}>
+                                {p.label}
+                            </option>
+                        ))}
+                    </select>
+                    <input
+                        className="w-72 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[0.75rem] font-mono bg-white text-gray-900 outline-none transition-colors focus:border-blue-400"
+                        placeholder="Address (0x...)"
+                        value={detectionAddress}
+                        onChange={(e) => setDetectionAddress(e.target.value)}
+                    />
+                    <button
+                        className="px-3.5 py-1.5 bg-gray-900 text-white text-[0.75rem] font-semibold rounded-lg border-none cursor-pointer transition-colors hover:bg-[#1e293b] disabled:opacity-45"
+                        onClick={handleRunDetection}
+                        disabled={detectionLoading}
+                    >
+                        {detectionLoading ? "Running..." : "Run"}
+                    </button>
+                    {detectionResult && (
+                        <button
+                            className="px-3 py-1.5 bg-white text-gray-900 text-[0.75rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50"
+                            onClick={clearDetection}
+                        >
+                            Clear
+                        </button>
+                    )}
+                    {detectionResult && (
+                        <span className="text-[0.72rem] text-gray-500">
+                            {detectionResult.matches} matches, {detectionResult.highlighted_node_ids.length} nodes, {detectionResult.highlighted_edge_ids.length} txs
+                            {detectionResult.truncated ? " (truncated)" : ""}
+                        </span>
                     )}
                 </div>
             </div>
@@ -674,8 +1028,29 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 </span>
                                 <span className="inline-flex items-center gap-[5px] px-2.5 py-[5px] bg-[rgba(249,250,251,0.9)] border border-gray-200 backdrop-blur-sm rounded-full text-[0.7rem] font-medium text-gray-500">
                                     <span className="w-[5px] h-[5px] rounded-full bg-emerald-500" />
-                                    {graphData.total_transactions} transactions
+                                    {graphData.total_transactions.toLocaleString()} transactions
+                                    {selectedNode?.transaction_count != null &&
+                                        selectedNode.address === graphData.center_address &&
+                                        selectedNode.transaction_count > graphData.total_transactions && (
+                                            <span className="text-gray-400 font-normal">
+                                                &nbsp;of {selectedNode.transaction_count.toLocaleString()}
+                                            </span>
+                                        )}
                                 </span>
+                                {graphData.total_transactions === 0 && graphData.center_address && (
+                                    <button
+                                        className="inline-flex items-center gap-[5px] px-3 py-[5px] bg-blue-600 text-white backdrop-blur-sm rounded-full text-[0.7rem] font-semibold border-none cursor-pointer transition-colors hover:bg-blue-700 disabled:opacity-45"
+                                        onClick={() => handleIngestAndLoad(graphData.center_address)}
+                                        disabled={loading}
+                                    >
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                            <polyline points="7 10 12 15 17 10" />
+                                            <line x1="12" y1="15" x2="12" y2="3" />
+                                        </svg>
+                                        Fetch from Etherscan
+                                    </button>
+                                )}
                             </div>
                         </>
                     ) : (
@@ -712,7 +1087,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                             </div>
                             <button
                                 className="inline-flex items-center gap-2 px-3.5 py-2 bg-white border border-gray-200 rounded-lg text-[0.75rem] text-gray-500 shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-colors font-mono hover:bg-gray-50 hover:border-gray-300"
-                                onClick={() => handleSearch("0x28c6c06298d514db089934071355e5743bf21d60")}
+                                onClick={() => setSearchParams({ address: "0x28c6c06298d514db089934071355e5743bf21d60" })}
                             >
                                 <svg
                                     width="12"
@@ -740,6 +1115,7 @@ export function GraphExplorerPage({ initialAddress, initialTxHash, onAddressLoad
                                 onClose={() => setSelectedNode(null)}
                                 transactions={graphData?.transactions}
                                 onNavigateToAddress={handleNodeSelect}
+                                onIngestComplete={(addr) => handleSearch(addr, { waitForGraph: true })}
                                 overrideMembers={
                                     selectedNode.address === "synthetic_high_risk_group" && graphData
                                         ? graphData.nodes.filter(n => n.risk_level === "critical")

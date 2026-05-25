@@ -1,7 +1,7 @@
 """Tests for API endpoints."""
 
-import pytest
 from fastapi.testclient import TestClient
+from fastapi.routing import APIRoute
 
 
 class TestHealthEndpoints:
@@ -67,6 +67,29 @@ class TestLabelEndpoints:
         assert response.status_code in [200, 500]  # 500 if DB not connected
 
 
+class TestPipelineEndpoints:
+    """Tests for pipeline endpoint registration."""
+
+    def test_ingest_address_route_is_registered(self, client: TestClient):
+        """Test Etherscan ingestion route exists for explorer fetch action."""
+        response = client.post("/api/pipeline/ingest-address", json={})
+        assert response.status_code == 422
+
+
+class TestDetectionsEndpoints:
+    """Tests for AML detections endpoint registration."""
+
+    def test_detections_route_is_registered(self, client: TestClient):
+        """Endpoint exists and validates required query params."""
+        response = client.get("/api/detections/peel-chain")
+        assert response.status_code == 422
+
+    def test_detections_invalid_address_format(self, client: TestClient):
+        """Invalid address should return 400."""
+        response = client.get("/api/detections/peel-chain?address=invalid")
+        assert response.status_code == 400
+
+
 class TestValidation:
     """Tests for input validation."""
 
@@ -90,3 +113,29 @@ class TestValidation:
             },
         )
         assert response.status_code == 422
+
+
+class TestRouteResponseModels:
+    """Ensure API routes declare explicit response models."""
+
+    def test_api_routes_have_response_models_or_no_content(self, client: TestClient):
+        routes = [
+            route
+            for route in client.app.routes
+            if isinstance(route, APIRoute)
+            and route.path.startswith(("/api", "/health"))
+        ]
+
+        assert routes, "Expected API routes to inspect"
+
+        missing = []
+        for route in routes:
+            if route.status_code == 204:
+                if route.response_model is not None:
+                    missing.append(f"{route.path} should not declare a response model")
+                continue
+
+            if route.response_model is None:
+                missing.append(f"{route.path} is missing response_model")
+
+        assert not missing, "\n".join(missing)

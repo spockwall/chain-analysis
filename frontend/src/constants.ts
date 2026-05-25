@@ -94,7 +94,7 @@ export const btnSecondary =
     "inline-flex items-center justify-center gap-1.5 px-3 py-[5px] bg-white text-gray-700 text-[0.72rem] font-medium rounded-lg border border-gray-200 cursor-pointer transition-colors hover:bg-gray-50 disabled:opacity-45 disabled:cursor-not-allowed";
 
 export const btnDangerSm =
-    "inline-flex items-center justify-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-500 text-[0.72rem] font-semibold rounded-lg border border-red-200 transition-all hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed";
+    "inline-flex items-center justify-center gap-1.5 px-2.5 py-1 bg-transparent text-red-600 text-[0.72rem] font-semibold rounded-lg border border-red-400 transition-all hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed";
 
 export const btnDanger =
     "inline-flex items-center justify-center gap-1.5 px-4 py-[7px] bg-red-500 text-white text-[0.78rem] font-semibold rounded-lg border-none cursor-pointer shrink-0 transition-colors hover:bg-red-600 disabled:opacity-45 disabled:cursor-not-allowed";

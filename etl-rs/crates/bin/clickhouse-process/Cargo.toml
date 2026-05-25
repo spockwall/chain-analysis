@@ -1,0 +1,17 @@
+[package]
+name = "clickhouse-process-bin"
+version = "0.2.0"
+edition = "2021"
+
+[[bin]]
+name = "clickhouse-process"
+path = "src/main.rs"
+
+[dependencies]
+etl = { path = "../../etl" }
+clap = { version = "4", features = ["derive"] }
+color-eyre = "0.6"
+eyre = "0.6"
+metrics = "0.24"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"

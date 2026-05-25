@@ -12,12 +12,11 @@ class TestSettings:
 
     def test_default_settings(self):
         """Test default settings values."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
 
         assert settings.environment == "local"
         assert settings.graph_db_provider == "neo4j"
         assert settings.queue_provider == "redis"
-        assert settings.storage_provider == "minio"
 
     def test_database_url_property(self):
         """Test database URL generation."""
@@ -36,9 +35,10 @@ class TestSettings:
             "postgresql://testuser:testpass@testhost:5433/testdb"
         )
 
-    def test_cors_origins_default(self):
+    def test_cors_origins_default(self, monkeypatch):
         """Test CORS origins default value."""
-        settings = Settings()
+        monkeypatch.delenv("CORS_ORIGINS", raising=False)
+        settings = Settings(_env_file=None)
 
         assert "http://localhost:3000" in settings.cors_origins
         assert "http://localhost:5173" in settings.cors_origins

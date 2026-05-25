@@ -1,0 +1,75 @@
+# Dagster orchestration: webserver (UI/GraphQL) + daemon (schedules/sensors).
+# Both containers share the backend image, which bakes the Rust `ingest`
+# binary at /opt/rust-bin/ingest (see backend/Dockerfile).
+services:
+  # =============================================================================
+  # Dagster webserver (UI + GraphQL)
+  # =============================================================================
+  dagster-webserver:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: chain-analysis-dagster-webserver
+    command:
+      [
+        "dagster-webserver",
+        "-h",
+        "0.0.0.0",
+        "-p",
+        "3000",
+        "-m",
+        "etl.definitions",
+      ]
+    entrypoint: []
+    env_file:
+      - ./secrets.dev.env
+    ports:
+      - "3000:3000"
+    environment:
+      - DAGSTER_HOME=/opt/dagster/home
+      - RUST_INGEST_BINARY=/opt/rust-bin/ingest
+      - REDIS_URL=redis://redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - INGEST_TARGETED_QUEUE=ingest:targeted_queue
+    volumes:
+      - dagster_home:/opt/dagster/home
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - chain-analysis-net
+
+  # =============================================================================
+  # Dagster daemon (schedules + sensors + run queue)
+  # =============================================================================
+  dagster-daemon:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    container_name: chain-analysis-dagster-daemon
+    command: [ "dagster-daemon", "run", "-m", "etl.definitions" ]
+    entrypoint: []
+    env_file:
+      - ./secrets.dev.env
+    environment:
+      - DAGSTER_HOME=/opt/dagster/home
+      - RUST_INGEST_BINARY=/opt/rust-bin/ingest
+      - REDIS_URL=redis://redis:6379
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - INGEST_TARGETED_QUEUE=ingest:targeted_queue
+    volumes:
+      - dagster_home:/opt/dagster/home
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - chain-analysis-net
+
+volumes:
+  dagster_home:
+
+networks:
+  chain-analysis-net:
+    driver: bridge

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Route, Routes, useNavigate, useLocation } from "react-router-dom";
 import { SearchBar } from "./SearchBar";
-import { LogoIcon, ExplorerIcon, GroupsIcon, EtlIcon, DashboardIcon, AdminIcon } from "./NavIcons";
+import { LogoIcon, ExplorerIcon, GroupsIcon, EtlIcon, DashboardIcon, AdminIcon, LabelsIcon } from "./NavIcons";
+import type { ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 
 const NAV_TABS: Array<{
@@ -12,8 +13,18 @@ const NAV_TABS: Array<{
 }> = [
     { to: "/explorer", label: "Explorer", icon: <ExplorerIcon /> },
     { to: "/groups", label: "Groups", icon: <GroupsIcon /> },
+    { to: "/labels", label: "Labels", icon: <LabelsIcon /> },
     { to: "/etl", label: "ETL", icon: <EtlIcon /> },
     { to: "/dashboard", label: "Dashboard", icon: <DashboardIcon /> },
+];
+
+// Menu items gated by role, rendered inside the user dropdown.
+const DROPDOWN_NAV_ITEMS: Array<{
+    to: string;
+    label: string;
+    icon: ReactNode;
+    roles?: string[];
+}> = [
     { to: "/admin/users", label: "Admin", icon: <AdminIcon />, roles: ["admin"] },
 ];
 
@@ -114,7 +125,7 @@ export function Nav() {
                     </div>
                 )}
 
-                {/* Live indicator + user dropdown */}
+                {/* User dropdown */}
                 {isAuthenticated && (
                     <div className="flex items-center gap-2">
                         {/* Dropdown root */}
@@ -186,6 +197,32 @@ export function Nav() {
 
                                     {/* Divider */}
                                     <div className="mx-3 border-t border-gray-100" />
+
+                                    {/* Role-gated nav items (e.g. Admin) */}
+                                    {(() => {
+                                        const visibleDropdownNav = DROPDOWN_NAV_ITEMS.filter(
+                                            (item) => !item.roles || item.roles.includes(user?.role ?? ""),
+                                        );
+                                        if (visibleDropdownNav.length === 0) return null;
+                                        return (
+                                            <>
+                                                <div className="p-1.5">
+                                                    {visibleDropdownNav.map((item) => (
+                                                        <NavLink
+                                                            key={item.to}
+                                                            to={item.to}
+                                                            onClick={() => setOpen(false)}
+                                                            className="w-full flex items-center gap-2.5 px-3 py-2 text-[0.8rem] text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-left no-underline"
+                                                        >
+                                                            <span className="shrink-0 text-gray-400">{item.icon}</span>
+                                                            {item.label}
+                                                        </NavLink>
+                                                    ))}
+                                                </div>
+                                                <div className="mx-3 border-t border-gray-100" />
+                                            </>
+                                        );
+                                    })()}
 
                                     {/* Dynamic menu items */}
                                     {MENU_ITEMS.length > 0 && (
