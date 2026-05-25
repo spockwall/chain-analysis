@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "clickhouse-process-bin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "etl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "clickhouse",
@@ -1512,7 +1512,7 @@ dependencies = [
 
 [[package]]
 name = "ingest-bin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -4245,7 +4245,7 @@ dependencies = [
 
 [[package]]
 name = "worker-bin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "color-eyre",
  "etl",
