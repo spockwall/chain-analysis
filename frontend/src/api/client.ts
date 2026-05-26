@@ -1,5 +1,8 @@
 /**
  * API client for Chain-Analysis backend.
+ * 
+ * Token is stored in an httpOnly cookie automatically managed by the browser.
+ * No manual token management required.
  */
 
 import type {
@@ -8,7 +11,6 @@ import type {
     AdminUserCreateRequest,
     AdminUserListResponse,
     AdminUserUpdateRequest,
-    AuthResponse,
     EntityResponse,
     GroupCreateRequest,
     GroupDetailResponse,
@@ -36,20 +38,9 @@ import type {
 } from "../types";
 
 const API_BASE = "/api";
-
-const TOKEN_KEY = "ca_access_token";
-
-export function getStoredToken(): string | null {
-    return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setStoredToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearStoredToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
-}
+const CSRF_COOKIE = "csrf_token";
+const CSRF_HEADER = "X-CSRF-Token";
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
 
 class ApiError extends Error {
     constructor(
@@ -61,15 +52,26 @@ class ApiError extends Error {
     }
 }
 
+function readCookie(name: string): string | null {
+    if (typeof document === "undefined") return null;
+    const prefix = `${name}=`;
+    const cookie = document.cookie
+        .split("; ")
+        .find((part) => part.startsWith(prefix));
+    return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}, noContent = false): Promise<T> {
     const url = `${API_BASE}${endpoint}`;
-    const token = getStoredToken();
+    const method = (options.method ?? "GET").toUpperCase();
+    const csrfToken = SAFE_METHODS.has(method) ? null : readCookie(CSRF_COOKIE);
 
     const response = await fetch(url, {
         ...options,
+        credentials: "include",  // Include httpOnly cookies in all requests
         headers: {
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(csrfToken ? { [CSRF_HEADER]: csrfToken } : {}),
             ...options.headers,
         },
     });
@@ -85,18 +87,22 @@ async function request<T>(endpoint: string, options: RequestInit = {}, noContent
 
 // Auth endpoints
 
-export async function login(body: LoginRequest): Promise<AuthResponse> {
-    return request<AuthResponse>("/auth/login", {
+export async function login(body: LoginRequest): Promise<UserResponse> {
+    return request<UserResponse>("/auth/login", {
         method: "POST",
         body: JSON.stringify(body),
     });
 }
 
-export async function register(body: RegisterRequest): Promise<AuthResponse> {
-    return request<AuthResponse>("/auth/register", {
+export async function register(body: RegisterRequest): Promise<UserResponse> {
+    return request<UserResponse>("/auth/register", {
         method: "POST",
         body: JSON.stringify(body),
     });
+}
+
+export async function logout(): Promise<void> {
+    return request<void>("/auth/logout", { method: "POST" }, true);
 }
 
 export async function fetchMe(): Promise<UserResponse> {

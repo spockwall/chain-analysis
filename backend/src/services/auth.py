@@ -4,7 +4,9 @@ Authentication service: password hashing (bcrypt) and JWT creation / decoding.
 Pure functions with no FastAPI dependencies — importable by routes and tests.
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
+import secrets
 
 import bcrypt
 from jose import JWTError, jwt  # noqa: F401 – re-exported for callers
@@ -43,15 +45,41 @@ def create_access_token(
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(hours=24))
     to_encode.update({"exp": expire})
+    to_encode.setdefault("jti", secrets.token_urlsafe(16))
     return jwt.encode(to_encode, secret_key, algorithm=algorithm)
 
 
-def decode_access_token(token: str, secret_key: str, algorithm: str) -> dict:
+def _normalize_secret_keys(secret_keys: str | Sequence[str]) -> list[str]:
+    if isinstance(secret_keys, str):
+        return [secret_keys]
+    return list(secret_keys)
+
+
+def decode_access_token(
+    token: str,
+    secret_keys: str | Sequence[str],
+    algorithm: str,
+) -> dict:
     """Decode and verify a JWT, returning its payload as a dict.
+
+    The token is verified against each secret in *secret_keys* in order, which
+    allows deployments to accept tokens signed with the previous secret during
+    a rotation window. A single secret string is also accepted for callers that
+    do not participate in rotation.
 
     Raises :class:`jose.JWTError` if the token is invalid or expired.
     """
-    return jwt.decode(token, secret_key, algorithms=[algorithm])
+    last_error: JWTError | None = None
+    for secret_key in _normalize_secret_keys(secret_keys):
+        try:
+            return jwt.decode(token, secret_key, algorithms=[algorithm])
+        except JWTError as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+
+    raise JWTError("no JWT secrets configured")
 
 
 __all__ = [

@@ -1,17 +1,16 @@
 /**
  * AuthContext — global authentication state.
  *
- * Persists the JWT in localStorage so the user stays logged in across reloads.
+ * Token is persisted in an httpOnly cookie managed by the server.
+ * The browser automatically includes it in all requests.
  * Provides login, register, and logout helpers to any component.
  */
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import {
-    clearStoredToken,
     fetchMe,
-    getStoredToken,
     login as apiLogin,
+    logout as apiLogout,
     register as apiRegister,
-    setStoredToken,
 } from "../api/client";
 import type { RegisterRequest, UserResponse } from "../types";
 
@@ -21,7 +20,7 @@ interface AuthContextValue {
     loading: boolean;
     login: (email: string, password: string) => Promise<void>;
     register: (username: string, email: string, password: string) => Promise<void>;
-    logout: () => void;
+    logout: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue>({
@@ -30,7 +29,7 @@ export const AuthContext = createContext<AuthContextValue>({
     loading: true,
     login: async () => {},
     register: async () => {},
-    logout: () => {},
+    logout: async () => {},
 });
 
 export function useAuth(): AuthContextValue {
@@ -41,34 +40,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<UserResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // On mount: restore session from localStorage token
+    // On mount: restore session from httpOnly cookie
     useEffect(() => {
-        const token = getStoredToken();
-        if (!token) {
-            setLoading(false);
-            return;
-        }
         fetchMe()
             .then((u) => setUser(u))
-            .catch(() => clearStoredToken()) // token expired / invalid
+            .catch(() => setUser(null))  // Not authenticated or cookie expired
             .finally(() => setLoading(false));
     }, []);
 
     const login = useCallback(async (email: string, password: string) => {
         const res = await apiLogin({ email, password });
-        setStoredToken(res.access_token);
-        setUser(res.user);
+        setUser(res);
     }, []);
 
     const register = useCallback(async (username: string, email: string, password: string) => {
         const body: RegisterRequest = { username, email, password };
         const res = await apiRegister(body);
-        setStoredToken(res.access_token);
-        setUser(res.user);
+        setUser(res);
     }, []);
 
-    const logout = useCallback(() => {
-        clearStoredToken();
+    const logout = useCallback(async () => {
+        await apiLogout();
         setUser(null);
     }, []);
 

@@ -11,6 +11,63 @@ from slowapi import _rate_limit_exceeded_handler
 
 from httpx import AsyncClient, ASGITransport
 
+from src.core.config import Settings
+from src.libs import rate_limiter
+from src.services.auth import create_access_token
+
+
+def _request(headers: dict[str, str] | None = None) -> Request:
+    raw_headers = [
+        (key.lower().encode(), value.encode())
+        for key, value in (headers or {}).items()
+    ]
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/test",
+            "headers": raw_headers,
+            "client": ("203.0.113.10", 12345),
+        }
+    )
+
+
+def test_rate_limit_key_uses_cookie_jwt(monkeypatch):
+    token = create_access_token(
+        data={"sub": "42"},
+        secret_key="current-secret",
+        algorithm="HS256",
+    )
+    monkeypatch.setattr(
+        rate_limiter,
+        "get_settings",
+        lambda: Settings(jwt_secret_key="current-secret"),
+    )
+
+    request = _request({"Cookie": f"access_token={token}"})
+
+    assert rate_limiter._key_func(request) == "user:42"
+
+
+def test_rate_limit_key_accepts_rotated_previous_secret(monkeypatch):
+    token = create_access_token(
+        data={"sub": "84"},
+        secret_key="previous-secret",
+        algorithm="HS256",
+    )
+    monkeypatch.setattr(
+        rate_limiter,
+        "get_settings",
+        lambda: Settings(
+            jwt_secret_key="current-secret",
+            jwt_previous_secret_key="previous-secret",
+        ),
+    )
+
+    request = _request({"Authorization": f"Bearer {token}"})
+
+    assert rate_limiter._key_func(request) == "user:84"
+
 
 @pytest.mark.asyncio
 async def test_ingest_rate_limit_memory_storage():

@@ -44,6 +44,12 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+class LogoutResponse(BaseModel):
+    """Response returned after a logout request."""
+
+    message: str
+
+
 class ManagedUserCreateRequest(BaseModel):
     """Request body for POST /api/admin/users."""
 
