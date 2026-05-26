@@ -209,6 +209,157 @@ jobs:
       - name: Build production image
         run: docker build -f backend/Dockerfile -t chain-analysis-backend:ci .
 
+  rust-etl:
+    name: Rust ETL validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: etl-rs -> target
+
+      - name: Test
+        working-directory: etl-rs
+        run: cargo test --workspace
+
+  e2e:
+    name: E2E smoke journey
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare local compose secrets
+        run: |
+          set -euo pipefail
+          mkdir -p compose
+
+          cat > .env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_URI=bolt://localhost:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
+          POSTGRES_HOST=localhost
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://localhost:6379
+          DATABASE_URL=postgresql://postgres:changeme@localhost:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+          cat > compose/secrets.dev.env <<'EOF'
+          ENVIRONMENT=local
+          NEO4J_URI=bolt://neo4j:7687
+          NEO4J_USER=neo4j
+          NEO4J_PASSWORD=changeme
+          NEO4J_AUTH=neo4j/changeme
+          NEO4J_PLUGINS=[]
+          POSTGRES_HOST=postgres
+          POSTGRES_PORT=5432
+          POSTGRES_DB=chain_analysis
+          POSTGRES_USER=postgres
+          POSTGRES_PASSWORD=changeme
+          REDIS_PASSWORD=changeme
+          REDIS_URL=redis://redis:6379
+          DATABASE_URL=postgresql://postgres:changeme@postgres:5432/chain_analysis
+          CLICKHOUSE_DB=chain_analysis
+          CLICKHOUSE_USER=default
+          CLICKHOUSE_PASSWORD=changeme
+          JWT_SECRET_KEY=changeme
+          ETHERSCAN_API_KEY=
+          ALCHEMY_API_KEY=
+          INGEST_SOURCE=
+          EOF
+
+      - name: Start E2E stack
+        run: |
+          set -euo pipefail
+
+          docker compose up -d neo4j postgres redis backend frontend
+
+          deadline=$((SECONDS + 360))
+          while true; do
+            backend_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-backend 2>/dev/null || true)"
+            frontend_state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' chain-analysis-frontend 2>/dev/null || true)"
+            echo "backend=${backend_state:-missing} frontend=${frontend_state:-missing}"
+
+            if echo "$backend_state $frontend_state" | grep -q 'exited'; then
+              docker compose ps
+              docker compose logs --no-color --tail=200 backend frontend
+              exit 1
+            fi
+
+            if echo "$backend_state" | grep -q 'healthy' && echo "$frontend_state" | grep -q 'healthy'; then
+              break
+            fi
+
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              docker compose ps
+              docker compose logs --no-color --tail=200 backend frontend
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright runner
+        working-directory: frontend
+        run: |
+          npm install --no-save @playwright/test
+          npx playwright install --with-deps chromium
+
+      - name: Run E2E smoke journey
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          if-no-files-found: ignore
+
+      - name: Stop E2E stack
+        if: always()
+        run: docker compose down -v
+
+      - name: Remove local compose secrets
+        if: always()
+        run: rm -f .env compose/secrets.dev.env
+
   compose:
     name: Compose validation
     runs-on: ubuntu-latest

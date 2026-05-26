@@ -79,6 +79,7 @@ export function SearchBar({ onSearch, onSearchTx, loading }: SearchBarProps) {
 
                     <input
                         id="address-search"
+                        data-testid="address-search"
                         type="text"
                         value={value}
                         onChange={(e) => {
@@ -102,6 +103,7 @@ export function SearchBar({ onSearch, onSearchTx, loading }: SearchBarProps) {
 
             <button
                 type="submit"
+                data-testid="address-search-submit"
                 disabled={loading || !value.trim()}
                 className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-gray-900 text-white text-[0.8rem] font-semibold rounded-lg shadow-sm transition-all hover:-translate-y-px hover:shadow-md disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-y-0"
             >

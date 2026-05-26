@@ -64,6 +64,7 @@ export function LoginPage() {
                         </label>
                         <input
                             id="login-email"
+                            data-testid="login-email"
                             type="email"
                             autoComplete="email"
                             className={inputCls}
@@ -82,6 +83,7 @@ export function LoginPage() {
                         <div className="relative">
                             <input
                                 id="login-password"
+                                data-testid="login-password"
                                 type={showPassword ? "text" : "password"}
                                 autoComplete="current-password"
                                 className={`${inputCls} pr-10`}
@@ -127,7 +129,13 @@ export function LoginPage() {
                     </div>
 
                     {/* Submit */}
-                    <button id="login-submit" type="submit" className={`${btnPrimary} mt-1`} disabled={loading}>
+                    <button
+                        id="login-submit"
+                        data-testid="login-submit"
+                        type="submit"
+                        className={`${btnPrimary} mt-1`}
+                        disabled={loading}
+                    >
                         {loading ? (
                             <>
                                 <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">

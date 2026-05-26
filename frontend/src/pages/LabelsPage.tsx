@@ -219,6 +219,7 @@ export function LabelsPage() {
                         <div className="flex flex-col gap-1">
                             <label className={sectionLabel}>Mode</label>
                             <select
+                                data-testid="label-fetch-mode"
                                 className={selectCls}
                                 value={mode}
                                 onChange={(e) => setMode(e.target.value as FetchMode)}
@@ -247,6 +248,7 @@ export function LabelsPage() {
                         <div className="flex flex-col gap-1">
                             <label className={sectionLabel}>Addresses (comma or newline separated)</label>
                             <textarea
+                                data-testid="label-addresses-input"
                                 className={`${inputCls} font-mono min-h-[80px]`}
                                 value={addressesInput}
                                 onChange={(e) => setAddressesInput(e.target.value)}
@@ -258,6 +260,7 @@ export function LabelsPage() {
                         <div className="flex flex-col gap-1">
                             <label className={sectionLabel}>Transaction hashes</label>
                             <textarea
+                                data-testid="label-hashes-input"
                                 className={`${inputCls} font-mono min-h-[80px]`}
                                 value={hashesInput}
                                 onChange={(e) => setHashesInput(e.target.value)}
@@ -269,6 +272,7 @@ export function LabelsPage() {
                         <div className="flex flex-col gap-1">
                             <label className={sectionLabel}>Seed address</label>
                             <input
+                                data-testid="label-seed-input"
                                 className={`${inputCls} font-mono`}
                                 value={seed}
                                 onChange={(e) => setSeed(e.target.value)}
@@ -278,7 +282,7 @@ export function LabelsPage() {
                     )}
 
                     <div>
-                        <button type="submit" disabled={queueing} className={btnPrimary}>
+                        <button type="submit" data-testid="label-queue-submit" disabled={queueing} className={btnPrimary}>
                             {queueing ? "Queueing…" : "Queue fetch"}
                         </button>
                     </div>
@@ -291,6 +295,7 @@ export function LabelsPage() {
                     <h2 className="text-[0.9rem] font-semibold text-gray-900">Tasks</h2>
                     <div className="flex items-center gap-2">
                         <select
+                            data-testid="label-status-filter"
                             className={selectCls}
                             value={statusFilter}
                             onChange={(e) => setStatusFilter(e.target.value as LabelTaskStatus | "all")}
@@ -338,6 +343,8 @@ export function LabelsPage() {
                                         return (
                                             <tr
                                                 key={t.id}
+                                                data-testid="label-task-row"
+                                                data-entity-address={t.entity_address}
                                                 className={`border-t border-gray-100 ${active ? "bg-gray-50" : ""}`}
                                             >
                                                 <td className="px-3 py-2 font-mono text-gray-900">
@@ -356,6 +363,7 @@ export function LabelsPage() {
                                                     {t.status === "pending" || t.status === "running" ? (
                                                         <button
                                                             type="button"
+                                                            data-testid="label-annotate-button"
                                                             onClick={() => openTask(t)}
                                                             className={btnSecondary}
                                                         >
@@ -389,6 +397,7 @@ export function LabelsPage() {
                                 <div className="flex flex-col gap-1">
                                     <label className={sectionLabel}>Entity type</label>
                                     <select
+                                        data-testid="annotation-entity-type"
                                         className={selectCls}
                                         value={annEntityType}
                                         onChange={(e) => setAnnEntityType(e.target.value as EntityType)}
@@ -408,6 +417,7 @@ export function LabelsPage() {
                                             <button
                                                 key={r}
                                                 type="button"
+                                                data-testid={`annotation-risk-${r}`}
                                                 onClick={() => setAnnRisk(r)}
                                                 className={`px-2 py-1 rounded text-[0.7rem] transition-all ${
                                                     annRisk === r
@@ -424,6 +434,7 @@ export function LabelsPage() {
                                 <div className="flex flex-col gap-1">
                                     <label className={sectionLabel}>Labels (comma separated)</label>
                                     <input
+                                        data-testid="annotation-labels"
                                         className={inputCls}
                                         value={annLabelsInput}
                                         onChange={(e) => setAnnLabelsInput(e.target.value)}
@@ -434,6 +445,7 @@ export function LabelsPage() {
                                 <div className="flex flex-col gap-1">
                                     <label className={sectionLabel}>Notes</label>
                                     <textarea
+                                        data-testid="annotation-notes"
                                         className={`${inputCls} min-h-[60px]`}
                                         value={annNotes}
                                         onChange={(e) => setAnnNotes(e.target.value)}
@@ -443,6 +455,7 @@ export function LabelsPage() {
                                 <div className="flex flex-col gap-1">
                                     <label className={sectionLabel}>Evidence (URL or reference)</label>
                                     <input
+                                        data-testid="annotation-evidence"
                                         className={inputCls}
                                         value={annEvidence}
                                         onChange={(e) => setAnnEvidence(e.target.value)}
@@ -452,6 +465,7 @@ export function LabelsPage() {
                                 <div className="flex flex-col gap-1">
                                     <label className={sectionLabel}>Confidence (0–1)</label>
                                     <input
+                                        data-testid="annotation-confidence"
                                         type="number"
                                         step="0.05"
                                         min={0}
@@ -465,7 +479,12 @@ export function LabelsPage() {
                                 </div>
 
                                 <div className="flex gap-2 pt-1">
-                                    <button type="submit" disabled={submittingAnn} className={btnPrimary}>
+                                    <button
+                                        type="submit"
+                                        data-testid="annotation-submit"
+                                        disabled={submittingAnn}
+                                        className={btnPrimary}
+                                    >
                                         {submittingAnn ? "Submitting…" : "Submit"}
                                     </button>
                                     <button

@@ -326,7 +326,7 @@ async def create_annotation(
         )
         VALUES (
             :task_id, NULL, :address, :entity_type,
-            :risk_level, :labels, :notes, :evidence, :confidence
+            :risk_level, CAST(:labels AS JSON), :notes, CAST(:evidence AS JSON), :confidence
         )
         RETURNING id, task_id, user_id, entity_address, entity_type,
                   risk_level, labels, notes, confidence, created_at
@@ -338,9 +338,9 @@ async def create_annotation(
                 annotation.entity_type.value if annotation.entity_type else None
             ),
             "risk_level": annotation.risk_level.value,
-            "labels": annotation.labels,
+            "labels": json.dumps(annotation.labels) if annotation.labels is not None else None,
             "notes": annotation.notes,
-            "evidence": annotation.evidence,
+            "evidence": json.dumps(annotation.evidence) if annotation.evidence is not None else None,
             "confidence": annotation.confidence,
         },
     )
