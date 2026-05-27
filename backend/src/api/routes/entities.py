@@ -8,6 +8,7 @@ from api.deps import GraphDBDep
 from api.models.entity import (
     EntityResponse,
     EntityType,
+    GroupMemberDetailResponse,
     GroupMemberRequest,
     GroupMemberResponse,
     NeighborsResponse,
@@ -21,6 +22,22 @@ from api.models.entity import (
 router = APIRouter(prefix="/entities", tags=["entities"])
 write_router = APIRouter(prefix="/entities", tags=["entities"])
 transactions_router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+ENTITY_PROPERTY_KEYS = {
+    "entity_type",
+    "risk_level",
+    "name",
+    "first_seen_block",
+    "last_seen_block",
+    "tx_count",
+    "member_count",
+    "membership_note",
+    "membership_added_at",
+}
+
+
+def _node_properties_payload(properties: dict) -> dict:
+    return {k: v for k, v in properties.items() if k not in ENTITY_PROPERTY_KEYS}
 
 
 def _node_to_response(node: dict) -> EntityResponse:
@@ -36,10 +53,25 @@ def _node_to_response(node: dict) -> EntityResponse:
         last_seen_block=props.get("last_seen_block"),
         transaction_count=props.get("tx_count"),
         member_count=props.get("member_count", 0),
-        properties={k: v for k, v in props.items() if k not in {
-            "entity_type", "risk_level", "name", "first_seen_block",
-            "last_seen_block", "tx_count", "member_count"
-        }},
+        properties=_node_properties_payload(props),
+    )
+
+
+def _node_obj_to_group_member_response(node) -> GroupMemberDetailResponse:
+    props = node.properties
+    return GroupMemberDetailResponse(
+        address=node.address,
+        entity_type=props.get("entity_type"),
+        risk_level=RiskLevel(props.get("risk_level", "unknown")),
+        name=props.get("name"),
+        labels=node.labels,
+        first_seen_block=props.get("first_seen_block"),
+        last_seen_block=props.get("last_seen_block"),
+        transaction_count=props.get("tx_count"),
+        member_count=props.get("member_count", 0),
+        membership_note=props.get("membership_note"),
+        membership_added_at=props.get("membership_added_at"),
+        properties=_node_properties_payload(props),
     )
 
 
@@ -78,10 +110,7 @@ async def get_entity(
         last_seen_block=node.properties.get("last_seen_block"),
         transaction_count=node.properties.get("tx_count"),
         member_count=node.properties.get("member_count", 0),
-        properties={k: v for k, v in node.properties.items() if k not in {
-            "entity_type", "risk_level", "name", "first_seen_block",
-            "last_seen_block", "tx_count", "member_count"
-        }},
+        properties=_node_properties_payload(node.properties),
     )
 
 
@@ -372,25 +401,6 @@ async def delete_entity(
 
 # ── Group member endpoints ─────────────────────────────────────────────────────
 
-def _node_obj_to_response(node) -> EntityResponse:
-    """Convert a core Node dataclass to EntityResponse."""
-    return EntityResponse(
-        address=node.address,
-        entity_type=node.properties.get("entity_type"),
-        risk_level=RiskLevel(node.properties.get("risk_level", "unknown")),
-        name=node.properties.get("name"),
-        labels=node.labels,
-        first_seen_block=node.properties.get("first_seen_block"),
-        last_seen_block=node.properties.get("last_seen_block"),
-        transaction_count=node.properties.get("tx_count"),
-        member_count=node.properties.get("member_count", 0),
-        properties={k: v for k, v in node.properties.items() if k not in {
-            "entity_type", "risk_level", "name", "first_seen_block",
-            "last_seen_block", "tx_count", "member_count"
-        }},
-    )
-
-
 @write_router.get("/{address}/members", response_model=GroupMemberResponse)
 async def get_group_members(
     address: str,
@@ -399,7 +409,7 @@ async def get_group_members(
     """Get all contract members of a group entity."""
     address = _validate_address(address)
     members = await graph_db.get_group_members(address)
-    member_responses = [_node_obj_to_response(m) for m in members]
+    member_responses = [_node_obj_to_group_member_response(m) for m in members]
     return GroupMemberResponse(
         group_address=address,
         members=member_responses,
@@ -438,10 +448,11 @@ async def add_group_member(
                    f"{existing_group.properties.get('name', existing_group.address)}",
         )
 
-    await graph_db.add_group_member(address, member_address)
+    note = body.note.strip() if body.note else None
+    await graph_db.add_group_member(address, member_address, note or None)
 
     members = await graph_db.get_group_members(address)
-    member_responses = [_node_obj_to_response(m) for m in members]
+    member_responses = [_node_obj_to_group_member_response(m) for m in members]
     return GroupMemberResponse(
         group_address=address,
         members=member_responses,

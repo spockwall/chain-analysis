@@ -198,21 +198,36 @@ class Neo4jAdapter:
             properties=node_data,
         )
 
-    async def add_group_member(self, group_address: str, member_address: str) -> None:
+    async def add_group_member(
+        self,
+        group_address: str,
+        member_address: str,
+        note: str | None = None,
+    ) -> None:
         """Add an entity as a member of a group via IN_GROUP relationship."""
         from datetime import datetime, timezone
         # MATCH (not MERGE) the group — it must already exist; 404 is handled in the route.
         # MERGE the member entity in case it doesn't exist yet (unprocessed address).
         # MERGE the IN_GROUP relationship is idempotent — safe to call repeatedly.
-        # added_at on the relationship enables temporal auditing of group membership.
+        # added_at and note on the relationship enable temporal auditing and analyst context.
         # Complexity: O(log E) — two index lookups + one edge check.
         query = """
         MATCH (grp:Entity {address: $group})
         MERGE (member:Entity {address: $member})
-        MERGE (member)-[:IN_GROUP {added_at: $now}]->(grp)
+        MERGE (member)-[rel:IN_GROUP]->(grp)
+        ON CREATE SET rel.added_at = $now
+        SET rel.note = $note
         """
         now = datetime.now(timezone.utc).isoformat()
-        await self.execute_query(query, {"group": group_address, "member": member_address, "now": now})
+        await self.execute_query(
+            query,
+            {
+                "group": group_address,
+                "member": member_address,
+                "now": now,
+                "note": note,
+            },
+        )
 
     async def remove_group_member(self, group_address: str, member_address: str) -> None:
         """Remove the IN_GROUP relationship between a member and its group."""
@@ -233,14 +248,19 @@ class Neo4jAdapter:
         # display member properties without extra round-trips.
         # Complexity: O(log E + G) — unavoidably linear in G since all members are returned.
         query = """
-        MATCH (member:Entity)-[:IN_GROUP]->(grp:Entity {address: $group})
-        RETURN member, labels(member) AS labels
+        MATCH (member:Entity)-[rel:IN_GROUP]->(grp:Entity {address: $group})
+        RETURN member, labels(member) AS labels,
+               rel.note AS membership_note,
+               rel.added_at AS membership_added_at
+        ORDER BY coalesce(toString(rel.added_at), ""), member.address
         """
         result = await self.execute_query(query, {"group": group_address})
         nodes: list[Node] = []
         for record in result:
             node_data = dict(record["member"])
             node_address = node_data.pop("address")
+            node_data["membership_note"] = record.get("membership_note")
+            node_data["membership_added_at"] = record.get("membership_added_at")
             nodes.append(Node(
                 address=node_address,
                 labels=[l for l in record["labels"] if l != "Entity"],

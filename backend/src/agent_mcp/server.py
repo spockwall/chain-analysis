@@ -735,11 +735,15 @@ async def delete_group(address: str) -> dict[str, bool]:
 
 @chain_analysis_mcp.tool(
     name="add_group_member",
-    description="Add an address as a member of a group entity.",
+    description="Add an address as a member of a group entity with an optional note.",
     structured_output=True,
 )
-async def add_group_member(address: str, member_address: str) -> dict[str, Any]:
-    body = GroupMemberRequest(member_address=member_address)
+async def add_group_member(
+    address: str,
+    member_address: str,
+    note: str | None = None,
+) -> dict[str, Any]:
+    body = GroupMemberRequest(member_address=member_address, note=note)
     return await _invoke(entity_routes.add_group_member, address, body, get_graph_db())
 
 
