@@ -52,6 +52,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # The backend image bakes the Rust `ingest` binary from etl-rs/crates,
+          # so the build needs the etl-rs submodule checked out.
+          submodules: recursive
 
       - name: Prepare local compose secrets
         run: |
@@ -208,6 +212,52 @@ jobs:
 
       - name: Build production image
         run: docker build -f backend/Dockerfile -t chain-analysis-backend:ci .
+
+  etl-rs:
+    name: ETL (Rust) validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup default stable
+          rustup component add rustfmt clippy
+          rustc --version
+          cargo --version
+          cargo clippy --version
+          cargo fmt --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            etl-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('etl-rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Format check
+        working-directory: etl-rs
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: etl-rs
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: etl-rs
+        # Service-backed integration tests skip themselves when their E2E_*
+        # env vars are unset, and Docker-backed tests are #[ignore]'d — so this
+        # runs unit + offline integration tests without external infrastructure.
+        run: cargo test --workspace
 
   compose:
     name: Compose validation
