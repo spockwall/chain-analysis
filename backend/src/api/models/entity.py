@@ -76,6 +76,17 @@ class GroupUpdateRequest(BaseModel):
     )
 
 
+class GroupMemberDetailResponse(EntityResponse):
+    """Entity response enriched with membership relationship metadata."""
+
+    membership_note: str | None = Field(
+        None, description="Analyst note stored on the IN_GROUP relationship"
+    )
+    membership_added_at: str | None = Field(
+        None, description="Timestamp stored on the IN_GROUP relationship"
+    )
+
+
 class GroupDetailResponse(BaseModel):
     """Response model for a group entity with its members."""
 
@@ -85,7 +96,7 @@ class GroupDetailResponse(BaseModel):
     risk_level: "RiskLevel"
     description: str | None
     member_count: int
-    members: list["EntityResponse"]
+    members: list["GroupMemberDetailResponse"]
     properties: dict[str, Any]
 
 
@@ -100,13 +111,18 @@ class GroupMemberRequest(BaseModel):
     """Request model for adding a member to a group entity."""
 
     member_address: str = Field(..., description="Contract address to add as member")
+    note: str | None = Field(
+        None,
+        max_length=1000,
+        description="Optional analyst note explaining why this member belongs to the group",
+    )
 
 
 class GroupMemberResponse(BaseModel):
     """Response model for group member operations."""
 
     group_address: str = Field(..., description="Group entity address")
-    members: list["EntityResponse"] = Field(..., description="Member entities")
+    members: list["GroupMemberDetailResponse"] = Field(..., description="Member entities")
     total: int = Field(..., description="Total number of members")
 
 

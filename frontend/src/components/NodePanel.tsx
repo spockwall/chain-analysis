@@ -3,7 +3,7 @@
  */
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import type { EntityResponse, TransactionResponse } from "../types";
+import type { EntityResponse, GroupMemberEntity, TransactionResponse } from "../types";
 import {
     formatAddress,
     formatWei,
@@ -46,8 +46,9 @@ export function NodePanel({
     const navigate = useNavigate();
     const { track: trackRun, trackTask } = useIngestionRuns();
 
-    const [members, setMembers] = useState<EntityResponse[]>([]);
+    const [members, setMembers] = useState<GroupMemberEntity[]>([]);
     const [memberInput, setMemberInput] = useState("");
+    const [memberNoteInput, setMemberNoteInput] = useState("");
     const [membersLoading, setMembersLoading] = useState(false);
     const [ingesting, setIngesting] = useState(false);
     const [tracing, setTracing] = useState(false);
@@ -63,6 +64,7 @@ export function NodePanel({
 
         setMembers([]);
         setMemberInput("");
+        setMemberNoteInput("");
         setMembersLoading(true);
         fetchGroupMembers(node.address)
             .then((res) => {
@@ -81,9 +83,10 @@ export function NodePanel({
         const addr = memberInput.trim();
         if (!addr) return;
         try {
-            const res = await addGroupMember(node.address, addr);
+            const res = await addGroupMember(node.address, addr, memberNoteInput);
             setMembers(res.members);
             setMemberInput("");
+            setMemberNoteInput("");
             toast.success(`Added ${formatAddress(addr, 4)} as member`);
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : "Failed to add member");
@@ -420,6 +423,11 @@ export function NodePanel({
                                                 >
                                                     {formatAddress(m.address, 5)}
                                                 </span>
+                                                {m.membership_note && (
+                                                    <span className="block text-[0.64rem] text-gray-400 truncate leading-snug">
+                                                        {m.membership_note}
+                                                    </span>
+                                                )}
                                             </button>
                                             {m.entity_type && (
                                                 <span className="shrink-0 inline-flex items-center px-[5px] py-[1px] rounded text-[0.6rem] font-semibold uppercase border border-violet-500 text-violet-600">
@@ -437,23 +445,35 @@ export function NodePanel({
                                     ))}
                                 </div>
                             )}
-                            <div className="flex gap-1.5 items-center mt-1">
+                            <div className="flex flex-col gap-1.5 mt-1">
+                                <div className="flex gap-1.5 items-center">
+                                    <input
+                                        className="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded px-2 py-1 font-mono text-[0.68rem] text-gray-900 outline-none focus:border-violet-400"
+                                        type="text"
+                                        placeholder="0x… member address"
+                                        value={memberInput}
+                                        onChange={(e) => setMemberInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") handleAddMember();
+                                        }}
+                                    />
+                                    <button
+                                        className="shrink-0 px-2.5 py-1 bg-violet-600 text-white text-[0.7rem] font-semibold rounded border-none cursor-pointer transition-colors hover:bg-violet-700"
+                                        onClick={handleAddMember}
+                                    >
+                                        Add
+                                    </button>
+                                </div>
                                 <input
-                                    className="flex-1 min-w-0 bg-gray-50 border border-gray-200 rounded px-2 py-1 font-mono text-[0.68rem] text-gray-900 outline-none focus:border-violet-400"
+                                    className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1 text-[0.68rem] text-gray-900 outline-none focus:border-violet-400"
                                     type="text"
-                                    placeholder="0x… member address"
-                                    value={memberInput}
-                                    onChange={(e) => setMemberInput(e.target.value)}
+                                    placeholder="Note"
+                                    value={memberNoteInput}
+                                    onChange={(e) => setMemberNoteInput(e.target.value)}
                                     onKeyDown={(e) => {
                                         if (e.key === "Enter") handleAddMember();
                                     }}
                                 />
-                                <button
-                                    className="shrink-0 px-2.5 py-1 bg-violet-600 text-white text-[0.7rem] font-semibold rounded border-none cursor-pointer transition-colors hover:bg-violet-700"
-                                    onClick={handleAddMember}
-                                >
-                                    Add
-                                </button>
                             </div>
                         </>
                     )}

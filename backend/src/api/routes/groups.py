@@ -6,10 +6,10 @@ from fastapi import APIRouter, HTTPException
 
 from api.deps import GraphDBDep
 from api.models.entity import (
-    EntityResponse,
     EntityType,
     GroupCreateRequest,
     GroupDetailResponse,
+    GroupMemberDetailResponse,
     GroupListResponse,
     GroupUpdateRequest,
     RiskLevel,
@@ -18,6 +18,8 @@ from core.ports.graph_db import Node
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
+GROUP_MEMBER_METADATA_KEYS = {"membership_note", "membership_added_at"}
+
 
 def _validate_address(address: str) -> str:
     if not address.startswith("0x") or len(address) != 42:
@@ -25,8 +27,26 @@ def _validate_address(address: str) -> str:
     return address.lower()
 
 
-def _node_to_entity_response(node: Node) -> EntityResponse:
-    return EntityResponse(
+def _entity_properties(properties: dict) -> dict:
+    return {
+        k: v
+        for k, v in properties.items()
+        if k
+        not in {
+            "entity_type",
+            "risk_level",
+            "name",
+            "first_seen_block",
+            "last_seen_block",
+            "tx_count",
+            "member_count",
+            *GROUP_MEMBER_METADATA_KEYS,
+        }
+    }
+
+
+def _node_to_group_member_response(node: Node) -> GroupMemberDetailResponse:
+    return GroupMemberDetailResponse(
         address=node.address,
         entity_type=node.properties.get("entity_type"),
         risk_level=RiskLevel(node.properties.get("risk_level", "unknown")),
@@ -36,10 +56,9 @@ def _node_to_entity_response(node: Node) -> EntityResponse:
         last_seen_block=node.properties.get("last_seen_block"),
         transaction_count=node.properties.get("tx_count"),
         member_count=node.properties.get("member_count", 0),
-        properties={k: v for k, v in node.properties.items() if k not in {
-            "entity_type", "risk_level", "name", "first_seen_block",
-            "last_seen_block", "tx_count", "member_count",
-        }},
+        membership_note=node.properties.get("membership_note"),
+        membership_added_at=node.properties.get("membership_added_at"),
+        properties=_entity_properties(node.properties),
     )
 
 
@@ -52,7 +71,7 @@ def _build_group_detail(node: Node, members: list[Node]) -> GroupDetailResponse:
         risk_level=RiskLevel(props.get("risk_level", "unknown")),
         description=props.get("description"),
         member_count=props.get("member_count", len(members)),
-        members=[_node_to_entity_response(m) for m in members],
+        members=[_node_to_group_member_response(m) for m in members],
         properties={k: v for k, v in props.items() if k not in {
             "entity_type", "risk_level", "name", "description",
             "first_seen_block", "last_seen_block", "tx_count", "member_count",

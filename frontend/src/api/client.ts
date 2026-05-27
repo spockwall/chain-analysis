@@ -258,10 +258,18 @@ export async function fetchGroupMembers(address: string): Promise<GroupMemberRes
     return request<GroupMemberResponse>(`/entities/${address}/members`);
 }
 
-export async function addGroupMember(address: string, childAddress: string): Promise<GroupMemberResponse> {
+export async function addGroupMember(
+    address: string,
+    childAddress: string,
+    note?: string | null,
+): Promise<GroupMemberResponse> {
+    const cleanedNote = note?.trim();
     return request<GroupMemberResponse>(`/entities/${address}/members`, {
         method: "POST",
-        body: JSON.stringify({ member_address: childAddress }),
+        body: JSON.stringify({
+            member_address: childAddress,
+            ...(cleanedNote ? { note: cleanedNote } : {}),
+        }),
     });
 }
 

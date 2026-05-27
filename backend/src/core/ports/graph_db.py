@@ -170,7 +170,12 @@ class GraphDatabase(Protocol):
         """
         ...
 
-    async def add_group_member(self, group_address: str, member_address: str) -> None:
+    async def add_group_member(
+        self,
+        group_address: str,
+        member_address: str,
+        note: str | None = None,
+    ) -> None:
         """
         Add an entity as a member of a group.
 

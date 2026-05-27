@@ -13,7 +13,7 @@ import {
     formatAddress,
 } from "../api/client";
 import { useToastContext } from "../context/ToastContext";
-import type { EntityResponse, GroupDetailResponse, RiskLevel } from "../types";
+import type { GroupDetailResponse, GroupMemberEntity, RiskLevel } from "../types";
 import {
     RISK_LEVELS,
     RISK_COLOR,
@@ -28,6 +28,11 @@ import {
 
 interface GroupsPageProps {
     onNavigateToExplorer: (address: string) => void;
+}
+
+interface PendingMember {
+    address: string;
+    note: string;
 }
 
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -58,9 +63,10 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
     const [creating, setCreating] = useState(false);
 
     const [memberInput, setMemberInput] = useState("");
-    const [pendingMembers, setPendingMembers] = useState<string[]>([]);
+    const [memberNoteInput, setMemberNoteInput] = useState("");
+    const [pendingMembers, setPendingMembers] = useState<PendingMember[]>([]);
     const [removedMembers, setRemovedMembers] = useState<string[]>([]);
-    const [selectedMember, setSelectedMember] = useState<EntityResponse | null>(null);
+    const [selectedMember, setSelectedMember] = useState<GroupMemberEntity | null>(null);
 
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [editMode, setEditMode] = useState(false);
@@ -86,8 +92,9 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
         setShowCreateForm(false);
         setEditName(group.name ?? "");
         setEditRisk(group.risk_level);
-        setEditDesc((group.properties?.description as string) ?? "");
+        setEditDesc("");
         setMemberInput("");
+        setMemberNoteInput("");
         setPendingMembers([]);
         setRemovedMembers([]);
         setSelectedMember(null);
@@ -124,7 +131,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
             setSelected(created);
             setEditName(created.name ?? "");
             setEditRisk(created.risk_level);
-            setEditDesc(created.description ?? "");
+            setEditDesc("");
         } catch (err: unknown) {
             toast.error(err instanceof Error ? err.message : "Failed to create group");
         } finally {
@@ -142,13 +149,18 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                 description: editDesc || undefined,
             });
             await Promise.all([
-                ...pendingMembers.map((addr) => addGroupMember(selected.address, addr)),
+                ...pendingMembers.map((member) =>
+                    addGroupMember(selected.address, member.address, member.note),
+                ),
                 ...removedMembers.map((addr) => removeGroupMember(selected.address, addr)),
             ]);
             const refreshed = await fetchGroup(selected.address);
             toast.success("Group saved");
             setSelected(refreshed);
             setGroups((prev) => prev.map((g) => (g.address === refreshed.address ? refreshed : g)));
+            setEditName(refreshed.name ?? "");
+            setEditRisk(refreshed.risk_level);
+            setEditDesc("");
             setPendingMembers([]);
             setRemovedMembers([]);
             setEditMode(false);
@@ -175,20 +187,22 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
     function handleStageMember() {
         const addr = memberInput.trim().toLowerCase();
         if (!addr) return;
-        if (pendingMembers.includes(addr)) {
+        if (pendingMembers.some((member) => member.address === addr)) {
             setMemberInput("");
+            setMemberNoteInput("");
             return;
         }
         if (selected?.members.some((m) => m.address === addr && !removedMembers.includes(addr))) {
             toast.error("Address is already a member");
             return;
         }
-        setPendingMembers((prev) => [...prev, addr]);
+        setPendingMembers((prev) => [...prev, { address: addr, note: memberNoteInput.trim() }]);
         setMemberInput("");
+        setMemberNoteInput("");
     }
 
     function handleUnstageMember(addr: string) {
-        setPendingMembers((prev) => prev.filter((a) => a !== addr));
+        setPendingMembers((prev) => prev.filter((member) => member.address !== addr));
     }
 
     function handleMarkRemove(addr: string) {
@@ -373,6 +387,10 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         setPendingMembers([]);
                                         setRemovedMembers([]);
                                         setMemberInput("");
+                                        setMemberNoteInput("");
+                                        setEditName(selected.name ?? "");
+                                        setEditRisk(selected.risk_level);
+                                        setEditDesc("");
                                     }
                                     setEditMode((v) => !v);
                                 }}
@@ -417,7 +435,7 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                         <FormField label="Description">
                                             <input
                                                 className={inputCls}
-                                                placeholder="Optional description…"
+                                                placeholder={selected.description || "Optional description…"}
                                                 value={editDesc}
                                                 onChange={(e) => setEditDesc(e.target.value)}
                                             />
@@ -465,6 +483,13 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                     >
                                                         {m.address}
                                                     </span>
+                                                    {m.membership_note && (
+                                                        <span
+                                                            className={`text-[0.68rem] truncate ${isRemoved ? "text-red-400 line-through" : "text-gray-500"}`}
+                                                        >
+                                                            {m.membership_note}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div className="shrink-0 flex items-center gap-1.5">
                                                     {!isRemoved && (
@@ -545,6 +570,16 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                                             View in Explorer
                                                         </button>
                                                     </div>
+                                                    {m.membership_note && (
+                                                        <div className="flex flex-col gap-1">
+                                                            <span className="text-[0.65rem] text-gray-400 uppercase tracking-wider">
+                                                                Note
+                                                            </span>
+                                                            <p className="text-[0.78rem] text-gray-600 leading-relaxed m-0">
+                                                                {m.membership_note}
+                                                            </p>
+                                                        </div>
+                                                    )}
                                                     {(m.transaction_count != null || m.first_seen_block != null) && (
                                                         <div className="flex gap-4">
                                                             {m.transaction_count != null && (
@@ -586,19 +621,24 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                 })}
 
                                 {/* Pending (staged) members */}
-                                {pendingMembers.map((addr) => (
-                                    <div key={addr} className="flex items-center gap-2 px-5 py-2.5 border-l-2 border-green-500">
+                                {pendingMembers.map((member) => (
+                                    <div key={member.address} className="flex items-center gap-2 px-5 py-2.5 border-l-2 border-green-500">
                                         <div className="flex-1 min-w-0">
                                             <span className="font-mono text-[0.68rem] text-green-700 break-all">
-                                                {addr}
+                                                {member.address}
                                             </span>
                                             <span className="ml-2 text-[0.62rem] text-green-500 font-semibold uppercase tracking-wider">
                                                 pending
                                             </span>
+                                            {member.note && (
+                                                <span className="block text-[0.68rem] text-green-700 truncate mt-0.5">
+                                                    {member.note}
+                                                </span>
+                                            )}
                                         </div>
                                         <button
                                             className="w-6 h-6 flex items-center justify-center rounded border-none bg-transparent cursor-pointer text-green-300 transition-colors hover:text-red-500"
-                                            onClick={() => handleUnstageMember(addr)}
+                                            onClick={() => handleUnstageMember(member.address)}
                                             title="Remove staged member"
                                         >
                                             <svg
@@ -619,10 +659,10 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
 
                             {/* Add member input — only shown in edit mode */}
                             {editMode && (
-                                <div className="px-5 py-3 border-t border-gray-100 bg-gray-50">
+                                <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex flex-col gap-2">
                                     <input
                                         className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-[6px] font-mono text-[0.72rem] text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-indigo-400 focus:shadow-[0_0_0_2px_rgba(99,102,241,0.15)]"
-                                        placeholder="0x… type address and press Enter to stage"
+                                        placeholder="0x… member address"
                                         value={memberInput}
                                         onChange={(e) => setMemberInput(e.target.value)}
                                         onKeyDown={(e) => {
@@ -632,6 +672,27 @@ export function GroupsPage({ onNavigateToExplorer }: GroupsPageProps) {
                                             }
                                         }}
                                     />
+                                    <div className="flex gap-2">
+                                        <input
+                                            className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg px-2.5 py-[6px] text-[0.72rem] text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-indigo-400 focus:shadow-[0_0_0_2px_rgba(99,102,241,0.15)]"
+                                            placeholder="Note"
+                                            value={memberNoteInput}
+                                            onChange={(e) => setMemberNoteInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") {
+                                                    e.preventDefault();
+                                                    handleStageMember();
+                                                }
+                                            }}
+                                        />
+                                        <button
+                                            className={btnPrimarySm}
+                                            onClick={handleStageMember}
+                                            type="button"
+                                        >
+                                            Stage
+                                        </button>
+                                    </div>
                                 </div>
                             )}
 

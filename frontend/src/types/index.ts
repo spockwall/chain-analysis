@@ -82,9 +82,14 @@ export interface EntityResponse {
     properties: Record<string, unknown>;
 }
 
+export interface GroupMemberEntity extends EntityResponse {
+    membership_note?: string | null;
+    membership_added_at?: string | null;
+}
+
 export interface GroupMemberResponse {
     group_address: string;
-    members: EntityResponse[];
+    members: GroupMemberEntity[];
     total: number;
 }
 
@@ -213,7 +218,7 @@ export interface GroupDetailResponse {
     risk_level: RiskLevel;
     description: string | null;
     member_count: number;
-    members: EntityResponse[];
+    members: GroupMemberEntity[];
     properties: Record<string, unknown>;
 }
 
