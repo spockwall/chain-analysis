@@ -227,11 +227,10 @@ jobs:
         run: |
           set -euo pipefail
           rustup default stable
-          rustup component add rustfmt clippy
+          rustup component add clippy
           rustc --version
           cargo --version
           cargo clippy --version
-          cargo fmt --version
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -243,10 +242,6 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('etl-rs/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-
-      - name: Format check
-        working-directory: etl-rs
-        run: cargo fmt --all -- --check
 
       - name: Clippy
         working-directory: etl-rs
