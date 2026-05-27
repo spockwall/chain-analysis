@@ -19,6 +19,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Predeploy builds the backend image (bakes the Rust ingest binary
+          # from etl-rs/crates), so the etl-rs submodule must be present here.
+          submodules: recursive
 
       - name: Prepare local compose secrets
         run: |

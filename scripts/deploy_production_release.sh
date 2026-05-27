@@ -163,6 +163,14 @@ git fetch origin "$release_branch"
 git checkout "$release_branch"
 git reset --hard "origin/$release_branch"
 
+# The worker and backend images build from the etl-rs submodule; a bare reset
+# leaves it stale, so sync it to the committed SHA. etl-rs is public, so this
+# clones over HTTPS without credentials. `sync` rewrites any stale local
+# submodule URL from .gitmodules.
+log "syncing submodules"
+git submodule sync --recursive
+git submodule update --init --recursive
+
 current_commit="$(git rev-parse --short HEAD)"
 log "deploying commit: ${current_commit}"
 

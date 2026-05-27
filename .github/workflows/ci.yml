@@ -52,6 +52,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # The backend image bakes the Rust `ingest` binary from etl-rs/crates,
+          # so the build needs the etl-rs submodule checked out.
+          submodules: recursive
 
       - name: Prepare local compose secrets
         run: |
@@ -208,6 +212,42 @@ jobs:
 
       - name: Build production image
         run: docker build -f backend/Dockerfile -t chain-analysis-backend:ci .
+
+  etl-rs:
+    name: ETL (Rust) validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            etl-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('etl-rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Test
+        working-directory: etl-rs
+        # Library unit tests only. The tests/ integration targets need external
+        # services, and one (ingest_reprocess) doesn't even compile at the
+        # pinned submodule SHA (Config literal missing `public_rpc_url`), so we
+        # scope them out here rather than patch the etl-rs submodule.
+        run: cargo test --workspace --lib
 
   compose:
     name: Compose validation
