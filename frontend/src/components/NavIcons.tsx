@@ -62,6 +62,18 @@ export function LabelsIcon() {
     );
 }
 
+export function DatasetIcon() {
+    return (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 5h16" />
+            <path d="M4 12h16" />
+            <path d="M4 19h16" />
+            <path d="M8 3v18" />
+            <path d="M16 3v18" />
+        </svg>
+    );
+}
+
 export function AdminIcon() {
     return (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

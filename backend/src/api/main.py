@@ -21,6 +21,7 @@ from api.deps import close_adapters, init_adapters
 from api.routes import (
     admin_router,
     auth_router,
+    criminal_dataset_router,
     detections_router,
     entities_router,
     entities_write_router,
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
+    app.include_router(criminal_dataset_router, prefix="/api")
     app.include_router(entities_write_router, prefix="/api")
     app.include_router(entities_router, prefix="/api")
     app.include_router(features_router, prefix="/api")

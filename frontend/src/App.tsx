@@ -4,6 +4,7 @@ import { Footer } from "./components/Footer";
 import { Toaster } from "./components/Toaster";
 import {
     AdminUsersPage,
+    CriminalDatasetPage,
     GraphExplorerPage,
     DashboardPage,
     ETLPage,
@@ -94,6 +95,14 @@ function App() {
                                         element={
                                             <ProtectedRoute>
                                                 <LabelsPage />
+                                            </ProtectedRoute>
+                                        }
+                                    />
+                                    <Route
+                                        path="/criminal-dataset"
+                                        element={
+                                            <ProtectedRoute>
+                                                <CriminalDatasetPage />
                                             </ProtectedRoute>
                                         }
                                     />

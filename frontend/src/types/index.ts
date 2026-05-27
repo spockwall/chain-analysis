@@ -319,3 +319,42 @@ export interface AnnotationResponse {
     confidence: number | null;
     created_at: string;
 }
+
+// ── Criminal Dataset ─────────────────────────────────────────────────────────
+
+export type CriminalDatasetEntryType = "address" | "transaction";
+
+export interface CriminalDatasetEntry {
+    id: number;
+    entry_type: CriminalDatasetEntryType;
+    criminal_address: string | null;
+    criminal_transaction_hash: string | null;
+    source_transaction_hash: string | null;
+    note: string | null;
+    created_by_user_id: number | null;
+    created_by_username: string | null;
+    created_at: string;
+    updated_at: string;
+    can_delete: boolean;
+}
+
+export interface CriminalDatasetListResponse {
+    entries: CriminalDatasetEntry[];
+    total: number;
+}
+
+export interface CriminalDatasetCreateResponse {
+    entries: CriminalDatasetEntry[];
+    created: number;
+    existing: number;
+}
+
+export interface CriminalAddressCreateRequest {
+    criminal_address: string;
+    note?: string | null;
+}
+
+export interface CriminalTransactionCreateRequest {
+    criminal_transaction_hash: string;
+    note?: string | null;
+}

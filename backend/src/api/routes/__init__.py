@@ -2,6 +2,7 @@
 
 from .admin import router as admin_router
 from .auth import router as auth_router
+from .criminal_dataset import router as criminal_dataset_router
 from .detections import router as detections_router
 from .entities import (
     router as entities_router,
@@ -23,6 +24,7 @@ from .stats import router as stats_router
 __all__ = [
     "admin_router",
     "auth_router",
+    "criminal_dataset_router",
     "detections_router",
     "entities_router",
     "entities_write_router",

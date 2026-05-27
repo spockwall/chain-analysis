@@ -418,6 +418,64 @@ class EntityFeatures(Base):
     )
 
 
+class CriminalDatasetEntry(Base):
+    """Shared suspicious-address / suspicious-transaction dataset entries."""
+
+    __tablename__ = "criminal_dataset_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    criminal_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    criminal_transaction_hash: Mapped[str | None] = mapped_column(
+        String(66), nullable=True
+    )
+    source_transaction_hash: Mapped[str | None] = mapped_column(
+        String(66), nullable=True
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+            name="fk_criminal_dataset_entries_created_by_users",
+        ),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    created_by: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[created_by_user_id]
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "criminal_address",
+            name="uq_criminal_dataset_entries_address",
+        ),
+        UniqueConstraint(
+            "criminal_transaction_hash",
+            name="uq_criminal_dataset_entries_transaction_hash",
+        ),
+        Index(
+            "ix_criminal_dataset_entries_created_at",
+            "created_at",
+        ),
+        Index(
+            "ix_criminal_dataset_entries_created_by",
+            "created_by_user_id",
+        ),
+        Index(
+            "ix_criminal_dataset_entries_source_tx",
+            "source_transaction_hash",
+        ),
+    )
+
+
 class RawTransaction(Base):
     """
     Raw transactions ingested from the blockchain.

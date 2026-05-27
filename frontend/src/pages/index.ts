@@ -1,4 +1,5 @@
 export { AdminUsersPage } from "./AdminUsersPage";
+export { CriminalDatasetPage } from "./CriminalDatasetPage";
 export { GraphExplorerPage } from "./GraphExplorerPage";
 export { DashboardPage } from "./DashboardPage";
 export { ETLPage } from "./ETLPage";

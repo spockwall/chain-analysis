@@ -20,6 +20,10 @@ import type {
     IngestionRun,
     AnnotationCreateRequest,
     AnnotationResponse,
+    CriminalAddressCreateRequest,
+    CriminalDatasetCreateResponse,
+    CriminalDatasetListResponse,
+    CriminalTransactionCreateRequest,
     LabelFetchRequest,
     LabelFetchResponse,
     LabelTaskResponse,
@@ -359,6 +363,34 @@ export async function createAnnotation(body: AnnotationCreateRequest): Promise<A
 
 export async function getEntityAnnotations(address: string, limit = 50): Promise<AnnotationResponse[]> {
     return request<AnnotationResponse[]>(`/labels/annotations/${address}?limit=${limit}`);
+}
+
+// Criminal dataset endpoints
+
+export async function fetchCriminalDataset(limit = 500): Promise<CriminalDatasetListResponse> {
+    return request<CriminalDatasetListResponse>(`/criminal-dataset?limit=${limit}`);
+}
+
+export async function addCriminalAddress(
+    body: CriminalAddressCreateRequest,
+): Promise<CriminalDatasetCreateResponse> {
+    return request<CriminalDatasetCreateResponse>("/criminal-dataset/addresses", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function addCriminalTransaction(
+    body: CriminalTransactionCreateRequest,
+): Promise<CriminalDatasetCreateResponse> {
+    return request<CriminalDatasetCreateResponse>("/criminal-dataset/transactions", {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+export async function deleteCriminalDatasetEntry(entryId: number): Promise<void> {
+    return request<void>(`/criminal-dataset/${entryId}`, { method: "DELETE" }, true);
 }
 
 // Utility functions
